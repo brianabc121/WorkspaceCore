@@ -15,6 +15,7 @@ import pytest
 
 from bridge.drivers.base import DriverError, SessionSpec
 from bridge.drivers.cli_stream import (
+    CHAT_NOTICE,
     CliStreamDriver,
     claude_profile,
     codebuddy_profile,
@@ -233,6 +234,10 @@ async def test_cli_login_and_env_isolation(tmp_path: Path, monkeypatch: pytest.M
     # 用密钥登录：官方程序不报告是哪个账号，驱动也不拿密钥的指纹充当账号
     assert (status.logged_in, status.identity, status.method) == (True, None, "api_key")
     outcome = await driver.run_turn(spec, "你好", Sink())
+    # 聊天模式明说没有工具：不然模型会把“调用工具”写成文字，人以为它在执行
+    chat_args = driver._args(spec)
+    assert chat_args[chat_args.index("--append-system-prompt") + 1] == CHAT_NOTICE
+    assert "cannot execute code" in CHAT_NOTICE
     # 聊天模式不给工具；桥自己的环境变量不会传给官方程序
     assert (
         "tools=''" in outcome.text
@@ -288,6 +293,7 @@ async def test_cli_turns_resume_and_transcripts(tmp_path: Path) -> None:
     assert tools.events[0][1]["name"] == "Read" and "README.md" in tools.events[0][1]["input"]
     assert tools.events[1][1] == {"name": "Read", "text": "# 说明\n内容", "error": False}
     assert "tools='Read,Glob,Grep'" in (await driver.run_turn(read_only, "x", Sink())).text
+    assert "--append-system-prompt" not in driver._args(read_only)
     full = SessionSpec(
         mode="dev", model=None, workdir=tmp_path / "w", sandbox="exec", native_id=native
     )

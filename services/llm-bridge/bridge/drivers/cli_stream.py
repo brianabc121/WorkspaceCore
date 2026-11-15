@@ -62,6 +62,15 @@ _AUTH_HINTS = (
     "oauth",
 )
 _RATE_HINTS = ("rate limit", "usage limit", "429", "overloaded", "quota")
+# 对话模式不给工具，但官方程序自带的提示仍把模型说成能动手的编程助手：
+# 不说明的话，模型会把“调用工具”当成文字写出来，人以为它在执行、其实什么都没发生。
+CHAT_NOTICE = (
+    "This session is a plain chat with no tools: you cannot run commands, read or write files, "
+    "browse, or inspect the machine. Never write tool calls or pretend to run anything. "
+    "If the user asks for something that needs it, say plainly, in the user's language, that "
+    "this is a chat-mode session that cannot execute code or access files, and that they can "
+    "start a new session in dev mode (with a development environment) for that."
+)
 _READ_TOOLS = "Read,Glob,Grep"
 _WRITE_TOOLS = "Read,Glob,Grep,Edit,Write"
 _MAX_SCAN_BYTES = 512 * 1024
@@ -336,7 +345,7 @@ class CliStreamDriver(Driver):
         if spec.model:
             args += ["--model", spec.model]
         if spec.mode == "chat":
-            args += ["--tools", ""]
+            args += ["--tools", "", "--append-system-prompt", CHAT_NOTICE]
         elif spec.sandbox == "read_only":
             args += ["--tools", _READ_TOOLS]
         elif spec.sandbox == "workspace_write":

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { X } from '@lucide/vue'
-import { MODES, NO_QUOTA, SANDBOX, originName, platformName, quotaKind, quotaUsage, seconds, type Quota } from '../api'
+import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, originName, platformName, quotaKind, quotaUsage, seconds, type Quota } from '../api'
 import { TURN_STATUS, ownerText, type ChatMessage, type ChatSession } from './chatApi'
 
 // 右栏：这个会话的信息、这个平台的额度（T-0242）和回合列表。只显示。
@@ -22,7 +22,7 @@ const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
     <dl class="lb-meta">
       <dt>平台</dt><dd>{{ platformName(session.platform) }}</dd>
       <dt>模型</dt><dd>{{ session.model || '平台默认' }}</dd>
-      <dt>用法</dt><dd>{{ MODES[session.mode] ?? session.mode }}</dd>
+      <dt>用法</dt><dd>{{ MODES[session.mode] ?? session.mode }}<template v-if="session.mode === 'chat'">：{{ CHAT_NO_TOOLS }}</template></dd>
       <template v-if="session.environment">
         <dt>开发环境</dt><dd>{{ session.environment.name }}（{{ sandbox(session.environment.sandbox) }}{{ session.environment.network ? '，可联网' : '，不联网' }}）</dd>
         <template v-if="session.environment.repo_url"><dt>仓库</dt><dd>{{ session.environment.repo_url }}{{ session.environment.branch ? ` @ ${session.environment.branch}` : '' }}</dd></template>

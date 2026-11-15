@@ -374,6 +374,25 @@ describe('大模型聊天', () => {
     expect(screen.getByText('这一回合的结果未知：超时，结果未知')).toBeVisible()
   })
 
+  it('says that a chat-mode session cannot run commands, and marks a tool call the model only wrote out', async () => {
+    const fake = '让我查看一下。<tool_call>Bash_2(tool_name="Bash", command="ls -la")'
+    setup('owner', { conversations: { [S1]: talk({ mode: 'chat' }, [asked('给我看下当前环境'), answered(fake)]) } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    expect(await screen.findByText('不能执行命令')).toBeVisible()
+    const info = await screen.findByRole('complementary', { name: '会话信息' })
+    expect(within(info).getByText(/对话模式下模型不能执行命令，也不能读写文件/)).toBeVisible()
+    const thread = await screen.findByRole('list', { name: '消息' })
+    expect(within(thread).getByRole('note')).toHaveTextContent('上面像“调用工具”的内容只是模型写出来的文字，并没有执行。')
+  })
+
+  it('does not mark anything in a dev session, where tools are real', async () => {
+    setup('owner', { conversations: { [S1]: talk({ mode: 'dev' }, [asked('看下目录'), answered('<tool_call>Bash(ls)')]) } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const thread = await screen.findByRole('list', { name: '消息' })
+    expect(within(thread).queryByRole('note')).not.toBeInTheDocument()
+    expect(screen.queryByText('不能执行命令')).not.toBeInTheDocument()
+  })
+
   const quotaOf = (): Schema['LlmBridgeStatusOut']['quota'] => ({
     claude: { can_refresh: false, reports_quota: true, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 4321, windows: [
       { kind: 'five_hour', used_percent: 62, resets_at: 1794531600, reset_passed: false, status: 'ok', plan: null, observed_at: 1794528000 },

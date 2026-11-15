@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { seconds } from '../api'
+import { CHAT_NO_TOOLS, seconds } from '../api'
 import { splitText, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
 import ChatAttachments from './ChatAttachments.vue'
 
@@ -8,7 +8,8 @@ import ChatAttachments from './ChatAttachments.vue'
 // 开发会话的“过程”（中间说的话、命令、改动的文件）收在可以展开的一栏里；回答还没完时默认展开。
 // 被额度打断的回合（T-0237）显示什么时候自动继续，可以“现在就试”或“不要自动继续”。
 // source：从哪个管理器的哪个会话取附件的内容；不给就不显示附件。
-const props = defineProps<{ message: ChatMessage; platform: string; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
+// noTools：对话模式的会话。模型有时把“调用工具”当成文字写出来，这里标明它并没有执行。
+const props = defineProps<{ message: ChatMessage; platform: string; noTools?: boolean; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
 const emit = defineEmits<{ resume: [turn: string, now: boolean] }>()
 
 const STEP: Record<string, string> = { message: '说明', command: '命令', files: '改动的文件', notice: '提示', tool: '工具', tool_result: '结果', image: '图片', file: '文件' }
@@ -16,6 +17,7 @@ const stepLabel = (step: ChatStep) => `${STEP[step.kind] ?? step.kind}${step.nam
 const CODE_STEPS = ['command', 'files', 'tool', 'tool_result']
 const FAILURE: Record<string, string> = { failed: '这一回合失败了', unknown: '这一回合的结果未知' }
 const parts = computed(() => splitText(props.message.text))
+const fakeCall = computed(() => !!props.noTools && props.message.role === 'assistant' && /<tool_call>|<function_calls>|<invoke\b|<tool_use>/.test(props.message.text ?? ''))
 const reply = computed(() => props.message.role === 'assistant')
 const status = computed(() => (reply.value ? props.message.status ?? 'completed' : ''))
 const pending = computed(() => status.value === 'queued' || status.value === 'running')
@@ -85,6 +87,7 @@ const busy = computed(() => !!props.resuming && props.resuming === props.message
     </div>
     <p v-else-if="reply && status === 'completed'" class="lc-bubble lc-muted">（没有文字回答）</p>
     <ChatAttachments v-if="source && message.attachments?.length" :chat="source.chat" :bridge-id="source.bridgeId" :session-id="source.sessionId" :items="message.attachments" />
+    <p v-if="fakeCall" class="lc-note" role="note">上面像“调用工具”的内容只是模型写出来的文字，并没有执行。{{ CHAT_NO_TOOLS }}</p>
     <p v-if="failure" class="lc-failure" role="alert">{{ failure }}</p>
     <div v-if="interrupted" class="lc-interrupted" role="note">
       <p>{{ interrupted.text }}</p>
