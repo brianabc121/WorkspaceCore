@@ -233,6 +233,11 @@ async function main() {
     await card(page, ONE).getByRole('button', { name: `查看 MCP 管理器：${ONE}` }).click()
     await account(page, WORKBUDDY).getByRole('button', { name: `登录${WORKBUDDY}` }).click()
     form = page.getByRole('form', { name: `登录${WORKBUDDY}` })
+    // WorkBuddy 默认是网页登录（T-0241），没有“容器里已有的登录”；这里验收的是 API 密钥这条路
+    check(await form.getByRole('radio', { name: '网页登录（国内站）' }).isChecked(), 'WorkBuddy 默认应是网页登录（国内站）')
+    await form.getByRole('button', { name: '获取登录网址' }).waitFor()
+    check((await form.getByRole('radio', { name: '容器里已有的登录' }).count()) === 0, 'WorkBuddy 不应再有“容器里已有的登录”')
+    await form.getByRole('radio', { name: 'API 密钥' }).check()
     await form.getByRole('button', { name: '登录', exact: true }).click()
     await page.getByText('请填写API 密钥。').waitFor()
     await form.getByRole('textbox', { name: 'API 密钥' }).fill(FAKE_KEY)
