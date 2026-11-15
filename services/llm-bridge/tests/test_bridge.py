@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -431,7 +432,7 @@ async def test_source_is_kept_and_index_feed_follows_changes(bridge: Bridge) -> 
     assert "机密的内容" not in json.dumps(page, ensure_ascii=False)
     # 没有新的变化：下一页是空的，序号不动
     again = (await bridge.admin("GET", "/admin/index", params={"after": page["last_rev"]})).json()
-    assert again == {"sessions": [], "last_rev": page["last_rev"]}
+    assert again == {"sessions": [], "last_rev": page["last_rev"], "pauses": []}
     # 回合换了状态（失败）也算变化
     await tool(
         "llm_send",
@@ -557,6 +558,74 @@ async def test_search_finds_text_in_questions_and_answers_and_usage_adds_up(brid
     assert by_owner["user:u1"]["turns"] == 2 and by_owner["user:u1"]["failed"] == 1
     assert by_owner["agent-1"]["tokens"] > 0 and by_owner["agent-1"]["platform"] == "fake"
     assert by_owner["agent-1"]["day"] == time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def _init_repo(workdir: Path) -> None:
+    """把工作目录变成一个有一次提交的 git 仓库（a.txt 的内容是 old）。"""
+    import subprocess
+
+    git = ["git", "-C", str(workdir), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (workdir / "a.txt").write_text("old\n")
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+
+
+async def test_dev_turn_leaves_a_patch_and_retention_clears_content(bridge: Bridge) -> None:
+    """开发回合留下改动补丁（归档后还在）；保留期到了只清内容（改进方案 4.2 的 B3、B8）。"""
+    made = await bridge.admin(
+        "POST",
+        "/admin/environments",
+        json={"platform": "fake", "mode": "dev", "name": "仓库", "sandbox": "exec"},
+    )
+    session = await bridge.tool(
+        "c1",
+        "llm_session_create",
+        {"platform": "fake", "mode": "dev", "environment": made.json()["id"]},
+    )
+    a = session["session_id"]
+    workdir = Path(bridge.engine.store.get_session(a)["workdir"])  # type: ignore[index]
+    _init_repo(workdir)
+    (workdir / "a.txt").write_text("new\n")
+    turn = await _send(bridge, "c1", a, "write:out/b.txt", "r1")
+    names = [o["name"] for o in turn["outputs"]]
+    assert "改动（到这一回合为止）.patch" in names
+    patch = next(o for o in turn["outputs"] if o["name"].endswith(".patch"))
+    text = (await bridge.tool("c1", "llm_file_get", {"session_id": a, "file_id": patch["id"]}))[
+        "text"
+    ]
+    assert "-old" in text and "+new" in text and "out/b.txt" in text
+    # 没有新的改动：下一回合不再存一份一样的
+    again = await _send(bridge, "c1", a, "没改东西", "r2")
+    assert not [o for o in again.get("outputs", []) if o["name"].endswith(".patch")]
+    # 归档后工作目录删了，补丁还在
+    await bridge.tool("c1", "llm_session_archive", {"session_id": a})
+    assert not os.path.isdir(workdir)
+    kept = await bridge.admin("GET", f"/admin/sessions/{a}/attachments/{patch['id']}")
+    assert kept.status_code == 200 and b"+new" in kept.content
+
+    # 保留期：默认一直保留；设了之后，最后活动早于它的会话清掉内容，回合的状态和用量留着
+    assert bridge.engine.purge_expired() == 0
+    assert (
+        await bridge.admin("PUT", "/admin/settings", json={"retention_days": 1})
+    ).status_code == 200
+    assert bridge.engine.purge_expired() == 0  # 刚活动过的不清
+    bridge.engine.store._exec("UPDATE sessions SET updated_at = updated_at - 3 * 86400")
+    assert bridge.engine.purge_expired() == 1
+    view = (await bridge.admin("GET", f"/admin/sessions/{a}")).json()
+    assert view["session"]["purged_at"] and view["session"]["turns"] == 2
+    assert all(not m["text"] for m in view["messages"])
+    statuses = [m["status"] for m in view["messages"] if m["role"] == "assistant"]
+    assert statuses == ["completed", "completed"]
+    assert (
+        await bridge.admin("GET", f"/admin/sessions/{a}/attachments/{patch['id']}")
+    ).status_code == 404
+    assert (await bridge.admin("GET", "/admin/search", params={"q": "没改东西"})).json()[
+        "hits"
+    ] == []
+    usage = (await bridge.admin("GET", "/admin/usage")).json()["rows"]
+    assert sum(r["turns"] for r in usage) == 2
+    assert bridge.engine.purge_expired() == 0  # 清过的不再清
 
 
 async def test_external_sessions(bridge: Bridge) -> None:

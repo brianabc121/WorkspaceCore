@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import unquote, urlencode
 
@@ -84,6 +85,7 @@ def session_out(session: dict[str, Any], me: str) -> LlmChatSessionOut:
         updated_at=session["updated_at"],
         environment=LlmBridgeEnvironmentOut(**environment) if environment else None,
         source=session.get("source") if isinstance(session.get("source"), dict) else None,
+        purged_at=session.get("purged_at"),
     )
 
 
@@ -507,6 +509,53 @@ class LlmChatService:
         client = await self.bridges.client(row)
         await self.db.commit()
         await self._admin(client, "DELETE", f"/sessions/{session_id}/attachments/{attachment_id}")
+
+    async def export(
+        self, access: WorkspaceAccess, row: LlmBridge, session_id: str
+    ) -> tuple[str, str]:
+        """把一个会话导出成 Markdown：谁问的、回答、每回合的状态和用时。返回（文件名，内容）。
+
+        只有文字：过程、附件的内容不在里面（附件列出名字）。导出记一条审计。"""
+        view = await self.conversation(access, row, session_id)
+        session = view.session
+        title = session.title or "（没有标题）"
+        lines = [
+            f"# {title}",
+            "",
+            f"- 平台：{session.platform} · {session.mode} · {session.model or '平台默认模型'}",
+            f"- MCP 管理器：{row.name}",
+            f"- 谁建的：{session.owner or '—'}",
+            f"- 会话编号：{session.session_id}",
+            f"- 导出时间：{datetime.now(UTC):%Y-%m-%d %H:%M} UTC",
+            "",
+        ]
+        for message in view.messages:
+            when = (
+                f"{datetime.fromtimestamp(message.at, UTC):%Y-%m-%d %H:%M} UTC"
+                if message.at
+                else ""
+            )
+            if message.role == "user":
+                lines += [f"## {message.by or '用户'}（{when}）", "", message.text, ""]
+            else:
+                state = message.status or "completed"
+                ran = (message.timing or {}).get("ran_seconds")
+                note = f"{state}" + (f"，用时 {ran} 秒" if ran else "")
+                lines += [f"### 回答（{note}；{when}）", "", message.text or "（没有文字回答）", ""]
+                failure = (message.failure or {}).get("message")
+                if failure:
+                    lines += [f"> 没做完的原因：{failure}", ""]
+            if message.attachments:
+                names = "、".join(a.name for a in message.attachments)
+                lines += [f"附件：{names}", ""]
+        await self.bridges.audit(
+            access, "chat_session_exported", row.id, {"session": session_id, "bridge": row.name}
+        )
+        await self.db.commit()
+        safe = (
+            "".join(c if c.isalnum() or c in "-_ " else "_" for c in title)[:60].strip() or "会话"
+        )
+        return f"{safe}.md", "\n".join(lines)
 
     async def download(
         self, row: LlmBridge, session_id: str, attachment_id: str

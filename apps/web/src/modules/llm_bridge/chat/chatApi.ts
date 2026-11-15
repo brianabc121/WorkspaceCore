@@ -163,8 +163,14 @@ export function useLlmChat(scope: string) {
       await auth.api.DELETE('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/attachments/{attachment_id}', { params: { header, path: { bridge_id: bridge, session_id: session, attachment_id: attachment } } })
     },
     // 附件的内容：要带工作空间请求头，所以不能直接当图片地址或链接用
-    async attachmentBlob(bridge: string, session: string, attachment: string, signal?: AbortSignal): Promise<Blob> {
-      const path = `/api/v1/llm_bridge/bridges/${encodeURIComponent(bridge)}/chat/sessions/${encodeURIComponent(session)}/attachments/${encodeURIComponent(attachment)}`
+    /** 把一个会话导出成 Markdown（提问、回答、每回合的状态和用时） */
+    exportBlob(bridge: string, session: string): Promise<Blob> {
+      return this.fileBlob(`/api/v1/llm_bridge/bridges/${encodeURIComponent(bridge)}/chat/sessions/${encodeURIComponent(session)}/export`)
+    },
+    attachmentBlob(bridge: string, session: string, attachment: string, signal?: AbortSignal): Promise<Blob> {
+      return this.fileBlob(`/api/v1/llm_bridge/bridges/${encodeURIComponent(bridge)}/chat/sessions/${encodeURIComponent(session)}/attachments/${encodeURIComponent(attachment)}`, signal)
+    },
+    async fileBlob(path: string, signal?: AbortSignal): Promise<Blob> {
       let response: Response
       try { response = await fetch(new Request(`${window.location.origin}${path}`, { credentials: 'same-origin', headers: header, signal })) }
       catch { throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败') }

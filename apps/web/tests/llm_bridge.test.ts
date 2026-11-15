@@ -19,7 +19,7 @@ const lbModule: Schema['ModuleOut'] = { ...newsModule, key: 'llm_bridge', name: 
 
 const bridge: Schema['LlmBridgeOut'] = { id: BRIDGE, name: '主账号', base_url: 'http://10.0.0.5:8787', enabled: true, has_token: true, created_at: at, updated_at: at }
 const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', enabled: true, state: 'logged_out', registered: false, identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
-const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
+const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
 const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBridgeStatusOut'] => ({
   reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 1, running: 2, load: {}, quota: {}, settings,
   accounts: [
@@ -537,7 +537,7 @@ describe('大模型客户端管理', () => {
     await fireEvent.update(concurrency, '4')
     await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
     expect(await within(set).findByText('设置已保存。')).toBeVisible()
-    expect(await writes(requests)[0]!.clone().json()).toEqual({ concurrency: 4, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, auto_resume_max: 3, auto_resume: true, resume_text: '继续意外中断的任务' })
+    expect(await writes(requests)[0]!.clone().json()).toEqual({ concurrency: 4, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, auto_resume_max: 3, auto_resume: true, resume_text: '继续意外中断的任务' })
 
     // 额度用完后自动继续（T-0237）：开关、次数、发的那句话；那句话不能空
     const resume = within(set).getByRole('group', { name: '额度用完后自动继续' })

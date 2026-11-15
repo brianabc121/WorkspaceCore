@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import os
 import re
 import shutil
 import time
@@ -58,6 +59,9 @@ DEFAULTS: dict[str, Any] = {
     "auto_resume": True,
     "auto_resume_max": 3,  # 同一次中断最多自动续几次
     "resume_text": RESUME_TEXT,
+    # 对话内容保留多少天（按会话最后活动算）；0 是一直保留。到期只清内容：
+    # 会话这一行、回合的状态和用量都留着（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 的 B8）
+    "retention_days": 0,
 }
 SETTING_LIMITS = {
     "concurrency": (1, 16),
@@ -66,12 +70,17 @@ SETTING_LIMITS = {
     "send_per_hour": (1, 10_000),
     "max_text_chars": (1, 1_000_000),
     "auto_resume_max": (1, 10),
+    "retention_days": (0, 3650),
 }
 MAX_WAIT_SECONDS = 50
+RETENTION_CHECK_SECONDS = 6 * 3600  # 多久按保留期清一次
 # 逐字的增量：攒到这么多字、或者过了这么久，就写成一条事件
 DELTA_FLUSH_CHARS = 240
 DELTA_FLUSH_SECONDS = 0.12
 MAX_EVENT_WAIT_SECONDS = 25
+MAX_STEP_OUTPUT = 8000  # 过程里一条命令的输出最多给这么多字符
+MAX_PATCH_BYTES = 2 * 1024 * 1024  # 开发回合留下的改动补丁最大这么大，超过的截断
+PATCH_NAME = "改动（到这一回合为止）.patch"
 MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024  # 智能体按编号读产出文件：只读这么大以内的文字文件
 EVENT_POLL_SECONDS = 0.1  # 等新事件时多久看一次
 ACCOUNT_CACHE_SECONDS = 60
@@ -191,6 +200,7 @@ class Engine:
         self._pause_wake: dict[str, asyncio.Event] = {}
         self._resume_wake = asyncio.Event()
         self._resumer: asyncio.Task[None] | None = None
+        self._retainer: asyncio.Task[None] | None = None
         self._accounts: dict[str, tuple[float, Row]] = {}
         self._idle_seconds = 60.0
 
@@ -285,12 +295,13 @@ class Engine:
             (self.attachment_root / stale["path"]).unlink(missing_ok=True)
             self.store.delete_attachment(stale["id"])
         self._resumer = asyncio.create_task(self._resume_loop(), name="quota-resume")
+        self._retainer = asyncio.create_task(self._retention_loop(), name="retention")
 
     def _limiter(self, platform: str) -> SlotLimiter:
         return self._limiters.setdefault(platform, SlotLimiter())
 
     async def shutdown(self) -> None:
-        tasks = list(self._workers.values()) + ([self._resumer] if self._resumer else [])
+        tasks = list(self._workers.values()) + [t for t in (self._resumer, self._retainer) if t]
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -1122,6 +1133,7 @@ class Engine:
         if session["mode"] == "dev":  # 开发会话里改动、新建的文件收进附件
             for path in list(dict.fromkeys(outcome.files))[: files.MAX_OUTPUT_PER_TURN]:
                 self._collect_output(session, turn_id, Path(path))
+            await self._collect_patch(session, turn_id)
         result = redact(outcome.text)
         said = [
             m["text"]
@@ -1385,7 +1397,16 @@ class Engine:
             }
             for row in rows
         ]
-        return {"sessions": items, "last_rev": rows[-1]["rev"] if rows else after}
+        # 现在因为额度暂停着的平台：工作台据此通知管理员
+        pauses = [
+            {"platform": platform, "until": pause["until"], "estimated": bool(pause["estimated"])}
+            for platform, pause in self.store.pauses().items()
+        ]
+        return {
+            "sessions": items,
+            "last_rev": rows[-1]["rev"] if rows else after,
+            "pauses": pauses,
+        }
 
     # ---- 聊天页用（管理接口；docs/v2/LLM_CHAT_PLAN.md 第 4.1 节） ----
     def admin_session_view(self, session: Row, busy: set[str] | None = None) -> Row:
@@ -1550,6 +1571,95 @@ class Engine:
         )
         if image:
             self.store.add_event(session["id"], turn_id, "image", {"name": name})
+
+    async def _collect_patch(self, session: Row, turn_id: str) -> None:
+        """开发回合结束时，把工作目录相对仓库最新提交的全部改动存成一份补丁。
+
+        工作目录归档后会删掉，补丁留在附件里，回溯时还看得到改了什么。
+        不是 git 仓库、没有改动、和上一回合留下的一样，就不存。"""
+        workdir = Path(session["workdir"] or "")
+        if not (workdir / ".git").exists():
+            return
+
+        async def git(*args: str) -> bytes:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(workdir),
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env={"GIT_TERMINAL_PROMPT": "0", "PATH": os.environ.get("PATH", "")},
+            )
+            try:
+                out, _ = await asyncio.wait_for(proc.communicate(), 30)
+            except TimeoutError:
+                proc.kill()
+                return b""
+            return out if proc.returncode == 0 else b""
+
+        try:
+            diff = await git("diff", "HEAD", "--no-color")
+            untracked = (await git("ls-files", "--others", "--exclude-standard")).decode(
+                "utf-8", "replace"
+            )
+        except OSError:
+            return
+        new_files = [line for line in untracked.splitlines() if line.strip()][:200]
+        if not diff.strip() and not new_files:
+            return
+        head = ""
+        if new_files:
+            head = "# 新建、还没有纳入版本管理的文件（内容见这一回合的产出文件）：\n" + "".join(
+                f"#   {name}\n" for name in new_files
+            )
+        data = head.encode() + diff
+        if len(data) > MAX_PATCH_BYTES:
+            data = data[:MAX_PATCH_BYTES] + "\n# （补丁太大，后面的没有保存）\n".encode()
+        data = redact(data.decode("utf-8", "replace")).encode()
+        digest = hashlib.sha256(data).hexdigest()
+        previous = [
+            a for a in self.store.list_attachments(session["id"]) if a["name"] == PATCH_NAME
+        ]
+        if previous and previous[-1]["sha256"] == digest:
+            return
+        if len(self.store.turn_attachments(turn_id, "output")) >= files.MAX_OUTPUT_PER_TURN:
+            return
+        message_id = self.store.add_message(session["id"], turn_id, "process", "file", PATCH_NAME)
+        self._put_attachment(
+            session["id"],
+            "output",
+            PATCH_NAME,
+            "text/x-diff",
+            data,
+            turn_id=turn_id,
+            message_id=message_id,
+        )
+
+    # ---- 保留期（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 的 B8） ----
+    def purge_expired(self) -> int:
+        """最后活动早于保留期的会话：清掉对话内容，留下会话、回合的状态和用量。返回清了几个。"""
+        days = int(self.setting("retention_days") or 0)
+        if days <= 0:
+            return 0
+        busy = self.store.busy_sessions()
+        done = 0
+        for session in self.store.expired_sessions(time.time() - days * 86400):
+            if session["id"] in busy:
+                continue
+            for attachment in self.store.list_attachments(session["id"]):
+                (self.attachment_root / attachment["path"]).unlink(missing_ok=True)
+            self.store.purge_session(session["id"])
+            done += 1
+        return done
+
+    async def _retention_loop(self) -> None:
+        while True:
+            try:
+                self.purge_expired()
+            except Exception:
+                logger.exception("按保留期清理对话内容失败")
+            await asyncio.sleep(RETENTION_CHECK_SECONDS)
 
     def attachment_file(self, session_id: str, attachment_id: str) -> tuple[Row, Path]:
         row = self.store.get_attachment(attachment_id)
@@ -2155,6 +2265,11 @@ def _step(message: Row) -> Row | None:
     for key in ("name", "truncated", "error", "exit_code"):
         if data.get(key) not in (None, False, ""):
             step[key] = data[key]
+    if data.get("output"):  # 命令的输出：回溯时要看，太长的只给前面一段
+        output = str(data["output"])
+        step["output"] = output[:MAX_STEP_OUTPUT]
+        if len(output) > MAX_STEP_OUTPUT:
+            step["truncated"] = True
     return step
 
 
@@ -2210,6 +2325,7 @@ def session_view(session: Row, *, full: bool = False) -> Row:
         "status": session["status"],
         "origin": session["origin"],
         "source": session.get("source"),
+        "purged_at": session.get("purged_at"),
         "owner": session["caller_label"],
         "created_at": session["created_at"],
         "updated_at": session["updated_at"],

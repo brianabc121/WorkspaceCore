@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef } from 'vue'
-import { Archive, ArrowLeft, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
+import { Archive, ArrowLeft, Download, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
-import { CHAT_NO_TOOLS, MODES, platformName, type Bridge, type Quota } from '../api'
+import { CHAT_NO_TOOLS, MODES, platformName, seconds, type Bridge, type Quota } from '../api'
 import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, needsTakeover, newRequestId, ownerText, type ChatAttachment, type LlmChatApi } from './chatApi'
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
@@ -181,6 +181,18 @@ function saveTitle() {
   if (!value) { headError.value = '标题不能为空。'; return }
   return act(async () => { await props.chat.rename(props.bridge.id, props.sessionId, value); renaming.value = false })
 }
+// 导出：提问、回答、每回合的状态和用时，存成一个 Markdown 文件
+async function exportSession() {
+  if (working.value || !session.value) return
+  working.value = true; headError.value = ''
+  try {
+    const blob = await props.chat.exportBlob(props.bridge.id, props.sessionId)
+    const url = URL.createObjectURL(blob), link = document.createElement('a')
+    link.href = url; link.download = `${session.value.title || '会话'}.md`; link.rel = 'noopener'
+    document.body.append(link); link.click(); link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (e) { headError.value = `没能导出：${chatError(e)}` } finally { working.value = false }
+}
 function archive() {
   if (!window.confirm('归档这个会话？\n\n归档后不能再往里发消息，记录保留，可以在“看已归档的”里找到。')) return
   return act(() => props.chat.archive(props.bridge.id, props.sessionId))
@@ -208,11 +220,13 @@ function archive() {
         <div v-if="session" class="lc-head-actions">
           <button v-if="session.origin === 'external'" type="button" class="lc-icon" aria-label="重新导入" title="重新向官方程序读一次内容" :disabled="working" @click="reimport"><RefreshCw aria-hidden="true" /></button>
           <button v-if="!renaming && session.origin !== 'external'" type="button" class="lc-icon" aria-label="改标题" title="改标题" :disabled="working" @click="startRename"><Pencil aria-hidden="true" /></button>
+          <button type="button" class="lc-icon" aria-label="导出会话" title="导出成 Markdown 文件" :disabled="working" @click="exportSession"><Download aria-hidden="true" /></button>
           <button v-if="session.status !== 'archived'" type="button" class="lc-icon" aria-label="归档会话" title="归档" :disabled="working" @click="archive"><Archive aria-hidden="true" /></button>
           <button type="button" class="lc-icon" :aria-pressed="infoOpen" aria-label="会话信息" title="会话信息" @click="infoOpen = !infoOpen"><Info aria-hidden="true" /></button>
         </div>
       </header>
       <p v-if="headError" class="lc-note is-red" role="alert">{{ headError }}</p>
+      <p v-if="session?.purged_at" class="lc-note" role="note">这个会话的对话内容已经按保留期清除（{{ seconds(session.purged_at) }}）：只剩下每个回合的状态、用时和用量。</p>
 
       <div ref="box" class="lc-scroll" @scroll.passive="onScroll">
         <DataState v-if="conversation.isPending.value || (conversation.error.value && !session)" :loading="conversation.isPending.value" :error="conversation.error.value" :empty="false" empty-text="" @retry="conversation.refetch()" />

@@ -106,6 +106,8 @@ const busy = computed(() => !!props.resuming && props.resuming === props.message
           <code v-if="CODE_STEPS.includes(step.kind)">{{ step.text }}</code>
           <span v-else>{{ step.text }}</span>
           <span v-if="step.truncated" class="lc-tag">已截断</span>
+          <span v-if="step.exit_code != null && step.exit_code !== 0" class="lc-tag">退出码 {{ step.exit_code }}</span>
+          <pre v-if="step.output" class="lc-code lc-step-output" :aria-label="`${stepLabel(step)}的输出`"><code>{{ step.output }}</code></pre>
         </li>
       </ol>
     </details>

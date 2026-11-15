@@ -272,6 +272,8 @@ class Store:
                 "(o.updated_at = sessions.updated_at AND o.id <= sessions.id))"
             )
         self._db.execute("CREATE INDEX IF NOT EXISTS sessions_rev ON sessions (rev)")
+        if "purged_at" not in columns:  # 按保留期清掉了对话内容的时间
+            self._db.execute("ALTER TABLE sessions ADD COLUMN purged_at REAL")
         if "request_id" not in columns:  # 新建会话的幂等号（T-0247）：同一个调用方重试不会建出两个
             self._db.execute("ALTER TABLE sessions ADD COLUMN request_id TEXT")
         self._db.execute(
@@ -934,6 +936,24 @@ class Store:
 
     def delete_attachment(self, attachment_id: str) -> None:
         self._exec("DELETE FROM attachments WHERE id = ?", (attachment_id,))
+
+    def expired_sessions(self, before: float) -> list[Row]:
+        """最后活动早于 before、还没清过内容的会话。"""
+        return self._all(
+            "SELECT * FROM sessions WHERE updated_at < ? AND purged_at IS NULL", (before,)
+        )
+
+    def purge_session(self, session_id: str) -> None:
+        """清掉一个会话的对话内容：提问、回答、过程、事件、附件。会话、回合的状态和用量留着。"""
+        for table in ("messages", "events", "attachments"):
+            self._exec(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))  # noqa: S608
+        self._exec(
+            "UPDATE turns SET text = '', result_text = NULL, error_message = NULL "
+            "WHERE session_id = ?",
+            (session_id,),
+        )
+        self._exec("UPDATE sessions SET purged_at = ? WHERE id = ?", (time.time(), session_id))
+        self.touch_session(session_id)
 
     def stale_uploads(self, before: float) -> list[Row]:
         """上传了但一直没有随消息发出去的附件。"""

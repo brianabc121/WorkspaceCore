@@ -55,6 +55,10 @@ class LlmBridge(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     # 会话索引同步到了管理器的哪个变更序号（llm_bridge_sessions，jobs.py）
     index_rev: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    # 已经通知过管理员的额度暂停：平台 → 暂停到什么时候（同一次暂停只通知一次）
+    pause_notified: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

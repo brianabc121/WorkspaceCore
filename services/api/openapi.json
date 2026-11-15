@@ -14609,6 +14609,14 @@
             "title": "Resume Text",
             "type": "string"
           },
+          "retention_days": {
+            "default": 0,
+            "description": "对话内容保留多少天（按会话最后活动算）；0 是一直保留。到期只清内容：会话、回合的状态和用量留着。旧版本的管理器没有这一项",
+            "maximum": 3650.0,
+            "minimum": 0.0,
+            "title": "Retention Days",
+            "type": "integer"
+          },
           "send_per_hour": {
             "description": "每个实例每小时的发送次数",
             "maximum": 10000.0,
@@ -14745,6 +14753,19 @@
               }
             ],
             "title": "Resume Text"
+          },
+          "retention_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Days"
           },
           "send_per_hour": {
             "anyOf": [
@@ -16373,6 +16394,18 @@
             "title": "Platform",
             "type": "string"
           },
+          "purged_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "对话内容按保留期清掉的时间；没清过为空",
+            "title": "Purged At"
+          },
           "session_id": {
             "title": "Session Id",
             "type": "string"
@@ -16473,6 +16506,18 @@
             ],
             "description": "工具名（kind 是 tool / tool_result 时）",
             "title": "Name"
+          },
+          "output": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "命令的输出（平台给了才有；太长时只有前面一段，truncated 为真）",
+            "title": "Output"
           },
           "text": {
             "title": "Text",
@@ -59045,6 +59090,117 @@
           }
         ],
         "summary": "聊天：会话在某个事件之后的新事件（admin，长轮询）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/export": {
+      "get": {
+        "description": "提问、回答、每回合的状态和用时；过程和附件的内容不在里面。导出记一条审计。",
+        "operationId": "llm_chat_export",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/markdown": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "聊天：把一个会话导出成 Markdown（admin）",
         "tags": [
           "llm_bridge"
         ]

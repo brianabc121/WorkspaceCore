@@ -144,6 +144,13 @@ class LlmBridgeSettings(BaseModel):
     )
     auto_resume_max: int = Field(default=3, ge=1, le=10, description="同一次中断最多自动续几次")
     resume_text: str = Field(default="", description="自动续跑时发的那句话")
+    retention_days: int = Field(
+        default=0,
+        ge=0,
+        le=3650,
+        description="对话内容保留多少天（按会话最后活动算）；0 是一直保留。到期只清内容："
+        "会话、回合的状态和用量留着。旧版本的管理器没有这一项",
+    )
     platforms: list[str] = Field(
         default=list(ALL_PLATFORMS), description="这个 MCP 管理器控制的平台"
     )
@@ -159,6 +166,7 @@ class LlmBridgeSettingsPatch(_In):
     auto_resume: bool | None = None
     auto_resume_max: int | None = Field(default=None, ge=1, le=10)
     resume_text: str | None = Field(default=None, min_length=1, max_length=200)
+    retention_days: int | None = Field(default=None, ge=0, le=3650)
     platforms: list[Platform] | None = Field(
         default=None,
         min_length=1,

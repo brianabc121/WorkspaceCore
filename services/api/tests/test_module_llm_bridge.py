@@ -8,6 +8,7 @@
 import contextlib
 import importlib
 import sys
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
@@ -908,6 +909,99 @@ async def test_records_can_be_filtered_searched_and_usage_summed(rig: Rig) -> No
         "failed": ["主桥"],
     }
     rig.down[0] = False
+
+
+@pytest.mark.integration
+async def test_review_trail_audit_notifications_export_and_retention(rig: Rig) -> None:
+    """管理员回溯的另一半（T-0252）：智能体的写操作进审计、失败和额度暂停有通知、
+    会话能导出、保留期能设置。"""
+    env = rig.env
+    agent = await rig.agent("openclaw-1", can_write=True)
+    created = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_session_create",
+            {"platform": "claude", "mode": "chat", "title": "排查问题"},
+        )
+    )
+    session = created["session_id"]
+
+    async def send(text: str, rid: str) -> dict[str, Any]:
+        args = {"session_id": session, "text": text, "request_id": rid, "wait_seconds": 10}
+        return ok(await call(env, agent, "llm_bridge_send", args))
+
+    first = await send("先看日志", "r1")
+    # 第一次同步是补历史：不为已有的失败发通知
+    assert (await rig.api("GET", "/sessions", params={"sync": True})).status_code == 200
+
+    # 审计：智能体新建会话、发消息都有一条，带中文名，没有消息内容
+    logs = (await env.get("/api/v1/audit-logs", limit=50))["items"]
+    by_action = {entry["action"]: entry for entry in logs}
+    made = by_action["llm_bridge.agent_session_created"]
+    assert made["action_label"] == "智能体新建大模型会话"
+    assert (
+        made["metadata"]["instance"] == "openclaw-1" and made["metadata"]["session_id"] == session
+    )
+    sent = by_action["llm_bridge.agent_message_sent"]
+    assert sent["metadata"]["turn_id"] == first["turn_id"] and "先看日志" not in str(sent)
+
+    # 智能体的回合失败了：下一次同步时通知管理员，链接到那个会话；同一次失败不重复通知
+    failed = await send("fail:invalid", "r2")
+    assert failed["status"] == "failed"
+    from app.modules.llm_bridge import jobs
+
+    assert await jobs.index_tick({"sync": env.sync}) == 1
+    assert await jobs.index_tick({"sync": env.sync}) == 0
+    notes = (await env.get("/api/v1/notifications"))["items"]
+    (note,) = [n for n in notes if n["type"] == "llm_bridge.turn_failed"]
+    assert "openclaw-1" in note["title"] and "排查问题" in note["body"]
+    assert note["link"] == f"/llm_bridge?m={rig.bridge_id}&s={session}"
+
+    # 平台因额度暂停：通知一次；恢复后清掉记号，再暂停再通知
+    engine = rig.bridge_app.state.engine
+    until = time.time() + 3600
+    engine.store.set_pause("claude", until, False, "quota")
+    await jobs.index_tick({"sync": env.sync})
+    await jobs.index_tick({"sync": env.sync})
+    paused = [
+        n
+        for n in (await env.get("/api/v1/notifications"))["items"]
+        if n["type"] == "llm_bridge.quota_paused"
+    ]
+    assert len(paused) == 1 and "claude" in paused[0]["title"] and "主桥" in paused[0]["title"]
+    engine.store.clear_pause("claude")
+    await jobs.index_tick({"sync": env.sync})
+    engine.store.set_pause("claude", until + 7200, True, "quota")
+    await jobs.index_tick({"sync": env.sync})
+    paused = [
+        n
+        for n in (await env.get("/api/v1/notifications"))["items"]
+        if n["type"] == "llm_bridge.quota_paused"
+    ]
+    assert len(paused) == 2
+    engine.store.clear_pause("claude")
+
+    # 导出：一份 Markdown，提问、回答、没做完的原因都在；导出记一条审计
+    exported = await rig.api("GET", f"/bridges/{rig.bridge_id}/chat/sessions/{session}/export")
+    assert exported.status_code == 200, exported.text
+    assert exported.headers["content-type"].startswith("text/markdown")
+    assert "attachment" in exported.headers["content-disposition"]
+    text = exported.text
+    assert text.startswith("# 排查问题") and "先看日志" in text and "[fake-1] 先看日志" in text
+    assert "没做完的原因" in text
+    logs = (await env.get("/api/v1/audit-logs", limit=50))["items"]
+    assert any(e["action"] == "llm_bridge.chat_session_exported" for e in logs)
+
+    # 保留期：页面上能设置，写到管理器里；默认是一直保留
+    status = (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).json()
+    assert status["settings"]["retention_days"] == 0
+    saved = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"retention_days": 90})
+    assert saved.status_code == 200 and saved.json()["retention_days"] == 90
+    too_long = await rig.api(
+        "PUT", f"/bridges/{rig.bridge_id}/settings", json={"retention_days": 99999}
+    )
+    assert too_long.status_code == 422
 
 
 @pytest.mark.integration

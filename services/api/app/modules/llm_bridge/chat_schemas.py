@@ -41,6 +41,9 @@ class LlmChatSessionOut(BaseModel):
         default=None,
         description="出处：建会话时工作台记下的——哪个实例或人，智能体当时在执行哪些任务",
     )
+    purged_at: float | None = Field(
+        default=None, description="对话内容按保留期清掉的时间；没清过为空"
+    )
 
 
 class LlmChatSessionList(BaseModel):
@@ -68,6 +71,9 @@ class LlmChatStepOut(BaseModel):
     truncated: bool = Field(default=False, description="内容太长，后面的没有保存")
     error: bool = Field(default=False, description="工具报了错")
     exit_code: int | None = Field(default=None, description="命令的退出码（平台给了才有）")
+    output: str | None = Field(
+        default=None, description="命令的输出（平台给了才有；太长时只有前面一段，truncated 为真）"
+    )
 
 
 class LlmChatResumeOut(BaseModel):

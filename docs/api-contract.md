@@ -932,6 +932,15 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 - 执行记录（`GET /api/v1/ai/tool-executions`）里，`llm_bridge_*` 写工具成功时 `arguments.result` 带 `bridge_id`、`session_id`、`turn_id`：能从这条记录找到会话的那一回合。
 - **会话索引**：`GET /api/v1/llm_bridge/sessions`（admin）——所有 MCP 管理器上的会话，按最后活动倒序；`bridge_id`、`owner_kind`（`agent` / `user` / `external`）筛选，`limit` / `offset` 翻页，`sync=true` 先同步再读（连不上的管理器列在 `sync_failed`）。每条有 `bridge_id` / `bridge_name`、`session_id`、平台、用法、模型、`title`、`status`、`owner_kind` / `owner_id` / `owner`、`source`、`busy`、`turns_total` / `turns_failed` / `turns_interrupted`、`tokens`、三个时间。**不含提问和回答**。数据在工作台的 `llm_bridge_sessions` 表里，后台每分钟向每个启用的管理器取一次“变更序号之后变了的会话”（管理器的 `GET /admin/index?after=`）。
 
+**管理员回溯：回合详情、改动补丁、审计、通知、保留期、导出**（T-0252，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.2 的 B2、B3、B6、B7、B8）：
+
+- 过程里的命令多 `output`（平台给了才有，最多 8000 个字符，超过时 `truncated`）。
+- 开发回合成功结束时，工作目录是 git 仓库且相对最新提交有改动，就把全部改动存成一份补丁，作为这一回合的产出文件（`改动（到这一回合为止）.patch`，`text/x-diff`，最大 2 MB）；和上一回合留下的一样就不再存。归档会话会删掉工作目录，补丁留着。新建但没纳入版本管理的文件只列出名字。
+- 审计：智能体的写操作也进审计日志——`llm_bridge.agent_session_created` / `agent_message_sent` / `agent_takeover_sent` / `agent_turn_cancelled` / `agent_session_archived`，`metadata` 里有 `instance`、`instance_id`、`bridge`、`session_id`、`turn_id`，没有消息内容；人下载附件（不含页面自动显示的图片缩略图）记 `chat_attachment_downloaded`，导出会话记 `chat_session_exported`。`llm_bridge.*` 的事件都有中文名（`action_label`）；审计页能从这些记录点到会话的那一回合。**读别人的会话没有记审计**（页面每隔十几秒重读一次，会刷出大量记录）。
+- 通知管理员：智能体的会话里多了失败或结果未知的回合（`llm_bridge.turn_failed`，链接到那个会话；第一次同步历史数据时不发）；平台因额度用完暂停（`llm_bridge.quota_paused`，同一次暂停只发一次）。都在每分钟同步会话索引时检查，所以最多晚一分钟。
+- 保留期：管理器的设置多 `retention_days`（0 ~ 3650，默认 0 = 一直保留）。按会话最后活动的时间算，到期只清对话内容（提问、回答、过程、事件、附件），会话、每个回合的状态和用量留着；会话多一个 `purged_at`。管理器每 6 小时清一次，清掉的找不回来。
+- `GET .../chat/sessions/{session_id}/export`（admin）：把会话导出成 Markdown（提问、回答、每回合的状态和用时、没做完的原因、附件的名字），以附件形式下载。
+
 **管理员回溯：会话记录、搜索、用量**（T-0251，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.2 的 B1、B4、B5）：
 
 - `GET /api/v1/llm_bridge/sessions` 多这些筛选：`owner_id`（具体是谁：实例的 id，或 `user:<用户 id>`）、`platform`、`mode`、`status`、`problem=true`（有失败、结果未知或中断的回合）、`since` / `until`（最后活动的时间范围）、`q`（标题里有这段文字）。

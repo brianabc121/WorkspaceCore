@@ -16,10 +16,11 @@ const FIELDS = [
   { key: 'turn_timeout_seconds', label: '单个回合的时限（秒）', help: '一个回合最长跑多久（30–21600 秒）。', min: 30, max: 21600 },
   { key: 'send_per_hour', label: '每小时发送次数', help: '每个实例每小时最多发多少次指令（1–10000）。', min: 1, max: 10000 },
   { key: 'max_text_chars', label: '单条指令的字数上限', help: '一条指令最多多少个字符（1–1000000）。', min: 1, max: 1000000 },
+  { key: 'retention_days', label: '对话内容保留天数', help: '按会话最后活动的时间算（0–3650）；0 是一直保留。到期只清对话内容（提问、回答、过程、附件），会话、每个回合的状态和用量留着。每 6 小时清一次，清掉的找不回来。', min: 0, max: 3650 },
   { key: 'auto_resume_max', label: '同一次中断最多自动继续几次', help: '自动继续后又被额度打断，算同一次中断；超过这个次数（1–10）就不再自动继续，要人点“现在就试”。', min: 1, max: 10 },
 ] as const
 type Key = (typeof FIELDS)[number]['key']
-const form = reactive<Record<Key, string>>({ concurrency: '', min_start_interval_seconds: '', turn_timeout_seconds: '', send_per_hour: '', max_text_chars: '', auto_resume_max: '' })
+const form = reactive<Record<Key, string>>({ concurrency: '', min_start_interval_seconds: '', turn_timeout_seconds: '', send_per_hour: '', max_text_chars: '', retention_days: '', auto_resume_max: '' })
 // 额度用完后的自动继续：开关和发的那句话
 const resume = reactive({ on: true, text: '' })
 const settings = computed(() => (props.status?.reachable ? props.status.settings ?? null : null))

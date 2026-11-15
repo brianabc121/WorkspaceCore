@@ -30,7 +30,7 @@ const account = (slot: string, state: string): Schema['LlmBridgeAccountOut'] => 
 const channel = (platform: string, mode: string, slot: string, over: Partial<Schema['LlmBridgeChannelOut']> = {}): Schema['LlmBridgeChannelOut'] => ({ platform, mode, slot, enabled: true, available: true, note: '', ...over })
 const status = (): Schema['LlmBridgeStatusOut'] => ({
   reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {}, quota: {},
-  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
+  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
   accounts: [account('openai', 'logged_in'), account('claude', 'logged_in'), account('workbuddy', 'logged_out')],
   channels: [channel('chatgpt', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
 })
@@ -494,6 +494,29 @@ describe('大模型聊天', () => {
     workbuddy: { can_refresh: false, reports_quota: false, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 987, windows: [] },
   })
   const withQuota = (r: Request) => (/\/bridges\/[^/]+\/status$/.test(new URL(r.url).pathname) ? Response.json({ ...status(), quota: quotaOf() }) : undefined)
+
+  it('shows command output for review, exports the session and says when its content was purged', async () => {
+    const run: Schema['LlmChatStepOut'] = { kind: 'command', text: 'pytest -q', at: now(), truncated: false, error: false, exit_code: 1, output: '2 failed, 10 passed' }
+    const exported: string[] = []
+    setup('owner', { conversations: { [S1]: talk({ mode: 'dev', purged_at: now() - 60 }, [asked('跑一下测试'), answered('有两条没过。', T1, { steps: [run] })]) } }, r => {
+      if (path(r) !== `${chat}/sessions/${S1}/export`) return undefined
+      exported.push(r.method)
+      return new Response('# 周报怎么写\n', { headers: { 'Content-Type': 'text/markdown; charset=utf-8' } })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    // 回溯时要看命令跑出了什么：过程里有输出和退出码
+    const steps = await screen.findByText('过程（1 步）')
+    await fireEvent.click(steps)
+    expect(await screen.findByLabelText('命令的输出')).toHaveTextContent('2 failed, 10 passed')
+    expect(screen.getByText('退出码 1')).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent(/这个会话的对话内容已经按保留期清除（.+）：只剩下每个回合的状态、用时和用量。/)
+    // 导出成一个 Markdown 文件
+    const created = vi.fn(() => 'blob:x')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: created, revokeObjectURL: vi.fn() }))
+    await fireEvent.click(screen.getByRole('button', { name: '导出会话' }))
+    await waitFor(() => expect(created).toHaveBeenCalledTimes(1))
+    expect(exported).toEqual(['GET'])
+  })
 
   it('shows the quota of the platform and when it resets in the session info', async () => {
     setup('owner', {}, withQuota)

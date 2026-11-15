@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.domain import agent_ops, notifications, secret_scan
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
+from app.domain.audit import AuditTrail
 from app.domain.connectors import ConnectorRuntime
 from app.integrations.base import ConnectorError
 from app.models import AgentInstance
@@ -381,6 +382,14 @@ async def _source(db: AsyncSession, instance: AgentInstance) -> dict[str, Any]:
     }
 
 
+_AUDIT_ACTIONS = {
+    "llm_bridge_session_create": "agent_session_created",
+    "llm_bridge_send": "agent_message_sent",
+    "llm_bridge_turn_cancel": "agent_turn_cancelled",
+    "llm_bridge_session_archive": "agent_session_archived",
+}
+
+
 def _result_ref(bridge_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """执行得到的编号：执行记录里带着，回溯时能从这条记录点到会话的那一回合。"""
     ref = {"bridge_id": bridge_id}
@@ -503,6 +512,23 @@ async def run(
             link=_session_link(bridge_id, data.get("session_id"), data.get("turn_id")),
             key=str(data.get("turn_id")),
         )
+    # 智能体的写操作也进审计日志（内容不进：只有是谁、哪个会话、哪一回合）
+    action = _AUDIT_ACTIONS[spec.name]
+    if spec.name == "llm_bridge_send" and output.data.get("takeover"):
+        action = "agent_takeover_sent"
+    await AuditTrail(service.db, service.settings).record(
+        f"llm_bridge.{action}",
+        workspace_ids=[current.workspace_id],
+        actor_id=None,
+        resource_type="llm_bridge",
+        resource_id=uuid.UUID(bridge_id),
+        metadata={
+            "instance": current.name,
+            "instance_id": str(current.id),
+            "bridge": output.bridge,
+            **_result_ref(bridge_id, output.data),
+        },
+    )
     await service.record_knowledge(
         who,
         spec,

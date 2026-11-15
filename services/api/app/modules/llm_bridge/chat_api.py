@@ -129,6 +129,31 @@ async def llm_chat_session_events(
 
 
 @router.get(
+    f"{prefix}/sessions/{{session_id}}/export",
+    summary="聊天：把一个会话导出成 Markdown（admin）",
+    description="提问、回答、每回合的状态和用时；过程和附件的内容不在里面。导出记一条审计。",
+    response_class=Response,
+    responses={
+        200: {"content": {"text/markdown": {"schema": {"type": "string"}}}},
+        **read_errors,
+    },
+)
+async def llm_chat_export(
+    access: Admin, bridges: Bridges, bridge_id: UUID, session_id: SessionId
+) -> Response:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    name, content = await LlmChatService(bridges).export(access, row, session_id)
+    return Response(
+        content=content.encode(),
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.get(
     f"{prefix}/sessions/{{session_id}}/stream",
     summary="聊天：会话的新事件，逐条推送（admin，SSE）",
     description="和 .../events 是同一份数据，只是不用反复请求：每条事件 `event: chat`，"
@@ -379,11 +404,20 @@ async def llm_chat_download(
     attachment_id: AttachmentId,
 ) -> Response:
     row = await bridges.bridge(access.workspace.id, bridge_id)
+    bridge_name = row.name
     content, media_type, name = await LlmChatService(bridges).download(
         row, session_id, attachment_id
     )
     # 文件是别人（或模型）给的：只有四种图片内联，别的一律下载；不许浏览器猜类型、不许执行
     inline = media_type in INLINE_TYPES
+    if not inline:  # 下载文件记一条审计；页面上自动显示的图片缩略图不记
+        await bridges.audit(
+            access,
+            "chat_attachment_downloaded",
+            bridge_id,
+            {"session": session_id, "bridge": bridge_name, "attachment": attachment_id},
+        )
+        await bridges.db.commit()
     return Response(
         content=content,
         media_type=media_type if inline else "application/octet-stream",
