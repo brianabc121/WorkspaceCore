@@ -256,6 +256,10 @@ class LlmChatRenameIn(_In):
     title: str = Field(min_length=1, max_length=120)
 
 
+class LlmChatModelIn(_In):
+    model: str = Field(min_length=1, max_length=100, description="之后的回合用的模型")
+
+
 # ---- 会话的消息队列（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 4 节）----
 class LlmChatQueueItem(BaseModel):
     turn_id: str

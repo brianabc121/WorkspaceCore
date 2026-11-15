@@ -7,8 +7,9 @@ import { TURN_STATUS, ownerText, type ChatMessage, type ChatSession } from './ch
 
 // 右栏：这个会话的信息、这个平台的额度（T-0242）和回合列表。只显示。
 // quota 来自管理器的状态；旧版本的管理器没有，这一块不显示。
-const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; managerName: string; quota?: Quota | null }>()
-defineEmits<{ close: [] }>()
+// models：这个会话能换成哪些模型（Claude / CodeBuddy 的会话才给；不给就只显示现在的）
+const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; managerName: string; quota?: Quota | null; models?: { id: string; name: string }[]; changing?: boolean }>()
+defineEmits<{ close: []; model: [id: string] }>()
 
 const turns = computed(() => props.messages.filter(m => m.role === 'assistant' && m.turn_id))
 // 出处：智能体建这个会话时正在执行的任务（工作台记的，不保证就是引起这个会话的那一个）
@@ -24,7 +25,15 @@ const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
     </div>
     <dl class="lb-meta">
       <dt>平台</dt><dd>{{ platformName(session.platform) }}</dd>
-      <dt>模型</dt><dd>{{ session.model || '平台默认' }}</dd>
+      <dt>模型</dt>
+      <dd v-if="models?.length">
+        <select :value="session.model ?? ''" :disabled="changing" aria-label="之后的回合用的模型" @change="$emit('model', ($event.target as HTMLSelectElement).value)">
+          <option v-if="session.model && !models.some(m => m.id === session.model)" :value="session.model">{{ session.model }}</option>
+          <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name || m.id }}</option>
+        </select>
+        <span class="lc-sub">换了之后从下一回合起用新的模型。</span>
+      </dd>
+      <dd v-else>{{ session.model || '平台默认' }}</dd>
       <dt>用法</dt><dd>{{ MODES[session.mode] ?? session.mode }}<template v-if="session.mode === 'chat'">：{{ CHAT_NO_TOOLS }}</template></dd>
       <template v-if="session.environment">
         <dt>开发环境</dt><dd>{{ session.environment.name }}（{{ sandbox(session.environment.sandbox) }}{{ session.environment.network ? '，可联网' : '，不联网' }}）</dd>

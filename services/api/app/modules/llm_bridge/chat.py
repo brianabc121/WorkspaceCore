@@ -603,6 +603,24 @@ class LlmChatService:
         await self.db.commit()
         return _turn_out(data)
 
+    async def set_model(
+        self, access: WorkspaceAccess, row: LlmBridge, session_id: str, model: str
+    ) -> LlmChatSessionOut:
+        """换这个会话之后的回合用的模型（Claude / CodeBuddy；Codex 的会话换不了）。"""
+        self._writable(row)
+        me, client = caller_id(access.user_id), await self.bridges.client(row)
+        bridge_id, bridge_name = row.id, row.name
+        await self.db.commit()
+        data = await self._admin(client, "PUT", f"/sessions/{session_id}/model", {"model": model})
+        await self.bridges.audit(
+            access,
+            "chat_session_model_changed",
+            bridge_id,
+            {"bridge": bridge_name, "session": session_id, "model": model},
+        )
+        await self.db.commit()
+        return session_out(data, me)
+
     async def rename(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str, title: str
     ) -> LlmChatSessionOut:

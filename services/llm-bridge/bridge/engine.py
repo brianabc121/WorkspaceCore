@@ -921,6 +921,11 @@ class Engine:
             delivery="merged" if merged else "turn",
             source=caller.source,
         )
+        if not session["title"]:
+            # 标题在发出第一条时就定下来，不等第一回合做完：列表里马上看得出是哪个会话
+            self.store.update_session(
+                session_id, title=redact(" ".join(text.split()))[:120], updated_at=time.time()
+            )
         if edge is not None:  # 插入的消息排在这个会话队列的最前面
             self.store.update_turn(turn["id"], position=edge - 1)
         asked = self.store.user_message(turn["id"])
@@ -2150,6 +2155,27 @@ class Engine:
         if not clean:
             raise BridgeError("VALIDATION_FAILED", "标题不能为空")
         self.store.update_session(session_id, title=clean, updated_at=session["updated_at"])
+        return self.admin_session_view(self._required_session(session_id))
+
+    async def set_model(self, session_id: str, model: str) -> Row:
+        """换这个会话之后用的模型：从下一回合起，已经在跑的不受影响。
+
+        Claude Code、CodeBuddy Code 每个回合起一次官方命令行，模型是那一次的参数，所以能换。
+        Codex 的会话（线程）建好后能不能逐回合换模型没有在锁定版本上核验过：不支持，明确报出来。"""
+        session = self._required_session(session_id)
+        if session["status"] != "active":
+            raise BridgeError("CONFLICT", "会话已归档，不能换模型")
+        if session["origin"] != "bridge":
+            raise BridgeError("NOT_SUPPORTED", "官方程序里已有的会话不能在这里换模型")
+        if session["slot"] == "openai":
+            raise BridgeError(
+                "NOT_SUPPORTED", "ChatGPT / Codex 的会话不能中途换模型：要换就新建一个会话"
+            )
+        channel = self._channel(session["platform"], session["mode"])
+        picked = await self._pick_model(channel, model)
+        if picked != session["model"]:
+            self.store.update_session(session_id, model=picked, updated_at=session["updated_at"])
+            self.store.add_event(session_id, None, "model", {"model": picked})
         return self.admin_session_view(self._required_session(session_id))
 
     # ---- 管理页用 ----

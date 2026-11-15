@@ -181,6 +181,7 @@ _LABELS: dict[str, str] = {
     "llm_bridge.chat_resume_now": "让中断的回合现在就继续",
     "llm_bridge.chat_resume_cancelled": "取消自动继续",
     "llm_bridge.chat_session_renamed": "修改会话标题",
+    "llm_bridge.chat_session_model_changed": "更换会话用的模型",
     "llm_bridge.chat_session_archived": "归档会话",
     "llm_bridge.chat_session_exported": "导出会话",
     "llm_bridge.chat_group_created": "新建多模型同问",

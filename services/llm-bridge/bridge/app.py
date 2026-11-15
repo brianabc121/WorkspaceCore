@@ -182,6 +182,10 @@ class SessionPatchBody(_Body):
     title: str = Field(min_length=1, max_length=200)
 
 
+class SessionModelBody(_Body):
+    model: str = Field(min_length=1, max_length=100)
+
+
 class TurnEditBody(_Body):
     text: str = Field(min_length=1)
 
@@ -445,6 +449,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, session_id: str, body: SessionPatchBody, _: Admin
     ) -> dict[str, Any]:
         return engine_of(request).rename_session(session_id, body.title)
+
+    @app.put("/admin/sessions/{session_id}/model")
+    async def admin_session_model(
+        request: Request, session_id: str, body: SessionModelBody, _: Admin
+    ) -> dict[str, Any]:
+        """换这个会话之后用的模型（命令行类平台；从下一回合起）。"""
+        return await engine_of(request).set_model(session_id, body.model)
 
     @app.post("/admin/sessions/{session_id}/reimport")
     async def admin_session_reimport(request: Request, session_id: str, _: Admin) -> dict[str, Any]:

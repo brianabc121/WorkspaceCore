@@ -932,6 +932,12 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 - 执行记录（`GET /api/v1/ai/tool-executions`）里，`llm_bridge_*` 写工具成功时 `arguments.result` 带 `bridge_id`、`session_id`、`turn_id`：能从这条记录找到会话的那一回合。
 - **会话索引**：`GET /api/v1/llm_bridge/sessions`（admin）——所有 MCP 管理器上的会话，按最后活动倒序；`bridge_id`、`owner_kind`（`agent` / `user` / `external`）筛选，`limit` / `offset` 翻页，`sync=true` 先同步再读（连不上的管理器列在 `sync_failed`）。每条有 `bridge_id` / `bridge_name`、`session_id`、平台、用法、模型、`title`、`status`、`owner_kind` / `owner_id` / `owner`、`source`、`busy`、`turns_total` / `turns_failed` / `turns_interrupted`、`tokens`、三个时间。**不含提问和回答**。数据在工作台的 `llm_bridge_sessions` 表里，后台每分钟向每个启用的管理器取一次“变更序号之后变了的会话”（管理器的 `GET /admin/index?after=`）。
 
+**聊天页的日常体验**（T-0253，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.3）：
+
+- `PUT .../chat/sessions/{session_id}/model`（admin，`{model}`）：换这个会话之后的回合用的模型，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换（每个回合起一次官方程序，模型是那一次的参数）；ChatGPT / Codex 的会话 422 `NOT_SUPPORTED`，已归档的 409。记审计 `chat_session_model_changed`。
+- 会话的标题在发出第一条消息时就定下来（之前要等第一回合做完）。
+- 其余都在页面上，没有新接口：回答按 Markdown 显示（沿用知识库的安全渲染：不允许原始 HTML、链接只允许 http / https / mailto、外部图片不自动加载、DOMPurify 消毒），代码块和整条回答可以复制；没做成的回合可以“重试”、最后一条回答可以“重新生成”（都是把那一问原样再发一次，新的回合接在后面）；草稿按会话存在浏览器里；回答到了而人不在这个页面时在标签页标题上标出来；会话列表可以“加载更多”（最多 200 个，更早的到“会话记录”里找）；Esc 停止正在回答的回合，输入框空着时按 ↑ 把自己上一条发的消息放回来。
+
 **管理员回溯：回合详情、改动补丁、审计、通知、保留期、导出**（T-0252，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.2 的 B2、B3、B6、B7、B8）：
 
 - 过程里的命令多 `output`（平台给了才有，最多 8000 个字符，超过时 `truncated`）。

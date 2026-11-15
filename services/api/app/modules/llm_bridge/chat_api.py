@@ -23,6 +23,7 @@ from app.modules.llm_bridge.chat_schemas import (
     LlmChatCreateIn,
     LlmChatEventOut,
     LlmChatEventsOut,
+    LlmChatModelIn,
     LlmChatOptionsOut,
     LlmChatQueueEditIn,
     LlmChatQueueMoveIn,
@@ -308,6 +309,21 @@ async def llm_chat_move_queued(
 ) -> LlmChatQueueOut:
     row = await bridges.bridge(access.workspace.id, bridge_id)
     return await LlmChatService(bridges).change_queued(access, row, turn_id, to=body.to)
+
+
+@router.put(
+    f"{prefix}/sessions/{{session_id}}/model",
+    summary="聊天：换这个会话之后用的模型（admin）",
+    description="从下一回合起生效，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换；"
+    "ChatGPT / Codex 的会话 422 NOT_SUPPORTED（要换就新建会话）。",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_set_model(
+    access: Admin, bridges: Bridges, bridge_id: UUID, session_id: SessionId, body: LlmChatModelIn
+) -> LlmChatSessionOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).set_model(access, row, session_id, body.model)
 
 
 @router.patch(

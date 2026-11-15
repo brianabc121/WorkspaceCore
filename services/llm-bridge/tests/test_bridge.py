@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -600,7 +599,7 @@ async def test_dev_turn_leaves_a_patch_and_retention_clears_content(bridge: Brid
     assert not [o for o in again.get("outputs", []) if o["name"].endswith(".patch")]
     # 归档后工作目录删了，补丁还在
     await bridge.tool("c1", "llm_session_archive", {"session_id": a})
-    assert not os.path.isdir(workdir)
+    assert not await asyncio.to_thread(workdir.exists)
     kept = await bridge.admin("GET", f"/admin/sessions/{a}/attachments/{patch['id']}")
     assert kept.status_code == 200 and b"+new" in kept.content
 
