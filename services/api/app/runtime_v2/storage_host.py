@@ -632,8 +632,17 @@ class LinuxOps:
             raise StorageError("PVC name exists; UID replacement is not deletion proof")
         if get("pv", pv_name, "--ignore-not-found=true") is not None:
             raise StorageError("PV name exists; UID replacement is not deletion proof")
-        pods = get("pods", "--all-namespaces", "--chunk-size=0")
-        attachments = get("volumeattachments.storage.k8s.io", "--chunk-size=0")
+        # Preserve API list kind/resourceVersion; kubectl's list printer may rebuild List.
+        pods = _json(
+            self._execute_kube([*prefix, "get", "--raw", "/api/v1/pods"]).encode(),
+            8 * 1024**2,
+        )
+        attachments = _json(
+            self._execute_kube(
+                [*prefix, "get", "--raw", "/apis/storage.k8s.io/v1/volumeattachments"]
+            ).encode(),
+            8 * 1024**2,
+        )
         for value, kind in ((pods, "PodList"), (attachments, "VolumeAttachmentList")):
             if (
                 not isinstance(value, dict)

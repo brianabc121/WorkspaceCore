@@ -43,7 +43,14 @@ class RetireKernel(Kernel):
         self.kube_calls.append(argv)
         if self.fail_kube:
             raise StorageError("simulated Kubernetes timeout")
-        resource = argv[argv.index("get") + 1]
+        command = argv[argv.index("get") + 1 :]
+        resource = command[0]
+        if resource == "--raw":
+            assert len(command) == 2
+            resource = {
+                "/api/v1/pods": "pods",
+                "/apis/storage.k8s.io/v1/volumeattachments": "volumeattachments.storage.k8s.io",
+            }[command[1]]
         return json.dumps(self.objects[resource]) if self.objects[resource] is not None else ""
 
     def mount_references(
@@ -722,3 +729,73 @@ def test_namespace_pin_is_closed_if_validation_after_open_raises(
         for fd in opened:
             with suppress(OSError):
                 os.close(fd)
+
+
+def test_root_inventory_uses_raw_api_instead_of_kubectl_rebuilt_lists(
+    retired_host: RetiredHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host, kernel, req, _ = retired_host
+    kernel.objects["pods"]["metadata"]["resourceVersion"] = "150510"
+    kernel.objects["pods"]["items"] = [
+        {"metadata": {"name": f"unrelated-{index}", "namespace": "system"}, "spec": {"volumes": []}}
+        for index in range(11)
+    ]
+    kernel.objects["volumeattachments.storage.k8s.io"]["metadata"]["resourceVersion"] = "150510"
+    query = kernel._execute_kube
+    raw_calls: list[list[str]] = []
+    paths = {
+        "/api/v1/pods": "pods",
+        "/apis/storage.k8s.io/v1/volumeattachments": "volumeattachments.storage.k8s.io",
+    }
+
+    def actual_cli_shape(argv: list[str]) -> str:
+        command = argv[argv.index("get") + 1 :]
+        if command[0] == "--raw":
+            assert len(command) == 2
+            raw_calls.append(command)
+            return json.dumps(kernel.objects[paths[command[1]]])
+        if command[0] in ("pods", "volumeattachments.storage.k8s.io"):
+            # Observed kubectl1.35.10 rebuilds these lists and erases their API list RV.
+            return json.dumps(
+                {
+                    "apiVersion": "v1",
+                    "kind": "List",
+                    "metadata": {"resourceVersion": ""},
+                    "items": kernel.objects[command[0]]["items"],
+                }
+            )
+        return query(argv)
+
+    monkeypatch.setattr(kernel, "_execute_kube", actual_cli_shape)
+    audit = kernel.kube_audit(host.config, req, os.getuid(), False)
+    assert audit["pods_resource_version"] == "150510"
+    assert audit["attachments_resource_version"] == "150510"
+    assert raw_calls == [
+        ["--raw", "/api/v1/pods"],
+        ["--raw", "/apis/storage.k8s.io/v1/volumeattachments"],
+    ]
+
+
+@pytest.mark.parametrize("resource", ["pods", "volumeattachments.storage.k8s.io"])
+@pytest.mark.parametrize("damage", ["generic_kind", "empty_rv", "non_string_rv", "continue"])
+def test_raw_inventory_keeps_strict_kind_version_and_completeness_checks(
+    retired_host: RetiredHost, resource: str, damage: str
+) -> None:
+    host, kernel, req, ready = retired_host
+    inventory = kernel.objects[resource]
+    if damage == "generic_kind":
+        inventory["kind"] = "List"
+    elif damage == "empty_rv":
+        inventory["metadata"]["resourceVersion"] = ""
+    elif damage == "non_string_rv":
+        inventory["metadata"]["resourceVersion"] = 150510
+    else:
+        inventory["metadata"]["continue"] = "unread-page"
+    with pytest.raises(StorageError, match="incomplete or malformed"):
+        kernel.kube_audit(host.config, req, os.getuid(), False)
+    raw_commands = [argv[argv.index("get") + 1 :] for argv in kernel.kube_calls if "--raw" in argv]
+    assert raw_commands == [
+        ["--raw", "/api/v1/pods"],
+        ["--raw", "/apis/storage.k8s.io/v1/volumeattachments"],
+    ]
+    assert Path(ready["backing_path"]).exists()
