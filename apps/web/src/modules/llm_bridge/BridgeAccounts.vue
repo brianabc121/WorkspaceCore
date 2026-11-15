@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onUnmounted, reactive, ref } from 'vue'
+import { computed, onUnmounted, reactive, ref, toRef } from 'vue'
 import { RefreshCw } from '@lucide/vue'
 import ManagementSection from '../../components/management/ManagementSection.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import BridgeQuota from './BridgeQuota.vue'
+import BridgeConnectivity from './BridgeConnectivity.vue'
 import { ApiError } from '../../services/api'
 import { ACCOUNT_STATE, METHODS, MODES, PLATFORMS, PLATFORM_SLOT, bridgeError, methodName, platformName, seconds, type Account, type Bridge, type BridgeStatus, type LlmBridgeApi, type LoginBody, type LoginMethod, type Platform, type Slot } from './api'
 
@@ -14,6 +15,16 @@ const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeSt
 const emit = defineEmits<{ reload: [] }>()
 
 const POLL_MS = 3000
+// 平台连通性（T-0240）：这个管理器所在的服务器到各平台能不能用、延迟多少；管理器连得上才测
+const bridgeId = toRef(() => (props.status?.reachable ? props.bridge.id : null))
+const net = props.api.useConnectivity(bridgeId)
+const netBusy = ref(false), netError = ref('')
+async function recheckNet() {
+  if (netBusy.value) return
+  netBusy.value = true; netError.value = ''
+  try { await props.api.recheckConnectivity(props.bridge.id) } catch (e) { netError.value = bridgeError(e) } finally { netBusy.value = false }
+}
+const netFailed = computed(() => netError.value || (net.error.value ? bridgeError(net.error.value) : ''))
 const error = ref(''), notice = ref(''), busy = ref('')
 const login = reactive({ slot: null as Slot | null, method: 'api_key' as LoginMethod, secret: '' })
 const device = ref<{ slot: Slot; label: string; url: string; code: string } | null>(null)
@@ -169,6 +180,10 @@ function reset(account: Account) {
         <div><button type="button" class="secondary-button" @click="cancelDevice">不等了</button></div>
       </div>
 
+      <div class="lb-quota-head">
+        <p class="form-help">每个平台下面的“平台连通性”是这个 MCP 管理器所在的服务器访问这个平台的情况和延迟：有些服务器访问不了 ChatGPT / Claude，或者被平台拒绝，登录之前先看这里。</p>
+        <button type="button" class="secondary-button" :disabled="netBusy || net.isFetching.value" @click="recheckNet"><RefreshCw aria-hidden="true" />{{ netBusy || net.isFetching.value ? '正在检测…' : '重新检测连通性' }}</button>
+      </div>
       <div class="lb-accounts">
         <article v-for="a in accounts" :key="a.slot" class="lb-account" :class="{ 'is-off': !a.enabled }" :aria-label="`账号：${a.label}`">
           <div class="lb-account-head"><h3>{{ a.label }}</h3><span class="asv-state" :class="stateOf(a).tone">{{ stateOf(a).text }}</span></div>
@@ -179,6 +194,7 @@ function reset(account: Account) {
             <dt>首次登录</dt><dd>{{ seconds(a.first_login_at) }}</dd>
             <dt>进行中</dt><dd>{{ a.running }} 个回合</dd>
           </dl>
+          <BridgeConnectivity v-if="a.enabled" :data="net.data.value" :account="a.slot" :label="a.label" :loading="net.isPending.value || netBusy" :failed="netFailed" />
           <p v-if="a.detail" class="form-help">{{ a.detail }}</p>
           <p v-if="a.registered && a.state === 'logged_out'" class="form-help">这个管理器登记过这个平台的账号{{ a.identity ? `（${a.identity}）` : '' }}。重新登录同一个账号可以接着用原来的会话；要换成别的账号，先点“更换账号”。</p>
           <p v-if="a.state === 'mismatch'" role="note" class="lb-warn is-red">现在登录的账号，和这个管理器最初登记的不是同一个。为了不把两个账号的会话混在一起，这个平台已暂停使用。要继续用，只能点“更换账号”：这个管理器上这个平台的全部会话会被归档，然后登记新的账号。</p>

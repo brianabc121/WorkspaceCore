@@ -482,6 +482,12 @@ async function main() {
     check(typeof localId === 'string', '添加后应记下本机管理器是哪一个')
     const localStatus = await statusOf(localId)
     check(localStatus.reachable === true && localStatus.platforms.join() === 'codex,claude,workbuddy', `本机的管理器应连得上，控制勾选的平台：${JSON.stringify({ reachable: localStatus.reachable, platforms: localStatus.platforms, error: localStatus.error })}`)
+    // 平台连通性（T-0240）：由本机的管理器去测，每个平台逐个地址给出状态和延迟
+    const net = await api(page, workspace, 'GET', `/api/v1/llm_bridge/bridges/${localId}/connectivity`)
+    check(net.status === 200 && net.body.supported === true, `应能检测平台连通性：${JSON.stringify(net).slice(0, 300)}`)
+    check(net.body.slots.claude?.targets.length === 2 && net.body.slots.openai?.targets.length === 3, `每个平台应逐个地址给出结果：${JSON.stringify(net.body.slots).slice(0, 400)}`)
+    check(net.body.slots.claude.targets.every((t) => ['ok', 'blocked', 'unreachable'].includes(t.state) && (t.state === 'unreachable') === (t.latency_ms === null)), `状态只有三种；连不上的没有延迟，别的都有：${JSON.stringify(net.body.slots.claude.targets)}`)
+    await page.getByRole('group', { name: /^平台连通性：/ }).first().waitFor({ timeout: 30000 })
     const twice = await api(page, workspace, 'POST', '/api/v1/llm_bridge/local', { platforms: ['claude'] })
     check(twice.status === 409 && twice.body.error.code === 'LOCAL_EXISTS', `本机的管理器只能添加一次：${JSON.stringify(twice)}`)
     const retoken = await api(page, workspace, 'PATCH', `/api/v1/llm_bridge/bridges/${localId}`, { token: 'x'.repeat(40) })
@@ -490,7 +496,7 @@ async function main() {
     acceptNext(page)
     await card(page, '本机').getByRole('button', { name: '删除本机' }).click()
     await page.getByText('已删除「本机」。').waitFor()
-    step('本机部署：默认选中“本机”，不选服务器、不填地址令牌密码，点一下就添加好并连得上；只能添加一次，令牌不能在页面上改')
+    step('本机部署：默认选中“本机”，不选服务器、不填地址令牌密码，点一下就添加好并连得上；页面和接口给出各平台的连通性与延迟；只能添加一次，令牌不能在页面上改')
 
     check(problems.length === 0, `检查过程中出现错误：\n  ${problems.join('\n  ')}`)
     console.log('大模型客户端管理浏览器验收全部通过')

@@ -52,6 +52,7 @@ function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, wo
     if (p === '/api/v1/modules' && r.method === 'GET') return Response.json({ items: [newsModule, lbModule] })
     if (p === `${api}/bridges` && r.method === 'GET') return Response.json({ bridges: world.bridges })
     if (/\/bridges\/[^/]+\/status$/.test(p)) return Response.json(status)
+    if (/\/bridges\/[^/]+\/connectivity$/.test(p)) return Response.json({ supported: true, slots: {} })
     if (p === `${api}/grants`) return Response.json({ grants: [] })
     if (p === `${api}/local` && r.method === 'GET') return Response.json(world.local)
     if (/\/bridges\/[^/]+\/environments$/.test(p)) return Response.json({ environments: [] })

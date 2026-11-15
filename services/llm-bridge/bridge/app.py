@@ -259,6 +259,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "detail": account["detail"],
         }
 
+    @app.get("/admin/connectivity")
+    async def admin_connectivity(
+        request: Request, _: Admin, refresh: bool = False
+    ) -> dict[str, Any]:
+        return await engine_of(request).connectivity(refresh)
+
     @app.post("/admin/accounts/{slot}/login")
     async def admin_login(request: Request, slot: str, body: LoginBody, _: Admin) -> dict[str, Any]:
         payload = {

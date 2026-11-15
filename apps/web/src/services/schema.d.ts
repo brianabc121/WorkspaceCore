@@ -3357,6 +3357,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/connectivity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * MCP 管理器所在的服务器到各平台能不能用、延迟多少（admin）
+         * @description 由管理器去访问各平台的地址（不带凭据）：ok 可用；blocked 连得上但被平台拒绝（这台服务器的 IP 或地区不被允许）；unreachable 连不上。结果一分钟内复用，refresh=true 时重新测。旧版本的管理器 supported 为 false。
+         */
+        get: operations["llm_bridge_bridge_connectivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/environments": {
         parameters: {
             query?: never;
@@ -11434,6 +11454,81 @@ export interface components {
             platform: string;
             /** Slot */
             slot: string;
+        };
+        /**
+         * LlmBridgeConnectivityOut
+         * @description 管理器所在的服务器到各平台的连通性与延迟（T-0240）。
+         *
+         *     键是账号槽位：openai / claude / workbuddy。
+         */
+        LlmBridgeConnectivityOut: {
+            /** Slots */
+            slots: {
+                [key: string]: components["schemas"]["LlmBridgeConnectivitySlotOut"];
+            };
+            /**
+             * Supported
+             * @description 这个管理器的版本支持检测；旧版本为 false
+             */
+            supported: boolean;
+        };
+        /** LlmBridgeConnectivitySlotOut */
+        LlmBridgeConnectivitySlotOut: {
+            /**
+             * Checked At
+             * @description 什么时候测的
+             */
+            checked_at: number;
+            /**
+             * Need
+             * @description all：列出的地址都要可用；any：有一个可用就行
+             */
+            need: string;
+            /**
+             * Ok
+             * @description 这个平台在管理器所在的服务器上能不能用
+             */
+            ok: boolean;
+            /** Targets */
+            targets: components["schemas"]["LlmBridgeConnectivityTargetOut"][];
+        };
+        /** LlmBridgeConnectivityTargetOut */
+        LlmBridgeConnectivityTargetOut: {
+            /**
+             * Error
+             * @description 不可用时的说明
+             */
+            error?: string | null;
+            /**
+             * Host
+             * @description 平台的地址（域名）
+             */
+            host: string;
+            /**
+             * Http Status
+             * @description 平台回的 HTTP 状态码
+             */
+            http_status?: number | null;
+            /**
+             * Label
+             * @description 这个地址是做什么用的
+             */
+            label: string;
+            /**
+             * Latency Ms
+             * @description 从发起到收到应答的毫秒数；连不上时为空
+             */
+            latency_ms: number | null;
+            /**
+             * Ok
+             * @description 可用：连得上，平台也正常应答
+             */
+            ok: boolean;
+            /**
+             * State
+             * @description ok 可用；blocked 连得上但被平台拒绝（这台服务器的 IP 或地区不被允许）；unreachable 连不上
+             */
+            state: string;
         };
         /** LlmBridgeDeployIn */
         LlmBridgeDeployIn: {
@@ -35429,6 +35524,79 @@ export interface operations {
             };
             /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_bridge_connectivity: {
+        parameters: {
+            query?: {
+                /** @description 重新测一次 */
+                refresh?: boolean;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeConnectivityOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

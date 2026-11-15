@@ -731,3 +731,40 @@ async def test_platform_failure_at_login_shows_the_reason(rig: Rig) -> None:  # 
         json={"method": "api_key", "api_key": "k" * 20},
     )
     assert done.status_code == 200, done.text
+
+
+async def test_connectivity_is_measured_by_the_manager(rig: Rig) -> None:  # noqa: F811
+    """到各平台能不能用、延迟多少：由管理器在它那台服务器上测，工作台原样给页面。"""
+    engine = rig.bridge_app.state.engine
+    calls: list[str] = []
+
+    async def probe(target: Any) -> dict[str, Any]:
+        calls.append(target.host)
+        if target.host == "claude.ai":
+            note = "平台拒绝了这台服务器的访问（HTTP 403）"
+            return {"state": "blocked", "latency_ms": 9, "http_status": 403, "error": note}
+        return {"state": "ok", "latency_ms": 37, "http_status": 401, "error": None}
+
+    engine.probe_host = probe
+    path = f"/bridges/{rig.bridge_id}/connectivity"
+    data = (await rig.api("GET", path)).json()
+    assert data["supported"] is True and set(data["slots"]) == {"openai", "claude", "workbuddy"}
+    claude = data["slots"]["claude"]
+    assert claude["ok"] is False and claude["need"] == "all"
+    blocked = claude["targets"][1]
+    assert (blocked["host"], blocked["state"], blocked["ok"], blocked["latency_ms"]) == (
+        "claude.ai",
+        "blocked",
+        False,
+        9,
+    )
+    assert data["slots"]["openai"]["ok"] is True
+    count = len(calls)
+    await rig.api("GET", path)
+    assert len(calls) == count  # 一分钟内复用
+    await rig.api("GET", path, params={"refresh": "true"})
+    assert len(calls) == count * 2
+    async with login_as(rig, "net-member@example.com", "member") as member:
+        scope = {"X-Workspace-Id": rig.env.workspace_id}
+        denied = await member.get(f"/api/v1/llm_bridge{path}", headers=scope)
+        assert denied.status_code == 403

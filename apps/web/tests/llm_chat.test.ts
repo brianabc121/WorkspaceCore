@@ -63,6 +63,7 @@ function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, wo
     const group = /^\/api\/v1\/llm_bridge\/chat\/groups\/([^/]+)$/.exec(p)
     if (group && r.method === 'GET') { const found = world.groups.find(g => g.id === group[1]); return found ? Response.json(found) : fail(404, 'NOT_FOUND') }
     if (/^\/api\/v1\/llm_bridge\/bridges\/[^/]+\/status$/.test(p)) return Response.json(status())
+    if (/^\/api\/v1\/llm_bridge\/bridges\/[^/]+\/connectivity$/.test(p)) return Response.json({ supported: true, slots: {} })
     const found = /^\/api\/v1\/llm_bridge\/bridges\/[^/]+\/chat(\/.*)$/.exec(p)
     if (!found || r.method !== 'GET') return undefined
     const rest = found[1]!

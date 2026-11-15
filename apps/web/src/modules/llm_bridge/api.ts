@@ -15,6 +15,8 @@ export type BridgeStatus = Schema['LlmBridgeStatusOut']
 export type Account = Schema['LlmBridgeAccountOut']
 export type BridgeSettings = Schema['LlmBridgeSettings']
 export type Quota = Schema['LlmBridgeQuotaOut']
+export type Connectivity = Schema['LlmBridgeConnectivityOut']
+export type ConnectivityTarget = Schema['LlmBridgeConnectivityTargetOut']
 export type QuotaWindow = Schema['LlmBridgeQuotaWindowOut']
 export type SettingsPatch = Schema['LlmBridgeSettingsPatch']
 export type LoginBody = Schema['LlmBridgeLoginIn']
@@ -204,6 +206,14 @@ export function useLlmBridge(scope: string) {
     async saveSettings(id: string, body: SettingsPatch) {
       const out = dataOf(await auth.api.PUT('/api/v1/llm_bridge/bridges/{bridge_id}/settings', { params: at(id), body }))
       await invalidate('bridge', id, 'status'); return out
+    },
+    // 管理器所在的服务器到各平台能不能用、延迟多少（T-0240）：打开“平台与账号”时测一次，管理器那边一分钟内复用结果
+    useConnectivity: (id: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'connectivity')), enabled: computed(() => active() && !!id.value), staleTime: 60000, retry: false,
+      queryFn: async ({ signal }) => dataOf(await auth.slowApi.GET('/api/v1/llm_bridge/bridges/{bridge_id}/connectivity', { params: at(id.value!), signal })) }),
+    // 重新测一次
+    async recheckConnectivity(id: string) {
+      const out = dataOf(await auth.slowApi.GET('/api/v1/llm_bridge/bridges/{bridge_id}/connectivity', { params: { ...at(id), query: { refresh: true } } }))
+      cache.setQueryData(key(user, scope, 'bridge', id, 'connectivity'), out); return out
     },
     // 向能随时查的平台（Codex）实查一次额度，再重新读状态
     async refreshQuota(id: string) {

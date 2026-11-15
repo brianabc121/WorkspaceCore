@@ -41,6 +41,7 @@ function setup(role: Role, handler?: (r: Request) => Response | undefined | Prom
     if (p === '/api/v1/modules' && r.method === 'GET') return Response.json({ items: [newsModule, lbModule] })
     if (p === '/api/v1/llm_bridge/bridges' && r.method === 'GET') return Response.json({ bridges })
     if (p === `${base}/status`) return Response.json(status())
+    if (p === `${base}/connectivity`) return Response.json({ supported: true, slots: {} })
     if (p === '/api/v1/llm_bridge/grants') return Response.json({ grants: [grant()] })
     // 一键部署（T-0234）在这个文件里按“不可用”处理：添加管理器走手动填写；一键部署见 llm_bridge_deploy.test.ts
     if (p === '/api/v1/llm_bridge/local' && r.method === 'GET') return Response.json({ available: false, bridge_id: null, taken: false })
@@ -476,6 +477,49 @@ describe('大模型客户端管理', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: '向平台查一次' }))
     await waitFor(() => expect(requests.some(r => path(r) === `${base}/quota` && new URL(r.url).searchParams.get('refresh') === 'true')).toBe(true))
+    expect(writes(requests)).toEqual([])
+  })
+
+  it('shows whether the manager\u2019s server can use each platform, with latency, and rechecks on request', async () => {
+    const target = (host: string, label: string, state: string, latency_ms: number | null, error: string | null = null): Schema['LlmBridgeConnectivityTargetOut'] => ({ host, label, ok: state === 'ok', state, latency_ms, http_status: state === 'unreachable' ? null : state === 'ok' ? 401 : 403, error })
+    const first: Schema['LlmBridgeConnectivityOut'] = { supported: true, slots: {
+      openai: { ok: false, need: 'all', checked_at: 1794528000, targets: [
+        target('chatgpt.com', 'ChatGPT（订阅登录、对话）', 'ok', 35),
+        target('auth.openai.com', 'OpenAI 登录（设备码）', 'blocked', 12, '平台拒绝了这台服务器的访问（HTTP 403，拦截页）'),
+        target('api.openai.com', 'OpenAI API（API 密钥）', 'unreachable', null, '超时（8 秒内没有应答）'),
+      ] },
+      claude: { ok: true, need: 'all', checked_at: 1794528000, targets: [target('api.anthropic.com', 'Anthropic API', 'ok', 1800), target('claude.ai', 'Claude（订阅登录）', 'ok', 90)] },
+    } }
+    const fixed: Schema['LlmBridgeConnectivityOut'] = { supported: true, slots: { ...first.slots, openai: { ok: true, need: 'all', checked_at: 1794528060, targets: first.slots.openai!.targets.map(t => target(t.host, t.label, 'ok', 40)) } } }
+    const requests = setup('owner', r => {
+      if (path(r) !== `${base}/connectivity`) return undefined
+      return Response.json(new URL(r.url).searchParams.get('refresh') === 'true' ? fixed : first)
+    })
+    await openApp('/llm_bridge?view=manage')
+    const openai = await screen.findByRole('group', { name: '平台连通性：OpenAI（ChatGPT / Codex）' })
+    expect(await within(openai).findByText('这台服务器用不了')).toBeVisible()
+    const rows = within(openai).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('chatgpt.com')
+    expect(rows[0]).toHaveTextContent('可用')
+    expect(rows[0]).toHaveTextContent('35 ms')
+    // 连得上但被平台拒绝：延迟照样显示，并写明原因
+    expect(rows[1]).toHaveTextContent('被平台拒绝')
+    expect(rows[1]).toHaveTextContent('12 ms')
+    expect(rows[1]).toHaveTextContent('平台拒绝了这台服务器的访问（HTTP 403，拦截页）')
+    expect(rows[2]).toHaveTextContent('连不上')
+    expect(rows[2]).toHaveTextContent('超时（8 秒内没有应答）')
+    expect(within(openai).getByRole('alert')).toHaveTextContent(/用不了OpenAI（ChatGPT \/ Codex）：登录和对话都会失败。\s*网络是通的，但平台拒绝了这台服务器/)
+    // 可用但延迟高：提醒一句
+    const claude = screen.getByRole('group', { name: '平台连通性：Claude' })
+    expect(within(claude).getAllByText('可用').length).toBeGreaterThan(0)
+    expect(within(claude).getByText('1800 ms')).toBeVisible()
+    expect(within(claude).getByText('延迟比较高：能用，但登录和回答会慢一些。')).toBeVisible()
+    expect(within(claude).queryByRole('alert')).not.toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: '重新检测连通性' }))
+    await waitFor(() => expect(within(openai).queryByRole('alert')).not.toBeInTheDocument())
+    expect(within(openai).getAllByText('40 ms')).toHaveLength(3)
+    expect(requests.some(r => path(r) === `${base}/connectivity` && new URL(r.url).searchParams.get('refresh') === 'true')).toBe(true)
     expect(writes(requests)).toEqual([])
   })
 

@@ -30,6 +30,7 @@ from app.modules.llm_bridge.schemas import (
     ALL_PLATFORMS,
     LlmBridgeAccountOut,
     LlmBridgeChannelOut,
+    LlmBridgeConnectivityOut,
     LlmBridgeGrantIn,
     LlmBridgeGrantOut,
     LlmBridgeIn,
@@ -457,6 +458,22 @@ class LlmBridgeService:
             for platform, row in data.items()
             if platform in ALL_PLATFORMS and isinstance(row, dict)
         }
+
+    async def connectivity(self, row: LlmBridge, *, refresh: bool) -> LlmBridgeConnectivityOut:
+        """管理器所在的服务器到各平台能不能用、多慢。由管理器去测：要看的是它那台服务器的网络。"""
+        path = f"/connectivity?refresh={'true' if refresh else 'false'}"
+        try:
+            data = await (await self.client(row)).admin("GET", path)
+        except BridgeCallError as error:
+            raise from_bridge(error) from error
+        except ConnectorError as error:
+            if error.reason == "invalid_response":  # 旧版本的管理器没有这个接口
+                return LlmBridgeConnectivityOut(supported=False, slots={})
+            raise unavailable(error) from error
+        slots = data.get("slots") if isinstance(data, dict) else None
+        return LlmBridgeConnectivityOut(
+            supported=True, slots=slots if isinstance(slots, dict) else {}
+        )
 
     async def quota(self, row: LlmBridge, *, refresh: bool) -> LlmBridgeQuotaList:
         """各平台的额度；refresh 时让管理器向能随时查的平台实查一次。"""
