@@ -509,6 +509,110 @@ async def test_requirement_example_end_to_end(rig: Rig) -> None:
 
 
 @pytest.mark.integration
+async def test_grant_limits_follow_the_session_and_protections_hold(rig: Rig) -> None:
+    """例外九写的保护（T-0247）：平台限制跟着会话走、开发环境要管理员勾选、发出去的内容过密钥扫描；
+    接手别人的会话和被限额拒绝都通知管理员；新建会话带幂等号不会建出两个。"""
+    env = rig.env
+    owner = await rig.agent("openclaw-1", can_write=True)
+
+    async def send(token: str, sid: str, text: str, rid: str) -> dict[str, Any]:
+        args = {"session_id": sid, "text": text, "request_id": rid, "wait_seconds": 10}
+        return await call(env, token, "llm_bridge_send", args)
+
+    args = {"platform": "claude", "mode": "chat", "request_id": "create-1"}
+    created = ok(await call(env, owner, "llm_bridge_session_create", args))
+    session = created["session_id"]
+    # 同一个幂等号再建一次：还是这个会话
+    assert ok(await call(env, owner, "llm_bridge_session_create", args))["session_id"] == session
+    first = ok(await send(owner, session, "你好", "r1"))
+
+    # 只给了 Codex 的实例：有接手权限，也碰不了 Claude 的会话（这些调用都不带 platform 参数）
+    limited = await rig.agent(
+        "codex-only", can_write=True, can_account=True, can_takeover=True, platforms=["codex"]
+    )
+    for name, arguments in (
+        ("llm_bridge_session_get", {"session_id": session}),
+        ("llm_bridge_turn_get", {"turn_id": first["turn_id"]}),
+        ("llm_bridge_turn_cancel", {"turn_id": first["turn_id"]}),
+        ("llm_bridge_queue", {"session_id": session}),
+        ("llm_bridge_session_archive", {"session_id": session}),
+    ):
+        assert tool_error(await call(env, limited, name, arguments))["code"] == "NOT_FOUND", name
+    assert tool_error(await send(limited, session, "插话", "x1"))["code"] == "NOT_FOUND"
+    seen = ok(await call(env, limited, "llm_bridge_session_list", {"scope": "account"}))
+    assert seen["sessions"] == []
+    overview = ok(await call(env, limited, "llm_bridge_status", {}))
+    assert "claude" not in overview["accounts"]
+
+    # 发出去的内容像密钥：不发、不建回合
+    secret = "ghp_" + "a1B2c3D4e5" * 4
+    blocked = tool_error(await send(owner, session, f"用这个令牌 {secret}", "s1"))
+    assert blocked["code"] == "VALIDATION_FAILED" and "密钥" in blocked["message"]
+    assert secret not in str(blocked)
+    detail = ok(await call(env, owner, "llm_bridge_session_get", {"session_id": session}))
+    assert [m["text"] for m in detail["messages"]] == ["你好", "[fake-1] 你好"]
+    # 人在聊天页发也一样
+    typed = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/chat/sessions/{session}/messages",
+        json={"text": f"token: {secret}", "request_id": "h1", "takeover": True},
+    )
+    assert typed.status_code == 422 and secret not in typed.text
+
+    # 开发环境：管理员没勾选的看不到、用不了；勾选之后才行
+    made = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/environments",
+        json={"platform": "claude", "name": "空目录", "sandbox": "exec"},
+    )
+    assert made.status_code == 201, made.text
+    env_id = made.json()["id"]
+    dev = {"platform": "claude", "mode": "dev"}
+    assert ok(await call(env, owner, "llm_bridge_environments", dev))["environments"] == []
+    refused = tool_error(
+        await call(env, owner, "llm_bridge_session_create", {**dev, "environment": env_id})
+    )
+    assert refused["code"] == "FORBIDDEN_CAPABILITY" and "开发环境" in refused["message"]
+    instance = next(
+        g["instance_id"]
+        for g in (await rig.api("GET", "/grants")).json()["grants"]
+        if g["instance_name"] == "openclaw-1"
+    )
+    await rig.grant(instance, can_write=True, environment_ids=[env_id])
+    listed = ok(await call(env, owner, "llm_bridge_environments", dev))["environments"]
+    assert [e["id"] for e in listed] == [env_id]
+    built = ok(await call(env, owner, "llm_bridge_session_create", {**dev, "environment": env_id}))
+    assert built["mode"] == "dev"
+    # 没有“新建和发送”时开发环境一并收回
+    off = await rig.api(
+        "PUT", f"/grants/{instance}", json={"enabled": True, "environment_ids": [env_id]}
+    )
+    assert off.json()["environment_ids"] == []
+    await rig.grant(instance, can_write=True)
+
+    # 接手别人的会话发消息：通知管理员，链接直接到那个会话
+    boss = await rig.agent("boss", can_write=True, can_takeover=True)
+    taken = ok(await send(boss, session, "接手", "b1"))
+    assert taken["takeover"] is True
+    notes = (await env.get("/api/v1/notifications"))["items"]
+    takeover = next(n for n in notes if n["type"] == "llm_bridge.takeover_sent")
+    assert "boss" in takeover["title"]
+    assert takeover["link"] == f"/llm_bridge?m={rig.bridge_id}&s={session}"
+    made_note = next(n for n in notes if n["type"] == "llm_bridge.session_created")
+    assert made_note["link"].startswith(f"/llm_bridge?m={rig.bridge_id}&s=bs_")
+
+    # 被发送限额拒绝：通知管理员（同一个实例一个小时只一条）
+    limit = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"send_per_hour": 1})
+    assert limit.status_code == 200, limit.text
+    for request_id in ("o2", "o3"):
+        over = tool_error(await send(owner, session, "再来", request_id))
+        assert over["code"] == "RATE_LIMITED"
+    notes = (await env.get("/api/v1/notifications"))["items"]
+    limited_notes = [n for n in notes if n["type"] == "llm_bridge.rate_limited"]
+    assert len(limited_notes) == 1 and "openclaw-1" in limited_notes[0]["title"]
+
+
+@pytest.mark.integration
 async def test_tool_failures_are_explicit(rig: Rig) -> None:
     env = rig.env
     token = await rig.agent("alpha", can_write=True)

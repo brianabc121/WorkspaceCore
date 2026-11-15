@@ -87,6 +87,8 @@
 .lb-quota { display: grid; gap: 8px; }
 .lb-quota-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .lb-quota-head h3, .lb-quota h4 { margin: 0; }
+.lb-grant-envs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.lb-grant-envs-name { font-weight: 600; font-size: .85rem; }
 .lb-windows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .lb-window-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .lb-windows progress { width: 100%; height: 8px; accent-color: var(--accent); }

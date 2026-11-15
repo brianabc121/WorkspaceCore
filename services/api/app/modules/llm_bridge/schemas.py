@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -360,6 +360,12 @@ class LlmBridgeGrantIn(_In):
         description="允许用的 MCP 管理器；不填（null）表示都允许，包括以后新增的；"
         "空列表表示一个都不允许",
     )
+    environment_ids: list[Annotated[str, Field(pattern=r"^be_[0-9a-f]{20}$")]] = Field(
+        default=[],
+        max_length=200,
+        description="允许用的开发环境（环境编号）；空列表表示一个都不能用，"
+        "这个实例就不能新建开发会话",
+    )
 
 
 class LlmBridgeGrantOut(BaseModel):
@@ -373,6 +379,7 @@ class LlmBridgeGrantOut(BaseModel):
     bridge_ids: list[UUID] | None = Field(
         description="允许用的 MCP 管理器；null 表示都允许，空列表表示一个都不允许"
     )
+    environment_ids: list[str] = Field(description="允许用的开发环境；空列表表示一个都不能用")
 
 
 class LlmBridgeGrantList(BaseModel):

@@ -30,7 +30,7 @@ const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBr
   channels: [{ platform: 'codex', mode: 'dev', slot: 'openai', enabled: true, available: true, note: '' }, { platform: 'claude', mode: 'cloud', slot: 'claude', enabled: true, available: false, note: '云端通道还没有实现' }],
   ...over,
 })
-const grant = (over: Partial<Schema['LlmBridgeGrantOut']> = {}): Schema['LlmBridgeGrantOut'] => ({ instance_id: INSTANCE, instance_name: '甲', enabled: true, can_write: true, can_account: true, can_takeover: false, platforms: ['codex'], bridge_ids: null, ...over })
+const grant = (over: Partial<Schema['LlmBridgeGrantOut']> = {}): Schema['LlmBridgeGrantOut'] => ({ instance_id: INSTANCE, instance_name: '甲', enabled: true, can_write: true, can_account: true, can_takeover: false, platforms: ['codex'], bridge_ids: null, environment_ids: [], ...over })
 
 function setup(role: Role, handler?: (r: Request) => Response | undefined | Promise<Response | undefined>, bridges = [bridge]) {
   return mockApi(async r => {
@@ -284,6 +284,28 @@ describe('大模型客户端管理', () => {
     expect(await screen.findByText('已归档 3 个会话；现在可以登录新的账号。')).toBeVisible()
   })
 
+  it('lets the owner pick which development environments an instance may use; none means no dev sessions', async () => {
+    let current = grant()
+    const ENV = 'be_0123456789abcdef0123'
+    const requests = setup('owner', async r => {
+      if (path(r) === '/api/v1/llm_bridge/grants') return Response.json({ grants: [current] })
+      if (path(r) === `/api/v1/llm_bridge/grants/${INSTANCE}` && r.method === 'PUT') { current = { ...current, ...(await r.clone().json()) }; return Response.json(current) }
+      if (path(r) === `${base}/environments` && r.method === 'GET') return Response.json({ environments: [{ id: ENV, platform: 'codex', mode: 'dev', name: '工作台仓库', enabled: true, repo_url: '', branch: '', sandbox: 'exec', network: false, description: '' }] })
+      return undefined
+    })
+    await openApp('/llm_bridge?view=manage')
+    const row = await screen.findByRole('group', { name: '实例权限：甲' })
+    const envs = within(row).getByRole('group', { name: '甲可用的开发环境' })
+    expect(within(envs).getByText('可用的开发环境（现在：一个都不能用）')).toBeVisible()
+    const box = await within(envs).findByLabelText(/工作台仓库（Codex，/)
+    expect(box).not.toBeChecked()
+    await fireEvent.click(box)
+    await screen.findByText('已保存「甲」的权限。')
+    await waitFor(() => expect(within(row).getByLabelText(/工作台仓库（Codex，/)).toBeChecked())
+    const bodies = await Promise.all(writes(requests).map(r => r.clone().json()))
+    expect(bodies).toEqual([{ enabled: true, can_write: true, can_account: true, can_takeover: false, platforms: ['codex'], bridge_ids: null, environment_ids: [ENV] }])
+  })
+
   it('sends the whole grant on every toggle; disabling clears the flags but keeps the chosen platforms', async () => {
     let current = grant()
     const requests = setup('owner', async r => {
@@ -308,10 +330,10 @@ describe('大模型客户端管理', () => {
 
     const bodies = await Promise.all(writes(requests).map(r => r.clone().json()))
     expect(bodies).toEqual([
-      { enabled: true, can_write: true, can_account: true, can_takeover: true, platforms: ['codex'], bridge_ids: null },
-      { enabled: true, can_write: true, can_account: true, can_takeover: true, platforms: ['codex', 'claude'], bridge_ids: null },
+      { enabled: true, can_write: true, can_account: true, can_takeover: true, platforms: ['codex'], bridge_ids: null, environment_ids: [] },
+      { enabled: true, can_write: true, can_account: true, can_takeover: true, platforms: ['codex', 'claude'], bridge_ids: null, environment_ids: [] },
       // 关掉时三项权限收回，已选的平台保留（再打开时不用重选）
-      { enabled: false, can_write: false, can_account: false, can_takeover: false, platforms: ['codex', 'claude'], bridge_ids: null },
+      { enabled: false, can_write: false, can_account: false, can_takeover: false, platforms: ['codex', 'claude'], bridge_ids: null, environment_ids: [] },
     ])
     for (const name of ['新建会话和发送', '查看账号下全部会话', '接手别人的会话']) { expect(within(row).getByLabelText(name)).not.toBeChecked(); expect(within(row).getByLabelText(name)).toBeDisabled() }
   })

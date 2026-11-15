@@ -913,6 +913,15 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 | `llm_bridge_session_list` / `llm_bridge_session_get` / `llm_bridge_turn_get` | read | 会话列表（`scope=account` 需要 `can_account`）；会话内容（别人的会话需要 `can_takeover`）；回合状态与结果 |
 | `llm_bridge_session_create` / `llm_bridge_send` / `llm_bridge_turn_cancel` / `llm_bridge_session_archive` | direct | 需要 `can_write`；直接执行、不审批，记执行记录；新建会话通知管理员（`llm_bridge.session_created`）。依据是 `docs/AGENTS.md` 的例外九（人类 2026-11-13 批准） |
 
+**权限与保护的补充**（T-0247，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 第 2 节）：
+
+- 实例权限多一项 `environment_ids`：这个实例能用的开发环境（环境编号）。默认空列表——一个都不能用，新建开发会话返回 `FORBIDDEN_CAPABILITY`，`llm_bridge_environments` 也只列出勾选的。没有 `can_write` 时保存下来的是空列表。
+- 管理员给实例选的平台随每次调用带给管理器（请求头 `X-Bridge-Platforms`），由管理器按**会话所属的平台**检查：发送、取回合、读会话、取消、归档这些不带 `platform` 参数的调用同样受限，不属于允许平台的会话按“没有这个会话”回答；`llm_bridge_status` 只给出允许的平台。
+- 要发给平台的内容（智能体的 `text` / `title`，人在聊天页发的消息、新建会话的第一条、同问的问题、修改排队中的消息）先过工作台的密钥扫描：像令牌、私钥的返回 `VALIDATION_FAILED`（接口是 422），不发、不存。
+- `llm_bridge_session_create` 多一个可选的 `request_id`：同一个实例用同一个重试，得到的是同一个会话。没等到回答时的提示按工具给出，不再让没有幂等号的调用“直接重试”。
+- `llm_bridge_send` 发到不是自己建的会话时，结果里有 `takeover: true`。
+- 通知管理员：新建会话（原有）、接手发送（`llm_bridge.takeover_sent`）、被发送限额拒绝（`llm_bridge.rate_limited`，同一个实例一小时一条）。前两种的链接直接到聊天页的那个会话。
+
 结果统一是 `{bridge, data}`，`data` 是会话桥返回的内容。回合的 `data.status`：`queued` / `running` / `completed`（带 `result`、`summary`）/
 `failed` / `unknown`（带 `failure.kind`、`failure.message`）/ `cancelled`。错误码：`FORBIDDEN_CAPABILITY`（没有授权、平台不在允许范围、管理员没有给这个实例开任何 MCP 管理器）、
 `NOT_FOUND`（包括 `bridge` 填了没有授权的管理器）、`VALIDATION_FAILED`、`CONFLICT`（会话已归档、`request_id` 用在了别的会话）、`RATE_LIMITED`、`NOT_SUPPORTED`（接口桩通道、这座桥没有控制这个平台）、

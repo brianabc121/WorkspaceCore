@@ -41,6 +41,14 @@ class SessionCreateInput(ChannelInput):
     )
     title: str = Field(default="", max_length=120, description="会话标题；不填用第一条消息")
     effort: str | None = Field(default=None, max_length=20, description="推理强度（平台支持时）")
+    request_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[\w.\-:]+$",
+        description="幂等号（建议带）：开发会话要先克隆仓库，可能等不到结果；"
+        "用同一个 request_id 重试得到的是同一个会话，不会建出两个",
+    )
 
 
 class SendInput(_Input):

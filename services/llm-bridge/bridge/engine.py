@@ -110,6 +110,12 @@ class Caller:
     id: str
     label: str
     scopes: frozenset[str]
+    # 这个调用方只能用哪些平台；None 是不限（人在聊天页、桥自己的调用方）。
+    # 由工作台按管理员给实例选的平台带过来，在这里按会话所属的平台检查（T-0247）。
+    platforms: frozenset[str] | None = None
+
+    def may_use(self, platform: str) -> bool:
+        return self.platforms is None or platform in self.platforms
 
     def can(self, scope: str) -> bool:
         return scope in self.scopes
@@ -169,6 +175,7 @@ class Engine:
         self.probe_host: Any = net.probe
         # 被插入的消息打断的回合 → 打断它的那个新回合
         self._superseded: dict[str, str] = {}
+        self._creating: dict[tuple[str, str], asyncio.Future[Row]] = {}
         self._limiters: dict[str, SlotLimiter] = {}
         # 额度用完后的暂停与续跑（T-0237）
         self._pause_wake: dict[str, asyncio.Event] = {}
@@ -513,8 +520,47 @@ class Engine:
         environment: str | None = None,
         title: str = "",
         effort: str | None = None,
+        request_id: str | None = None,
     ) -> Row:
+        """新建会话。带 request_id 时同一个调用方重试得到的是同一个会话：
+        克隆仓库可能比调用方等的时间长，调用方超时后重试不能建出两个。"""
         self._need(caller, "write")
+        if not caller.may_use(platform):
+            raise BridgeError("FORBIDDEN", f"管理员没有给你开 {platform} 这个平台")
+        if request_id is None:
+            return await self._create_session(
+                caller, platform, mode, model, environment, title, effort, None
+            )
+        if not _REQUEST_ID_RE.match(request_id):
+            raise BridgeError(
+                "VALIDATION_FAILED", "request_id 只能用字母、数字和 . - _ :，最多 100 个字符"
+            )
+        existing = self.store.session_by_request(caller.id, request_id)
+        if existing is not None:
+            return session_view(existing, full=True)
+        key = (caller.id, request_id)
+        task = self._creating.get(key)
+        if task is None:  # 同一个幂等号的另一次调用还在建：等它，不再建一个
+            task = asyncio.ensure_future(
+                self._create_session(
+                    caller, platform, mode, model, environment, title, effort, request_id
+                )
+            )
+            self._creating[key] = task
+            task.add_done_callback(lambda _: self._creating.pop(key, None))
+        return await asyncio.shield(task)
+
+    async def _create_session(
+        self,
+        caller: Caller,
+        platform: str,
+        mode: str,
+        model: str | None,
+        environment: str | None,
+        title: str,
+        effort: str | None,
+        request_id: str | None,
+    ) -> Row:
         channel = self._channel(platform, mode)
         await self.require_ready(channel.slot)
         options: Row = {"sandbox": "read_only", "network": False}
@@ -580,6 +626,7 @@ class Engine:
             title=" ".join(title.split())[:120],
             workdir=str(workdir),
             options=options,
+            request_id=request_id,
         )
         self.store.add_event(session_id, None, "created", {"by": caller.label, "model": picked})
         return session_view(session, full=True)
@@ -590,6 +637,8 @@ class Engine:
 
     def _session(self, caller: Caller, session_id: str, *, metadata_only: bool = False) -> Row:
         session = self.store.get_session(session_id)
+        if session is not None and not caller.may_use(session["platform"]):
+            session = None  # 管理员没给这个平台：和“不存在”一样回答
         if session is not None and (
             session["caller_id"] == caller.id
             or caller.can("takeover")
@@ -660,12 +709,15 @@ class Engine:
             )
         else:
             raise BridgeError("VALIDATION_FAILED", "scope 只能是 mine 或 account")
+        more = len(rows) > limit
         items = [
-            {**session_view(row), "mine": row["caller_id"] == caller.id} for row in rows[:limit]
+            {**session_view(row), "mine": row["caller_id"] == caller.id}
+            for row in rows[:limit]
+            if caller.may_use(row["platform"])
         ]
         return {
             "sessions": items,
-            "next_offset": offset + limit if len(rows) > limit else None,
+            "next_offset": offset + limit if more else None,
             "note": note,
         }
 
@@ -781,6 +833,8 @@ class Engine:
         session = self._session(caller, session_id)
         if session["status"] != "active":
             raise BridgeError("CONFLICT", "会话已归档，不能再发送")
+        # 发到不是自己建的会话（接手）：结果里写明，工作台据此通知管理员
+        extra: Row = {"takeover": True} if session["caller_id"] != caller.id else {}
         hour_ago = time.time() - 3600
         sent = self.store.count_turns_since(caller.id, hour_ago)
         if sent + self.store.count_inserted_since(caller.id, hour_ago) >= self.setting(
@@ -807,7 +861,7 @@ class Engine:
                 )
                 self.store.add_event(session_id, running["id"], "inserted", {"by": caller.label})
                 view = await self.wait_turn(running["id"], wait_seconds)
-                return {**view, "delivered": "inserted"}
+                return {**view, **extra, "delivered": "inserted"}
             merged = True
         busy = session_id in self.store.busy_sessions()
         edge = self.store.queue_edge(session_id, first=True) if mode == "insert" else None
@@ -831,7 +885,8 @@ class Engine:
             await self._driver(session["slot"]).cancel(self._spec(session))
         self._enqueue(self.store.get_turn(turn["id"]) or turn)
         view = await self.wait_turn(turn["id"], wait_seconds)
-        return {**view, "delivered": "merged" if merged else "queued" if busy else "started"}
+        delivered = "merged" if merged else "queued" if busy else "started"
+        return {**view, **extra, "delivered": delivered}
 
     async def _steer(self, session: Row, running: Row, text: str) -> bool:
         """把消息送进正在跑的回合；平台在规定时间内确认收下、回合也还在跑，才算成功。"""
@@ -1077,14 +1132,9 @@ class Engine:
         if turn["status"] == "queued":
             view["ahead_in_session"] = self.store.queue_position(turn)
         elif turn["status"] == "running":
-            events = self.store.list_events(turn["session_id"], limit=10_000)
-            recent = [
-                e
-                for e in events
-                if e["turn_id"] == turn["id"] and e["kind"] in ("message", "notice", "command")
-            ]
-            if recent:
-                last = recent[-1]["payload"] or {}
+            latest = self.store.last_progress(turn["id"])
+            if latest is not None:
+                last = latest["payload"] or {}
                 view["progress"] = str(last.get("text") or last.get("command") or "")[:300]
         elif turn["status"] == "completed":
             view["result"] = turn["result_text"] or ""
@@ -1787,14 +1837,26 @@ class Engine:
             "running": running,
         }
 
-    async def caller_overview(self) -> Row:
-        """给调用方（智能体）看的概况：只有这座桥控制的平台。"""
+    async def caller_overview(self, caller: Caller | None = None) -> Row:
+        """给调用方（智能体）看的概况：只有这座桥控制的、管理员给了它的平台。"""
         view = await self.overview()
-        return {
+        channels = [
+            c
+            for c in view["channels"]
+            if c["enabled"] and (caller is None or caller.may_use(c["platform"]))
+        ]
+        slots = {c["slot"] for c in channels}
+        out = {
             **view,
-            "accounts": {s: a for s, a in view["accounts"].items() if a["enabled"]},
-            "channels": [c for c in view["channels"] if c["enabled"]],
+            "accounts": {s: a for s, a in view["accounts"].items() if a["enabled"] and s in slots},
+            "channels": channels,
         }
+        if caller is not None and caller.platforms is not None:
+            out["platforms"] = [p for p in view.get("platforms", []) if caller.may_use(p)]
+            for key in ("quota", "load"):
+                if isinstance(view.get(key), dict):
+                    out[key] = {p: v for p, v in view[key].items() if caller.may_use(p)}
+        return out
 
 
 def _event_view(event: Row) -> Row:

@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import ApiError
 from app.domain.policy import WorkspaceAccess
-from app.modules.llm_bridge.chat import OWN_SCOPES, SCOPES, LlmChatService
+from app.modules.llm_bridge.chat import OWN_SCOPES, SCOPES, LlmChatService, no_secrets
 from app.modules.llm_bridge.chat_schemas import (
     LlmChatGroupCreateIn,
     LlmChatGroupList,
@@ -193,6 +193,7 @@ class LlmChatGroupService:
     async def create(
         self, access: WorkspaceAccess, body: LlmChatGroupCreateIn
     ) -> LlmChatGroupSentOut:
+        no_secrets(body.text, body.title)
         caller = await self.chat._caller(access)
         workspace_id, user_id, user_name = access.workspace.id, access.user_id, caller.label
         existing = await self.db.scalar(
@@ -297,6 +298,7 @@ class LlmChatGroupService:
     async def send(
         self, access: WorkspaceAccess, group_id: uuid.UUID, body: LlmChatGroupSendIn
     ) -> LlmChatGroupSentOut:
+        no_secrets(body.text)
         group = await self._group(access, group_id)
         if group.status != "active":
             raise ApiError(409, "CONFLICT", "这一组同问已归档，不能再发送")

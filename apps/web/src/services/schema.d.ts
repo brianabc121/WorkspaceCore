@@ -11798,6 +11798,12 @@ export interface components {
             /** Enabled */
             enabled: boolean;
             /**
+             * Environment Ids
+             * @description 允许用的开发环境（环境编号）；空列表表示一个都不能用，这个实例就不能新建开发会话
+             * @default []
+             */
+            environment_ids: string[];
+            /**
              * Platforms
              * @description 允许的平台；空表示都允许
              * @default []
@@ -11824,6 +11830,11 @@ export interface components {
             can_write: boolean;
             /** Enabled */
             enabled: boolean;
+            /**
+             * Environment Ids
+             * @description 允许用的开发环境；空列表表示一个都不能用
+             */
+            environment_ids: string[];
             /**
              * Instance Id
              * Format: uuid

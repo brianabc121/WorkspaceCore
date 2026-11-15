@@ -75,6 +75,8 @@ class LlmBridgeGrant(Base):
     platforms: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     # 允许用的会话桥（id 的列表）；NULL 表示都允许（包括以后登记的），空列表表示一个都不允许
     bridge_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    # 允许用的开发环境（管理器里的环境编号）；空列表表示一个都不能用（T-0247）
+    environment_ids: Mapped[list[str]] = mapped_column(JSONB, server_default=text("'[]'::jsonb"))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

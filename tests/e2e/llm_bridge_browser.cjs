@@ -373,6 +373,11 @@ async function main() {
     await grant.getByText('已启用').waitFor()
     await grant.getByRole('group', { name: `${INSTANCE}允许的平台` }).getByLabel('Codex').check()
     await waitGrant((g) => g.enabled && g.can_write && !g.can_account && g.platforms.join() === 'codex' && g.bridge_ids === null, '启用后的权限不对')
+    // 可用的开发环境（T-0247）：默认一个都不能用；这时还没有开发环境可勾
+    const devEnvs = grant.getByRole('group', { name: `${INSTANCE}可用的开发环境`, exact: true })
+    await devEnvs.getByText('可用的开发环境（现在：一个都不能用）').waitFor()
+    await devEnvs.getByText('还没有开发环境').first().waitFor({ timeout: 30000 })
+    await waitGrant((g) => Array.isArray(g.environment_ids) && g.environment_ids.length === 0, '可用的开发环境默认应是空的')
     // 允许的 MCP 管理器：默认“全部”（包括以后添加的）；取消后是明确的列表
     const managers = grant.getByRole('group', { name: `${INSTANCE}允许的 MCP 管理器` })
     const everything = managers.getByLabel('全部（包括以后添加的）')
