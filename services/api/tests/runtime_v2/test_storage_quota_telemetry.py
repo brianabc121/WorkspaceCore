@@ -131,17 +131,64 @@ def test_unbound_orphan_managed_claim_cannot_disappear_from_quota_sample() -> No
 
 
 def helper_profile() -> tuple[Api, str]:
-    from app.runtime_v2.runner import workload
-
     api = Api()
     identity = api.add_workload()
     image = "trusted/helper@sha256:" + "b" * 64
-    _claim, deployment = workload(
-        identity,
-        {"image": "image@sha256:" + "c" * 64, "cpus": 1, "memory_mb": 128, "disk_gb": 1},
-        helper_image=image,
-    )
-    template = deployment["spec"]["template"]
+    # Independent golden contract: the producer is a separate integration task.
+    template = copy.deepcopy(api.deployments[0]["spec"]["template"])
+    spec = template["spec"]
+    spec["volumes"] = [
+        {
+            "name": "workspace",
+            "persistentVolumeClaim": {"claimName": "data-" + identity.environment_id.hex},
+        },
+        {"name": "runtime-helper", "emptyDir": {"sizeLimit": "64Mi"}},
+        {"name": "runtime-secrets", "emptyDir": {"medium": "Memory", "sizeLimit": "32Mi"}},
+        {
+            "name": "runtime-identity",
+            "downwardAPI": {
+                "items": [
+                    {"path": "uid", "fieldRef": {"fieldPath": "metadata.uid"}},
+                    {
+                        "path": "allocation",
+                        "fieldRef": {
+                            "fieldPath": "metadata.labels['workspace.myworkspace.io/allocation']"
+                        },
+                    },
+                    {
+                        "path": "generation",
+                        "fieldRef": {
+                            "fieldPath": "metadata.labels['workspace.myworkspace.io/generation']"
+                        },
+                    },
+                ]
+            },
+        },
+    ]
+    spec["containers"][0]["image"] = "image@sha256:" + "c" * 64
+    spec["containers"][0]["volumeMounts"] = [
+        {"name": "workspace", "mountPath": "/workspace"},
+        {"name": "runtime-helper", "mountPath": "/runtime", "readOnly": True},
+        {"name": "runtime-identity", "mountPath": "/run/workspace-identity", "readOnly": True},
+        {"name": "runtime-secrets", "mountPath": "/run/secrets"},
+    ]
+    spec["initContainers"] = [
+        {
+            "name": "install-runtime-helper",
+            "image": image,
+            "command": ["/helper", "install", "/runtime/helper"],
+            "volumeMounts": [{"name": "runtime-helper", "mountPath": "/runtime"}],
+            "resources": {
+                "requests": {"cpu": "50m", "memory": "32Mi"},
+                "limits": {"cpu": "50m", "memory": "32Mi"},
+            },
+            "securityContext": {
+                "privileged": False,
+                "allowPrivilegeEscalation": False,
+                "capabilities": {"drop": ["ALL"]},
+            },
+        }
+    ]
     api.deployments[0]["spec"]["template"] = copy.deepcopy(template)
     pod = api.pods[0]
     pod["spec"].update(copy.deepcopy(template["spec"]))
@@ -288,3 +335,11 @@ def test_capacity_fences_node_identity_after_summary(
 
     monkeypatch.setattr(api, "call", changed_summary)
     assert NodeTelemetry(api, "node-a", storage=Storage()).capacity()["runtimes"] == []
+
+
+def test_shared_helper_layout_rejects_unpinned_image() -> None:
+    from app.runtime_v2.helper_profile import helper_layout
+    from tests.runtime_v2.test_storage_client import identity
+
+    with pytest.raises(ValueError, match="immutable helper image required"):
+        helper_layout(identity(), "tenant/helper:latest")

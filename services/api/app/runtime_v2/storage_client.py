@@ -132,6 +132,25 @@ class StorageClient:
             raise _refuse()
         return info
 
+    def probe_peer(self) -> None:
+        """Authenticate socket availability only; send no storage operation."""
+        try:
+            before = self._socket_stat()
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.settimeout(_TIMEOUT)
+                connection.connect(self.socket_path)
+                _, uid, _ = struct.unpack(
+                    "3i",
+                    connection.getsockopt(
+                        socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+                    ),
+                )
+                after = self._socket_stat()
+                if uid != 0 or (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):
+                    raise _refuse()
+        except (OSError, ValueError, TypeError, struct.error) as error:
+            raise _refuse() from error
+
     def _rpc(self, action: str, request: StorageRequest) -> dict[str, Any]:
         before = self._socket_stat()
         frame = (

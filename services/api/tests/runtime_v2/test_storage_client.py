@@ -683,3 +683,69 @@ def test_scratch_pv_cannot_gain_canonical_tenant_labels() -> None:
     api.pv["metadata"]["labels"][PREFIX + "environment"] = ident.environment_id.hex
     with pytest.raises(StorageUnavailable):
         client.inspect(ident, api.claim)
+
+
+@pytest.fixture
+def peer_listener(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[Path, socket.socket]]:
+    path = tmp_path / "peer.sock"
+    listener = socket.socket(socket.AF_UNIX)
+    listener.settimeout(1)
+    listener.bind(str(path))
+    os.chmod(path, 0o600)
+    listener.listen()
+    monkeypatch.setattr(StorageClient, "_socket_stat", lambda self: Path(self.socket_path).lstat())
+    try:
+        yield path, listener
+    finally:
+        listener.close()
+        path.unlink(missing_ok=True)
+
+
+@pytest.mark.parametrize("peer_uid", [0, 1234])
+def test_probe_peer_sends_no_bytes_and_closes_without_request(
+    peer_uid: int, peer_listener: tuple[Path, socket.socket], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, listener = peer_listener
+    monkeypatch.setattr(
+        "app.runtime_v2.storage_client.struct.unpack", lambda fmt, raw: (123, peer_uid, peer_uid)
+    )
+    client = StorageClient(str(path), Api(), "node-a")
+    if peer_uid == 0:
+        client.probe_peer()
+    else:
+        with pytest.raises(StorageUnavailable, match=r"^storage_refused_or_unknown$"):
+            client.probe_peer()
+    connection, _ = listener.accept()
+    with connection:
+        connection.settimeout(1)
+        assert connection.recv(1) == b""
+
+
+def test_probe_peer_refuses_real_socket_inode_replacement(
+    peer_listener: tuple[Path, socket.socket], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, listener = peer_listener
+    replacement = socket.socket(socket.AF_UNIX)
+    reads = 0
+
+    def swapped_stat(client: StorageClient) -> os.stat_result:
+        nonlocal reads
+        reads += 1
+        if reads == 2:
+            path.unlink()
+            replacement.bind(str(path))
+        return path.lstat()
+
+    monkeypatch.setattr(StorageClient, "_socket_stat", swapped_stat)
+    monkeypatch.setattr("app.runtime_v2.storage_client.struct.unpack", lambda fmt, raw: (123, 0, 0))
+    try:
+        with pytest.raises(StorageUnavailable):
+            StorageClient(str(path), Api(), "node-a").probe_peer()
+        connection, _ = listener.accept()
+        with connection:
+            connection.settimeout(1)
+            assert connection.recv(1) == b""
+    finally:
+        replacement.close()

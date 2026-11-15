@@ -22,13 +22,13 @@ from uuid import UUID
 
 from app.runner_agent import VERSION
 from app.runner_agent.client import Workspace
+from app.runtime_v2.helper_profile import helper_layout
 from app.runtime_v2.kubernetes import _IMAGE, RuntimeIdentity
 from app.runtime_v2.runner import (
     Kubectl,
     KubernetesCommandError,
     OutcomeUnknown,
     verify_identity,
-    workload,
 )
 from app.runtime_v2.storage_client import StorageClient, StorageUnavailable
 from app.schemas.runner import RunnerReport
@@ -261,12 +261,9 @@ class NodeTelemetry:
             return False
         template = deployment["spec"]["template"]
         expected_image = template["spec"]["containers"][0]["image"]
-        _, expected = workload(
-            identity,
-            {"image": expected_image, "cpus": 1, "memory_mb": 128, "disk_gb": 1},
-            helper_image=self.helper_image,
-        )
-        expected_spec = expected["spec"]["template"]["spec"]
+        if not isinstance(expected_image, str) or not _IMAGE.fullmatch(expected_image):
+            raise TelemetryUnavailable("immutable workload image unavailable")
+        expected_spec = helper_layout(identity, self.helper_image)
         for spec in (pod["spec"], template["spec"]):
             if self._volume_defaults(spec.get("volumes")) != expected_spec["volumes"]:
                 raise TelemetryUnavailable("helper volume identity unavailable")
@@ -276,8 +273,7 @@ class NodeTelemetry:
                 len(containers) != 1
                 or containers[0].get("name") != "environment"
                 or containers[0].get("image") != expected_image
-                or containers[0].get("volumeMounts")
-                != expected_spec["containers"][0]["volumeMounts"]
+                or containers[0].get("volumeMounts") != expected_spec["volumeMounts"]
                 or len(init) != 1
             ):
                 raise TelemetryUnavailable("helper mount identity unavailable")
