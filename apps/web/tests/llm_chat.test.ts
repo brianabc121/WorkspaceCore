@@ -127,7 +127,7 @@ describe('大模型聊天', () => {
 
     // 没登录的平台在筛选里标出来
     const filters = within(side).getByRole('group', { name: '按平台筛选' })
-    expect(within(filters).getByRole('button', { name: /WorkBuddy/ })).toHaveTextContent('未登录')
+    expect(within(filters).getByRole('button', { name: /CodeBuddy/ })).toHaveTextContent('未登录')
     expect(within(filters).getByRole('button', { name: 'Claude' })).not.toHaveTextContent('未登录')
     await fireEvent.click(within(filters).getByRole('button', { name: 'Claude' }))
     await waitFor(() => expect(listRequests(requests).some(r => query(r).get('platform') === 'claude')).toBe(true))
@@ -165,6 +165,8 @@ describe('大模型聊天', () => {
     expect(within(info).getByText('sonnet-5')).toBeVisible()
     expect(within(info).getByText('主账号')).toBeVisible()
     expect(within(info).getByText('回合（1）')).toBeVisible()
+    // 没有额度数据的管理器（旧版本）不显示额度这一块
+    expect(within(info).queryByRole('region', { name: /额度/ })).not.toBeInTheDocument()
     await fireEvent.click(within(info).getByRole('button', { name: '收起会话信息' }))
     expect(screen.queryByRole('complementary', { name: '会话信息' })).not.toBeInTheDocument()
     // 在列表里选中的那一行标出来
@@ -372,6 +374,52 @@ describe('大模型聊天', () => {
     expect(screen.getByText('这一回合的结果未知：超时，结果未知')).toBeVisible()
   })
 
+  it('says that a chat-mode session cannot run commands, and marks a tool call the model only wrote out', async () => {
+    const fake = '让我查看一下。<tool_call>Bash_2(tool_name="Bash", command="ls -la")'
+    setup('owner', { conversations: { [S1]: talk({ mode: 'chat' }, [asked('给我看下当前环境'), answered(fake)]) } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    expect(await screen.findByText('不能执行命令')).toBeVisible()
+    const info = await screen.findByRole('complementary', { name: '会话信息' })
+    expect(within(info).getByText(/对话模式下模型不能执行命令，也不能读写文件/)).toBeVisible()
+    const thread = await screen.findByRole('list', { name: '消息' })
+    expect(within(thread).getByRole('note')).toHaveTextContent('上面像“调用工具”的内容只是模型写出来的文字，并没有执行。')
+  })
+
+  it('does not mark anything in a dev session, where tools are real', async () => {
+    setup('owner', { conversations: { [S1]: talk({ mode: 'dev' }, [asked('看下目录'), answered('<tool_call>Bash(ls)')]) } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const thread = await screen.findByRole('list', { name: '消息' })
+    expect(within(thread).queryByRole('note')).not.toBeInTheDocument()
+    expect(screen.queryByText('不能执行命令')).not.toBeInTheDocument()
+  })
+
+  const quotaOf = (): Schema['LlmBridgeStatusOut']['quota'] => ({
+    claude: { can_refresh: false, reports_quota: true, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 4321, windows: [
+      { kind: 'five_hour', used_percent: 62, resets_at: 1794531600, reset_passed: false, status: 'ok', plan: null, observed_at: 1794528000 },
+    ] },
+    workbuddy: { can_refresh: false, reports_quota: false, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 987, windows: [] },
+  })
+  const withQuota = (r: Request) => (/\/bridges\/[^/]+\/status$/.test(new URL(r.url).pathname) ? Response.json({ ...status(), quota: quotaOf() }) : undefined)
+
+  it('shows the quota of the platform and when it resets in the session info', async () => {
+    setup('owner', {}, withQuota)
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const claude = await screen.findByRole('region', { name: '额度：Claude' })
+    expect(within(claude).getByText('5 小时额度')).toBeVisible()
+    expect(within(claude).getByText('已用 62%，剩余 38%')).toBeVisible()
+    expect(within(claude).getByText('重置时间')).toBeVisible()
+    expect(within(claude).getByText(/最近 5 小时经这个管理器用掉 4,321 个 token/)).toBeVisible()
+  })
+
+  it('says that CodeBuddy gives no quota instead of promising one after a turn', async () => {
+    setup('owner', { conversations: { [S1]: talk({ platform: 'workbuddy' }) } }, withQuota)
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const buddy = await screen.findByRole('region', { name: '额度：CodeBuddy' })
+    expect(within(buddy).getByText(/官方程序不提供剩余额度和重置时间/)).toBeVisible()
+    expect(within(buddy).queryByText(/跑过一个回合后会显示/)).not.toBeInTheDocument()
+    expect(within(buddy).getByText(/用掉 987 个 token/)).toBeVisible()
+  })
+
   it('shows a turn the quota interrupted, when it continues, and lets it be retried now or left alone', async () => {
     const at = now() + 3600
     const interrupted = (state: string) => talk({}, [
@@ -536,7 +584,7 @@ describe('大模型聊天', () => {
     const form = await screen.findByRole('form', { name: '新建会话' })
     const platforms = await within(form).findByRole('group', { name: '平台' })
     expect(within(platforms).getByRole('radio', { name: /ChatGPT/ })).toBeChecked()
-    expect(within(platforms).getByRole('radio', { name: /WorkBuddy/ })).toBeDisabled()
+    expect(within(platforms).getByRole('radio', { name: /CodeBuddy/ })).toBeDisabled()
     expect(within(form).getByRole('link', { name: '去登录' })).toHaveAttribute('href', '/llm_bridge?view=manage')
 
     // Codex 只有“开发”一种用法：要选开发环境
@@ -661,7 +709,7 @@ describe('多模型同问', () => {
     const gpt = screen.getByRole('region', { name: 'ChatGPT（备用）' })
     expect(await within(gpt).findByText('重复调用没有额外的副作用。')).toBeVisible()
     expect(requests.some(r => path(r) === `${chatOf(TWO)}/sessions/${S2}`)).toBe(true)
-    const buddy = screen.getByRole('region', { name: 'WorkBuddy（主账号）' })
+    const buddy = screen.getByRole('region', { name: 'CodeBuddy（主账号）' })
     expect(within(buddy).getByText('这个模型的会话没有建成：平台还没有登录')).toBeVisible()
     expect(within(buddy).queryByRole('link', { name: '在这个会话里继续' })).not.toBeInTheDocument()
 
@@ -724,7 +772,7 @@ describe('多模型同问', () => {
     const { router } = await openApp('/llm_bridge')
     await fireEvent.click(await within(await screen.findByRole('complementary', { name: '会话列表' })).findByRole('button', { name: '多模型同问' }))
     const form = await screen.findByRole('form', { name: '多模型同问' })
-    // 当前管理器上已登录、能对话的平台先加进来（Codex 只有“开发”，WorkBuddy 没登录）
+    // 当前管理器上已登录、能对话的平台先加进来（Codex 只有“开发”，CodeBuddy 没登录）
     const chosen = await within(form).findByRole('list', { name: '发给（2 个）' })
     expect(within(chosen).getAllByRole('listitem').map(li => li.textContent)).toEqual(['ChatGPT · 默认模型 · 主账号', 'Claude · 默认模型 · 主账号'])
 

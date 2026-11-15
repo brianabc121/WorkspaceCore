@@ -25,7 +25,7 @@ const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBr
   accounts: [
     account({ state: 'logged_in', registered: true, identity: 'a***@example.com', method: 'device_code', first_login_at: 1794528000 }),
     account({ slot: 'claude', label: 'Claude', login_methods: ['api_key', 'oauth_token', 'existing'] }),
-    account({ slot: 'workbuddy', label: 'WorkBuddy', state: 'mismatch', registered: true, identity: 'w***', detail: '登录的账号变了', login_methods: ['existing'] }),
+    account({ slot: 'workbuddy', label: 'CodeBuddy', state: 'mismatch', registered: true, identity: 'w***', detail: '登录的账号变了', login_methods: ['existing'] }),
   ],
   channels: [{ platform: 'codex', mode: 'dev', slot: 'openai', enabled: true, available: true, note: '' }, { platform: 'claude', mode: 'cloud', slot: 'claude', enabled: true, available: false, note: '云端通道还没有实现' }],
   ...over,
@@ -70,10 +70,10 @@ describe('大模型客户端管理', () => {
     expect(within(openai).getByText('a***@example.com')).toBeVisible()
     expect(within(openai).getByText('设备码登录')).toBeVisible()
     expect(within(screen.getByRole('article', { name: '账号：Claude' })).getByText('未登录')).toBeVisible()
-    const workbuddy = screen.getByRole('article', { name: '账号：WorkBuddy' })
+    const workbuddy = screen.getByRole('article', { name: '账号：CodeBuddy' })
     expect(within(workbuddy).getByText('账号不一致')).toBeVisible()
     expect(within(workbuddy).getByText(/只能点“更换账号”/)).toBeVisible()
-    expect(within(workbuddy).queryByRole('button', { name: '登录WorkBuddy' })).not.toBeInTheDocument()
+    expect(within(workbuddy).queryByRole('button', { name: '登录CodeBuddy' })).not.toBeInTheDocument()
     expect(screen.getByText('排队中 1')).toBeVisible()
     expect(screen.getByText('进行中 2')).toBeVisible()
     expect(within(screen.getByRole('table', { name: '通道' })).getByText('云端通道还没有实现')).toBeVisible()
@@ -103,13 +103,13 @@ describe('大模型客户端管理', () => {
     await fireEvent.update(within(form).getByLabelText('管理令牌'), TOKEN)
     // 控制的平台默认全选；一个都不勾不能添加
     const choose = within(form).getByRole('group', { name: '控制的平台' })
-    for (const name of ['ChatGPT', 'Codex', 'Claude', 'WorkBuddy']) expect(within(choose).getByLabelText(name)).toBeChecked()
-    for (const name of ['ChatGPT', 'Codex', 'Claude', 'WorkBuddy']) await fireEvent.click(within(choose).getByLabelText(name))
+    for (const name of ['ChatGPT', 'Codex', 'Claude', 'CodeBuddy']) expect(within(choose).getByLabelText(name)).toBeChecked()
+    for (const name of ['ChatGPT', 'Codex', 'Claude', 'CodeBuddy']) await fireEvent.click(within(choose).getByLabelText(name))
     await fireEvent.click(within(form).getByRole('button', { name: '添加' }))
     expect(await screen.findByText('至少勾选一个要控制的平台。')).toBeVisible()
     expect(writes(requests)).toEqual([])
-    // 人类的例子：1 号管理器控制 Claude / WorkBuddy（勾选的先后不影响提交的顺序）
-    await fireEvent.click(within(choose).getByLabelText('WorkBuddy'))
+    // 人类的例子：1 号管理器控制 Claude / CodeBuddy（勾选的先后不影响提交的顺序）
+    await fireEvent.click(within(choose).getByLabelText('CodeBuddy'))
     await fireEvent.click(within(choose).getByLabelText('Claude'))
     await fireEvent.click(within(form).getByRole('button', { name: '添加' }))
     expect(await screen.findByText(/^已添加「主账号」。/)).toBeVisible()
@@ -173,9 +173,9 @@ describe('大模型客户端管理', () => {
     expect(polls).toBe(2)
   })
 
-  it('logs WorkBuddy in through a web page: a link to open, no code, no container login', { timeout: 20000 }, async () => {
+  it('logs CodeBuddy in through a web page: a link to open, no code, no container login', { timeout: 20000 }, async () => {
     let polls = 0, loggedIn = false
-    const wb = (over: Partial<Schema['LlmBridgeAccountOut']> = {}) => account({ slot: 'workbuddy', label: 'WorkBuddy（CodeBuddy）', login_methods: ['web_cn', 'web_intl', 'api_key'], ...over })
+    const wb = (over: Partial<Schema['LlmBridgeAccountOut']> = {}) => account({ slot: 'workbuddy', label: 'CodeBuddy', login_methods: ['web_cn', 'web_intl', 'api_key'], ...over })
     const url = 'https://copilot.tencent.com/login?state=abc'
     const requests = setup('owner', r => {
       if (path(r) === `${base}/status`) return Response.json(status({ accounts: [wb(loggedIn ? { state: 'logged_in', identity: '测***', method: 'web_cn' } : {})] }))
@@ -186,9 +186,9 @@ describe('大模型客户端管理', () => {
       return Response.json({ state: loggedIn ? 'done' : 'pending', detail: '' })
     })
     await openApp('/llm_bridge?view=manage')
-    const card = await screen.findByRole('article', { name: '账号：WorkBuddy（CodeBuddy）' })
-    await fireEvent.click(within(card).getByRole('button', { name: '登录WorkBuddy（CodeBuddy）' }))
-    const form = within(card).getByRole('form', { name: '登录WorkBuddy（CodeBuddy）' })
+    const card = await screen.findByRole('article', { name: '账号：CodeBuddy' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录CodeBuddy' }))
+    const form = within(card).getByRole('form', { name: '登录CodeBuddy' })
     // 默认就是网页登录；没有“容器里已有的登录”，也不用填任何东西
     expect(within(form).getByLabelText('网页登录（国内站）')).toBeChecked()
     expect(within(form).getByLabelText('网页登录（国际站）')).toBeInTheDocument()
@@ -204,7 +204,7 @@ describe('大模型客户端管理', () => {
     expect(within(panel).queryByText(/验证码：/)).not.toBeInTheDocument()
     expect(await writes(requests)[0]!.clone().json()).toEqual({ method: 'web_cn' })
 
-    expect(await screen.findByText('「WorkBuddy（CodeBuddy）」已登录。', {}, { timeout: 10000 })).toBeVisible()
+    expect(await screen.findByText('「CodeBuddy」已登录。', {}, { timeout: 10000 })).toBeVisible()
     expect(screen.queryByRole('region', { name: '网页登录' })).not.toBeInTheDocument()
     expect(await within(card).findByText('网页登录（国内站）')).toBeVisible()
   })
@@ -276,11 +276,11 @@ describe('大模型客户端管理', () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValue(true)
     const requests = setup('owner', r => (path(r) === `${base}/accounts/workbuddy/reset` ? Response.json({ archived_sessions: 3 }) : undefined))
     await openApp('/llm_bridge?view=manage')
-    const card = await screen.findByRole('article', { name: '账号：WorkBuddy' })
-    await fireEvent.click(within(card).getByRole('button', { name: '更换账号WorkBuddy' }))
+    const card = await screen.findByRole('article', { name: '账号：CodeBuddy' })
+    await fireEvent.click(within(card).getByRole('button', { name: '更换账号CodeBuddy' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('这个 MCP 管理器上这个平台的全部会话都会被归档'))
     expect(writes(requests)).toEqual([])
-    await fireEvent.click(within(card).getByRole('button', { name: '更换账号WorkBuddy' }))
+    await fireEvent.click(within(card).getByRole('button', { name: '更换账号CodeBuddy' }))
     expect(await screen.findByText('已归档 3 个会话；现在可以登录新的账号。')).toBeVisible()
   })
 
@@ -317,10 +317,10 @@ describe('大模型客户端管理', () => {
   })
 
   it('shows every manager with the platforms it controls and each manager its own accounts', async () => {
-    // 人类的例子：1 号控制 Claude / WorkBuddy，2 号控制 Codex / Claude / WorkBuddy；同一个平台在两个管理器上是不同的账号
+    // 人类的例子：1 号控制 Claude / CodeBuddy，2 号控制 Codex / Claude / CodeBuddy；同一个平台在两个管理器上是不同的账号
     const one = { ...bridge, name: '1 号' }, two = { ...bridge, id: OTHER, name: '2 号', base_url: 'http://llm-bridge-2:8787' }
     const claude = (identity: string) => account({ slot: 'claude', label: 'Claude', state: 'logged_in', registered: true, identity, method: 'api_key', login_methods: ['api_key'] })
-    const idle = account({ slot: 'workbuddy', label: 'WorkBuddy', login_methods: ['api_key'] })
+    const idle = account({ slot: 'workbuddy', label: 'CodeBuddy', login_methods: ['api_key'] })
     setup('owner', r => {
       if (path(r) === `${base}/status`) return Response.json(status({ platforms: ['claude', 'workbuddy'], accounts: [account({ enabled: false }), claude('a***@example.com'), idle], channels: [{ platform: 'codex', mode: 'dev', slot: 'openai', enabled: false, available: false, note: '' }, { platform: 'claude', mode: 'chat', slot: 'claude', enabled: true, available: true, note: '' }] }))
       if (path(r) === `/api/v1/llm_bridge/bridges/${OTHER}/status`) return Response.json(status({ platforms: ['codex', 'claude', 'workbuddy'], accounts: [account({}), claude('b***@example.com'), idle] }))
@@ -331,8 +331,8 @@ describe('大模型客户端管理', () => {
     const second = screen.getByRole('article', { name: 'MCP 管理器：2 号' })
     expect(first).toHaveAttribute('aria-current', 'true')
     const names = (card: HTMLElement, label: string) => within(card).findByRole('list', { name: label }).then(list => within(list).getAllByRole('listitem').map(li => li.textContent))
-    expect(await names(first, '1 号控制的平台')).toEqual(['Claude已登录', 'WorkBuddy未登录'])
-    expect(await names(second, '2 号控制的平台')).toEqual(['Codex未登录', 'Claude已登录', 'WorkBuddy未登录'])
+    expect(await names(first, '1 号控制的平台')).toEqual(['Claude已登录', 'CodeBuddy未登录'])
+    expect(await names(second, '2 号控制的平台')).toEqual(['Codex未登录', 'Claude已登录', 'CodeBuddy未登录'])
 
     // 1 号的详情：只有它控制的平台的账号和通道；没勾选的 ChatGPT / Codex 没登录过，不显示
     const panel = await screen.findByRole('tabpanel', { name: '平台与账号' })
@@ -355,7 +355,7 @@ describe('大模型客户端管理', () => {
     let platforms = ['codex', 'claude']
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const requests = setup('owner', async r => {
-      if (path(r) === `${base}/status`) return Response.json(status({ platforms, accounts: [account({ enabled: platforms.includes('codex'), state: 'logged_in', registered: true, identity: 'a***@example.com', method: 'device_code' }), account({ slot: 'claude', label: 'Claude', enabled: platforms.includes('claude'), login_methods: ['api_key'] }), account({ slot: 'workbuddy', label: 'WorkBuddy', enabled: platforms.includes('workbuddy'), login_methods: ['api_key'] })] }))
+      if (path(r) === `${base}/status`) return Response.json(status({ platforms, accounts: [account({ enabled: platforms.includes('codex'), state: 'logged_in', registered: true, identity: 'a***@example.com', method: 'device_code' }), account({ slot: 'claude', label: 'Claude', enabled: platforms.includes('claude'), login_methods: ['api_key'] }), account({ slot: 'workbuddy', label: 'CodeBuddy', enabled: platforms.includes('workbuddy'), login_methods: ['api_key'] })] }))
       if (path(r) === `${base}/settings` && r.method === 'PUT') { platforms = (await r.clone().json()).platforms; return Response.json({ ...settings, platforms }) }
       return undefined
     })
@@ -363,7 +363,7 @@ describe('大模型客户端管理', () => {
     const control = () => screen.findByRole('group', { name: '控制的平台' })
     expect(within(await control()).getByLabelText('Codex')).toBeChecked()
     // 没勾选、也没登录过的平台不占地方
-    expect(screen.queryByRole('article', { name: '账号：WorkBuddy' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('article', { name: '账号：CodeBuddy' })).not.toBeInTheDocument()
 
     // 取消勾选要确认；不确认就什么都不发，勾选框回到原样
     await fireEvent.click(within(await control()).getByLabelText('Codex'))
@@ -388,11 +388,11 @@ describe('大模型客户端管理', () => {
 
     // 勾选新的平台不用确认
     confirm.mockClear()
-    await fireEvent.click(within(await control()).getByLabelText('WorkBuddy'))
-    expect(await screen.findByText(/^已让「主账号」控制 WorkBuddy。接下来在下面登录它的账号。$/)).toBeVisible()
+    await fireEvent.click(within(await control()).getByLabelText('CodeBuddy'))
+    expect(await screen.findByText(/^已让「主账号」控制 CodeBuddy。接下来在下面登录它的账号。$/)).toBeVisible()
     expect(confirm).not.toHaveBeenCalled()
     expect(await writes(requests)[1]!.clone().json()).toEqual({ platforms: ['claude', 'workbuddy'] })
-    expect(await screen.findByRole('article', { name: '账号：WorkBuddy' })).toBeVisible()
+    expect(await screen.findByRole('article', { name: '账号：CodeBuddy' })).toBeVisible()
   })
 
   it('limits an instance to chosen managers: all by default, an explicit list, and a warning when none is left', async () => {
@@ -482,14 +482,14 @@ describe('大模型客户端管理', () => {
   it('shows the quota of each platform, when it resets and that it is paused, and asks the platform on request', async () => {
     const resets = 1794531600, seen = 1794528000
     const quota: Schema['LlmBridgeStatusOut']['quota'] = {
-      codex: { can_refresh: true, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 12345, windows: [
+      codex: { can_refresh: true, reports_quota: true, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 12345, windows: [
         { kind: 'five_hour', used_percent: 42, resets_at: resets, reset_passed: false, status: 'ok', plan: 'plus', observed_at: seen },
         { kind: 'weekly', used_percent: null, resets_at: resets - 9000, reset_passed: true, status: 'ok', plan: null, observed_at: seen },
       ] },
-      claude: { can_refresh: false, paused_until: resets, pause_estimated: true, waiting_resume: 2, tokens_5h: 0, windows: [
+      claude: { can_refresh: false, reports_quota: true, paused_until: resets, pause_estimated: true, waiting_resume: 2, tokens_5h: 0, windows: [
         { kind: 'five_hour', used_percent: 100, resets_at: null, reset_passed: false, status: 'exceeded', plan: null, observed_at: seen },
       ] },
-      workbuddy: { can_refresh: false, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 0, windows: [] },
+      workbuddy: { can_refresh: false, reports_quota: false, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 0, windows: [] },
     }
     const requests = setup('owner', r => {
       if (path(r) === `${base}/status`) return Response.json(status({ quota }))
@@ -509,7 +509,7 @@ describe('大模型客户端管理', () => {
     expect(within(claude).getByRole('note')).toHaveTextContent(/额度用完，这个平台暂停到 .+（平台没有给出重置时间，这是估计的）；到时间后自动恢复。\s*有 2 个被打断的会话在等自动继续。/)
     expect(within(claude).getByText('已用 100%，剩余 0%')).toBeVisible()
     expect(within(claude).getByText('平台没有给出')).toBeVisible()
-    expect(within(screen.getByRole('article', { name: '额度：WorkBuddy' })).getByText(/还没有看到这个平台的额度：跑过一个回合后会显示/)).toBeVisible()
+    expect(within(screen.getByRole('article', { name: '额度：CodeBuddy' })).getByText(/官方程序不提供剩余额度和重置时间/)).toBeVisible()
 
     await fireEvent.click(screen.getByRole('button', { name: '向平台查一次' }))
     await waitFor(() => expect(requests.some(r => path(r) === `${base}/quota` && new URL(r.url).searchParams.get('refresh') === 'true')).toBe(true))

@@ -3,7 +3,7 @@ import { computed, nextTick, ref, toRef } from 'vue'
 import { Archive, ArrowLeft, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
-import { MODES, platformName, type Bridge } from '../api'
+import { CHAT_NO_TOOLS, MODES, platformName, type Bridge, type Quota } from '../api'
 import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, needsTakeover, newRequestId, ownerText, type ChatAttachment, type LlmChatApi } from './chatApi'
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
@@ -12,7 +12,7 @@ import ChatQueue from './ChatQueue.vue'
 
 // 中间一栏：一个会话的对话。父组件按“管理器 + 会话”给 key，换会话时整个重建。
 // 内容和进度（长轮询读事件）在 useLiveConversation 里。
-const props = defineProps<{ chat: LlmChatApi; bridge: Bridge; sessionId: string; narrow: boolean; initialDraft?: string; initialError?: string }>()
+const props = defineProps<{ chat: LlmChatApi; bridge: Bridge; sessionId: string; narrow: boolean; initialDraft?: string; initialError?: string; quotas?: Record<string, Quota> | null }>()
 const emit = defineEmits<{ back: []; changed: [] }>()
 
 const bridgeId = computed(() => props.bridge.id)
@@ -167,6 +167,7 @@ function archive() {
           <h2 v-else>{{ session ? session.title || '（没有标题）' : '会话' }}</h2>
           <p v-if="session" class="lc-head-meta">
             {{ platformName(session.platform) }} · {{ session.model || '平台默认模型' }} · {{ MODES[session.mode] ?? session.mode }}{{ session.environment ? `（${session.environment.name}）` : '' }} · {{ bridge.name }} · {{ ownerText(session) }}建的
+            <span v-if="session.mode === 'chat'" class="lc-tag" :title="CHAT_NO_TOOLS">不能执行命令</span>
             <span v-if="session.status === 'archived'" class="lc-tag">已归档</span>
           </p>
         </div>
@@ -184,7 +185,7 @@ function archive() {
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :resuming="resuming" :source="source" @resume="resume" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :no-tools="session.mode === 'chat'" :resuming="resuming" :source="source" @resume="resume" />
           </ol>
           <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
@@ -217,6 +218,6 @@ function archive() {
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>
       </form>
     </div>
-    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" @close="infoOpen = false" />
+    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" :quota="quotas?.[session.platform] ?? null" @close="infoOpen = false" />
   </div>
 </template>

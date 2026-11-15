@@ -3422,7 +3422,7 @@ export interface paths {
         };
         /**
          * 各平台的额度：每个窗口已用多少、什么时候重置；是否因为额度暂停着（admin）
-         * @description 平台给的是已用百分比和重置时间，不是剩余 token 数。refresh=true 时让管理器向能随时查的平台（Codex）实查一次；Claude / WorkBuddy 只在跑回合时顺带报出来，显示的是最近一次看到的。
+         * @description 平台给的是已用百分比和重置时间，不是剩余 token 数。refresh=true 时让管理器向能随时查的平台（Codex）实查一次；Claude 只在跑回合时顺带报出来，显示的是最近一次看到的；CodeBuddy 的官方程序不给额度和重置时间（reports_quota=false），只有管理器自己记的用量。
          */
         get: operations["llm_bridge_bridge_quota"];
         put?: never;
@@ -11965,7 +11965,7 @@ export interface components {
             api_key?: string | null;
             /**
              * Method
-             * @description web_cn / web_intl：WorkBuddy（CodeBuddy）的网页登录，国内站 / 国际站——返回 pending 和一个网址，人在自己的浏览器里打开并登录
+             * @description web_cn / web_intl：CodeBuddy的网页登录，国内站 / 国际站——返回 pending 和一个网址，人在自己的浏览器里打开并登录
              * @enum {string}
              */
             method: "device_code" | "api_key" | "oauth_token" | "existing" | "web_cn" | "web_intl";
@@ -12044,7 +12044,7 @@ export interface components {
         LlmBridgeQuotaOut: {
             /**
              * Can Refresh
-             * @description 能不能随时向平台查（Codex 能；Claude / WorkBuddy 只在跑回合时顺带报出来）
+             * @description 能不能随时向平台查（Codex 能；Claude 只在跑回合时顺带报出来）
              */
             can_refresh: boolean;
             /**
@@ -12057,6 +12057,12 @@ export interface components {
              * @description 因为额度用完暂停到什么时候；没暂停为空
              */
             paused_until: number | null;
+            /**
+             * Reports Quota
+             * @description 平台给不给额度（已用百分比、重置时间）。CodeBuddy 的官方程序不给：windows 一直是空的，只有 tokens_5h
+             * @default true
+             */
+            reports_quota: boolean;
             /**
              * Tokens 5H
              * @description 最近 5 小时经这个管理器用掉的 token（管理器自己记的）

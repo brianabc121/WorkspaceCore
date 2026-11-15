@@ -50,7 +50,7 @@ FAKE_CHANNELS: tuple[Channel, ...] = (
 SLOT_LABELS = {
     "openai": "ChatGPT / Codex",
     "claude": "Claude",
-    "workbuddy": "WorkBuddy（CodeBuddy）",
+    "workbuddy": "CodeBuddy",
     "fake": "Fake（测试）",
 }
 

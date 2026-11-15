@@ -1,4 +1,4 @@
-"""Claude Code 与 CodeBuddy Code（WorkBuddy）共用的驱动：每个回合起一次官方命令行，
+"""Claude Code 与 CodeBuddy Code共用的驱动：每个回合起一次官方命令行，
 
 `<程序> -p --output-format stream-json --verbose [--session-id <id> | --resume <id>]`，
 消息从标准输入给，逐行读 JSON 事件。两家的参数与事件格式相同（claude 2.1.323、
@@ -62,6 +62,15 @@ _AUTH_HINTS = (
     "oauth",
 )
 _RATE_HINTS = ("rate limit", "usage limit", "429", "overloaded", "quota")
+# 对话模式不给工具，但官方程序自带的提示仍把模型说成能动手的编程助手：
+# 不说明的话，模型会把“调用工具”当成文字写出来，人以为它在执行、其实什么都没发生。
+CHAT_NOTICE = (
+    "This session is a plain chat with no tools: you cannot run commands, read or write files, "
+    "browse, or inspect the machine. Never write tool calls or pretend to run anything. "
+    "If the user asks for something that needs it, say plainly, in the user's language, that "
+    "this is a chat-mode session that cannot execute code or access files, and that they can "
+    "start a new session in dev mode (with a development environment) for that."
+)
 _READ_TOOLS = "Read,Glob,Grep"
 _WRITE_TOOLS = "Read,Glob,Grep,Edit,Write"
 _MAX_SCAN_BYTES = 512 * 1024
@@ -79,6 +88,8 @@ class CliProfile:
     models_from_help: bool = False
     # 网页登录（bridge/drivers/web_login.py）：页面上的登录方式 → 官方程序本机服务里的登录方式
     web_login: dict[str, str] = field(default_factory=dict)
+    # 回合输出里带不带额度（已用百分比、重置时间）。CodeBuddy 2.184.0 的 stream-json 输出里没有
+    reports_quota: bool = True
     # 能不能用“容器里已有的登录”（要进容器操作官方程序；有网页登录的平台不再提供）
     allow_existing: bool = True
 
@@ -105,7 +116,7 @@ def claude_profile(binary: str) -> CliProfile:
 def codebuddy_profile(binary: str) -> CliProfile:
     return CliProfile(
         slot="workbuddy",
-        label="WorkBuddy（CodeBuddy Code）",
+        label="CodeBuddy",
         binary=binary,
         config_env="CODEBUDDY_CONFIG_DIR",
         secret_envs={"api_key": "CODEBUDDY_API_KEY"},
@@ -115,6 +126,7 @@ def codebuddy_profile(binary: str) -> CliProfile:
         # 网页登录：国内站 / 国际站（官方程序本机服务里叫 internal / external）
         web_login={"web_cn": "internal", "web_intl": "external"},
         allow_existing=False,
+        reports_quota=False,
     )
 
 
@@ -159,6 +171,10 @@ def parse_transcript_line(record: dict[str, Any]) -> Message | None:
 
 
 class CliStreamDriver(Driver):
+    @property
+    def reports_quota(self) -> bool:  # type: ignore[override]
+        return self.profile.reports_quota
+
     def __init__(
         self,
         profile: CliProfile,
@@ -329,7 +345,7 @@ class CliStreamDriver(Driver):
         if spec.model:
             args += ["--model", spec.model]
         if spec.mode == "chat":
-            args += ["--tools", ""]
+            args += ["--tools", "", "--append-system-prompt", CHAT_NOTICE]
         elif spec.sandbox == "read_only":
             args += ["--tools", _READ_TOOLS]
         elif spec.sandbox == "workspace_write":

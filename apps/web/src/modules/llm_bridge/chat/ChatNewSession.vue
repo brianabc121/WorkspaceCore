@@ -13,7 +13,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ 'update:managerId': [id: string]; created: [sessionId: string, draft: string, error: string]; cancel: [] }>()
 
-const MODE_HELP: Record<string, string> = { chat: '普通问答，不动代码。', dev: '在选定的开发环境里读写代码、执行命令。' }
+const MODE_HELP: Record<string, string> = { chat: '普通问答：模型不能执行命令，也不能读写文件。', dev: '在选定的开发环境里读写代码、执行命令。' }
 const platform = ref<Platform | null>(null), mode = ref<'chat' | 'dev'>('chat')
 const model = ref(''), effort = ref(''), environment = ref(''), title = ref(''), text = ref('')
 const usable = computed(() => props.choices.filter(c => c.loggedIn))

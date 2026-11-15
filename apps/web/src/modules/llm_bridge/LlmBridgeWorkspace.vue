@@ -151,7 +151,7 @@ function remove(bridge: Bridge) {
 </script>
 
 <template>
-  <ManagementPage title="大模型客户端管理" description="添加一个或多个 MCP 管理器。每个管理器控制你勾选的平台（ChatGPT / Codex / Claude / WorkBuddy），单独维护一套账号；智能体经它向这些平台发指令、管理会话。">
+  <ManagementPage title="大模型客户端管理" description="添加一个或多个 MCP 管理器。每个管理器控制你勾选的平台（ChatGPT / Codex / Claude / CodeBuddy），单独维护一套账号；智能体经它向这些平台发指令、管理会话。">
     <p v-if="isModuleDisabled(bridges.error.value)" role="status">功能已停用：大模型客户端在当前工作空间没有启用。</p>
     <DataState v-else-if="bridges.isPending.value || bridges.error.value" :loading="bridges.isPending.value" :error="bridges.error.value" :empty="false" empty-text="" @retry="bridges.refetch()" />
     <template v-else>

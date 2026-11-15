@@ -38,7 +38,10 @@ logger = logging.getLogger("bridge.codex")
 
 CHAT_INSTRUCTIONS = (
     "This session is a plain chat. Answer the user's message directly. "
-    "Do not read or modify files and do not run commands."
+    "Do not read or modify files and do not run commands, and never pretend to. "
+    "If the user asks for something that needs it, say plainly, in the user's language, that "
+    "this is a chat-mode session that cannot execute code or access files, and that they can "
+    "start a new session in dev mode (with a development environment) for that."
 )
 _SANDBOX = {
     "read_only": "read-only",

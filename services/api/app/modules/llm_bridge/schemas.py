@@ -192,7 +192,12 @@ class LlmBridgeQuotaOut(BaseModel):
 
     windows: list[LlmBridgeQuotaWindowOut]
     can_refresh: bool = Field(
-        description="能不能随时向平台查（Codex 能；Claude / WorkBuddy 只在跑回合时顺带报出来）"
+        description="能不能随时向平台查（Codex 能；Claude 只在跑回合时顺带报出来）"
+    )
+    reports_quota: bool = Field(
+        default=True,
+        description="平台给不给额度（已用百分比、重置时间）。"
+        "CodeBuddy 的官方程序不给：windows 一直是空的，只有 tokens_5h",
     )
     paused_until: float | None = Field(description="因为额度用完暂停到什么时候；没暂停为空")
     pause_estimated: bool = Field(description="平台没说什么时候重置，暂停的时间是估计的")
@@ -255,7 +260,7 @@ class LlmBridgeStatusOut(BaseModel):
 class LlmBridgeLoginIn(_In):
     method: Literal["device_code", "api_key", "oauth_token", "existing", "web_cn", "web_intl"] = (
         Field(
-            description="web_cn / web_intl：WorkBuddy（CodeBuddy）的网页登录，国内站 / 国际站——"
+            description="web_cn / web_intl：CodeBuddy的网页登录，国内站 / 国际站——"
             "返回 pending 和一个网址，人在自己的浏览器里打开并登录"
         )
     )

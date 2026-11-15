@@ -67,7 +67,8 @@ function created(id: string, draft: string, error: string) {
   carry.value = draft || error ? { session: id, draft, error } : null
   void router.replace(here({ s: id }))
 }
-function refreshList() { if (managerId.value) void chat.invalidateSessions(managerId.value) }
+// 会话有变化（发了消息、回合结束）时顺带重读状态：会话信息里的额度和用量跟着更新
+function refreshList() { if (managerId.value) { void chat.invalidateSessions(managerId.value); void status.refetch() } }
 function openGroup(id: string, replace = false) { carry.value = null; void router[replace ? 'replace' : 'push'](here({ g: id })) }
 // 同问里的会话分散在几个管理器上：都刷新一下
 function refreshAll() { for (const b of list.value) void chat.invalidateSessions(b.id) }
@@ -90,7 +91,7 @@ async function sync() {
     <DataState v-else-if="bridges.isPending.value || bridges.error.value" :loading="bridges.isPending.value" :error="bridges.error.value" :empty="false" empty-text="" @retry="bridges.refetch()" />
     <div v-else-if="!list.length" class="lb-empty lc-welcome">
       <p><strong>还没有 MCP 管理器。</strong></p>
-      <p>先添加一个 MCP 管理器并登录平台账号，然后就能在这里和 ChatGPT / Codex / Claude / WorkBuddy 对话，也能看到智能体开的会话。</p>
+      <p>先添加一个 MCP 管理器并登录平台账号，然后就能在这里和 ChatGPT / Codex / Claude / CodeBuddy 对话，也能看到智能体开的会话。</p>
       <p><RouterLink class="primary-button" :to="{ path: '/llm_bridge', query: { view: 'manage' } }">去添加 MCP 管理器</RouterLink></p>
     </div>
     <div v-else class="lc-app" :class="{ 'is-narrow': narrow }">
@@ -114,7 +115,7 @@ async function sync() {
           @update:manager-id="pickManager($event, { new: '1' })" @created="created" @cancel="router.push(here())"
         />
         <ChatConversation
-          v-else-if="sessionId && manager" :key="`${manager.id}:${sessionId}`" :chat="chat" :bridge="manager" :session-id="sessionId" :narrow="narrow"
+          v-else-if="sessionId && manager" :key="`${manager.id}:${sessionId}`" :chat="chat" :bridge="manager" :session-id="sessionId" :narrow="narrow" :quotas="status.data.value?.quota ?? null"
           :initial-draft="carry?.session === sessionId ? carry.draft : ''" :initial-error="carry?.session === sessionId ? carry.error : ''"
           @back="router.push(here())" @changed="refreshList"
         />

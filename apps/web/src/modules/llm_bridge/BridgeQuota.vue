@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { RefreshCw } from '@lucide/vue'
-import { bridgeError, platformName, quotaKind, quotaUsage, seconds, type Bridge, type BridgeStatus, type LlmBridgeApi, type QuotaWindow } from './api'
+import { NO_QUOTA, bridgeError, platformName, quotaKind, quotaUsage, seconds, type Bridge, type BridgeStatus, type LlmBridgeApi, type QuotaWindow } from './api'
 
 // 每个平台的额度（T-0237）：每个窗口已用多少、什么时候重置；因为额度用完暂停到什么时候、有几个会话在等自动续跑。
-// 平台给的是已用百分比和重置时间，不是剩余 token 数；Claude / WorkBuddy 只在跑回合时顺带报出来，
-// 所以显示的是“最近一次看到的”。旧版本的管理器没有这些数据，这一块不显示。
+// 平台给的是已用百分比和重置时间，不是剩余 token 数；Claude 只在跑回合时顺带报出来，
+// 所以显示的是“最近一次看到的”。CodeBuddy 的官方程序不给额度（reports_quota=false），照实说明。旧版本的管理器没有这些数据，这一块不显示。
 const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status: BridgeStatus }>()
 
 const rows = computed(() => Object.entries(props.status.quota ?? {}).map(([platform, quota]) => ({ platform, quota })))
@@ -27,7 +27,7 @@ const percent = (w: QuotaWindow) => (w.reset_passed || w.used_percent == null ? 
       <h3>额度</h3>
       <button v-if="canRefresh" type="button" class="secondary-button" :disabled="busy" @click="refresh"><RefreshCw aria-hidden="true" />{{ busy ? '正在查…' : '向平台查一次' }}</button>
     </div>
-    <p class="form-help">平台给的是已用百分比和重置时间，不是剩余的 token 数。Codex 可以随时查；Claude 和 WorkBuddy 只在跑回合时顺带报出来，这里显示最近一次看到的。</p>
+    <p class="form-help">平台给的是已用百分比和重置时间，不是剩余的 token 数。Codex 可以随时查；Claude 只在跑回合时顺带报出来，这里显示最近一次看到的；CodeBuddy 的官方程序不提供额度。</p>
     <p v-if="error" class="lb-warn is-red" role="alert">{{ error }}</p>
     <div class="lb-accounts">
       <article v-for="r in rows" :key="r.platform" class="lb-account" :aria-label="`额度：${platformName(r.platform)}`">
@@ -36,7 +36,8 @@ const percent = (w: QuotaWindow) => (w.reset_passed || w.used_percent == null ? 
           额度用完，这个平台暂停到 {{ seconds(r.quota.paused_until) }}{{ r.quota.pause_estimated ? '（平台没有给出重置时间，这是估计的）' : '' }}；到时间后自动恢复。
           <template v-if="r.quota.waiting_resume">有 {{ r.quota.waiting_resume }} 个被打断的会话在等自动继续。</template>
         </p>
-        <p v-if="!r.quota.windows.length" class="form-help">还没有看到这个平台的额度{{ r.quota.can_refresh ? '：点“向平台查一次”' : '：跑过一个回合后会显示' }}。</p>
+        <p v-if="!r.quota.windows.length && r.quota.reports_quota === false" class="form-help">{{ NO_QUOTA }}</p>
+        <p v-else-if="!r.quota.windows.length" class="form-help">还没有看到这个平台的额度{{ r.quota.can_refresh ? '：点“向平台查一次”' : '：跑过一个回合后会显示' }}。</p>
         <ul v-else class="lb-windows">
           <li v-for="w in r.quota.windows" :key="w.kind">
             <div class="lb-window-head"><strong>{{ quotaKind(w.kind) }}</strong><span class="asv-state" :class="tone(w)">{{ state(w) }}</span></div>

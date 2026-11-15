@@ -64,7 +64,7 @@ onUnmounted(stopPolling)
 
 function openLogin(account: Account) {
   const methods = methodsOf(account)
-  // 有网页登录的平台（WorkBuddy）默认用它；别的平台照旧默认 API 密钥
+  // 有网页登录的平台（CodeBuddy）默认用它；别的平台照旧默认 API 密钥
   const first = methods.find(m => WEB_METHODS.includes(m)) ?? (methods.includes('api_key') ? 'api_key' : methods[0] ?? 'api_key')
   Object.assign(login, { slot: account.slot as Slot, method: first, secret: '' })
   error.value = notice.value = ''

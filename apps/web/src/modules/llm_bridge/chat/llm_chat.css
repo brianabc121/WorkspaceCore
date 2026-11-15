@@ -108,6 +108,7 @@
 .lc-info-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .lc-info h3 { margin: 0; font-size: .95rem; }
 .lc-info h4 { margin: 6px 0 0; color: var(--muted); font-size: .82rem; }
+.lc-quota { display: grid; gap: 8px; }
 .lc-turns { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: .8rem; }
 .lc-turns li { display: flex; flex-wrap: wrap; gap: 2px 8px; padding: 6px 8px; border-radius: 8px; background: var(--surface-2); }
 .lc-turns time { color: var(--muted); }

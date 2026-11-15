@@ -156,6 +156,8 @@ class Driver:
 
     # 能不能随时向平台查额度（不能的只在跑回合时由官方程序顺带报出来）
     can_query_quota = False
+    # 平台给不给额度（已用百分比、重置时间）；不给的平台页面上要说明白，不让人干等
+    reports_quota = True
 
     async def quota(self) -> list[dict[str, Any]] | None:
         """现在向平台查一次额度（各窗口的已用百分比和重置时间）。
