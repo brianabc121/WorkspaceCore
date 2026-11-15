@@ -93,11 +93,17 @@ async function submit() {
 // ---- 附件：先上传到管理器，发送时带上编号；对话会话只能带图片 ----
 const attached = ref<ChatAttachment[]>([]), uploading = ref(0), picker = ref<HTMLInputElement | null>(null)
 const imagesOnly = computed(() => session.value?.mode !== 'dev')
-async function pick(event: Event) {
+function pick(event: Event) {
   const input = event.target as HTMLInputElement, chosen = Array.from(input.files ?? [])
   input.value = ''
+  void addFiles(chosen)
+}
+// 点按钮选、粘贴、拖进来，都走这里
+async function addFiles(chosen: File[]) {
+  if (!chosen.length || blocked.value) return
   sendError.value = ''
   for (const file of chosen) {
+    if (imagesOnly.value && !IMAGE_ACCEPT.split(',').includes(file.type)) { sendError.value = `「${file.name}」不是图片：对话会话只能带图片，别的文件要在开发会话里发。`; continue }
     if (attached.value.length + uploading.value >= ATTACHMENTS.max) { sendError.value = `一条消息最多带 ${ATTACHMENTS.max} 个附件。`; break }
     if (file.size > ATTACHMENTS.bytes) { sendError.value = `「${file.name}」太大：单个最多 20 MB。`; continue }
     uploading.value += 1
@@ -105,6 +111,25 @@ async function pick(event: Event) {
     catch (e) { sendError.value = `「${file.name}」没有传上去：${chatError(e)}` }
     finally { uploading.value -= 1 }
   }
+}
+// 粘贴：剪贴板里有文件（截图、复制的图片或文件）就当附件加上；只有文字时照常粘贴
+function onPaste(event: ClipboardEvent) {
+  const pasted = Array.from(event.clipboardData?.files ?? [])
+  if (!pasted.length) return
+  event.preventDefault()
+  void addFiles(pasted)
+}
+// 拖拽：只理会拖进来的是文件的情况；进出子元素会各触发一次，用计数判断是不是真的离开了
+const dragging = ref(0)
+const hasFiles = (event: DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files')
+function onDragEnter(event: DragEvent) { if (hasFiles(event) && !blocked.value) { event.preventDefault(); dragging.value += 1 } }
+function onDragOver(event: DragEvent) { if (hasFiles(event) && !blocked.value) event.preventDefault() }
+function onDragLeave(event: DragEvent) { if (hasFiles(event)) dragging.value = Math.max(0, dragging.value - 1) }
+function onDrop(event: DragEvent) {
+  if (!hasFiles(event)) return
+  event.preventDefault()
+  dragging.value = 0
+  void addFiles(Array.from(event.dataTransfer?.files ?? []))
 }
 async function detach(item: ChatAttachment) {
   attached.value = attached.value.filter(a => a.id !== item.id)
@@ -193,10 +218,14 @@ function archive() {
       </div>
 
       <ChatQueue v-if="session" :chat="chat" :bridge-id="bridge.id" :session-id="sessionId" :busy="!!activeTurn" @changed="poll()" />
-      <form v-if="session" class="lc-composer" aria-label="发送消息" @submit.prevent="submit">
+      <form
+        v-if="session" class="lc-composer" :class="{ 'is-dropping': dragging > 0 }" aria-label="发送消息" @submit.prevent="submit"
+        @dragenter="onDragEnter" @dragover="onDragOver" @dragleave="onDragLeave" @drop="onDrop"
+      >
         <p v-if="blocked" class="lc-note" role="note">{{ blocked }}</p>
         <template v-else>
           <p v-if="foreign" class="lc-note" role="note">{{ session.owner_kind === 'external' ? '这是官方程序里已有的会话' : `这是${session.owner_kind === 'agent' ? '智能体' : ''}「${ownerText(session)}」建的会话` }}：可以看；接着发消息前会让你确认一次。</p>
+          <p v-if="dragging > 0" class="lc-note" role="status">松开鼠标，把{{ imagesOnly ? '图片' : '图片或文件' }}加到这条消息里。</p>
           <ul v-if="attached.length || uploading" class="lc-attached" aria-label="要带上的附件">
             <li v-for="a in attached" :key="a.id"><span class="lc-file-name">{{ a.name }}</span><span class="lc-file-size">{{ fileSize(a.size) }}</span><button type="button" class="lc-icon" :aria-label="`去掉附件：${a.name}`" @click="detach(a)"><X aria-hidden="true" /></button></li>
             <li v-if="uploading" role="status">正在上传 {{ uploading }} 个…</li>
@@ -204,7 +233,7 @@ function archive() {
           <div class="lc-compose-row">
             <input ref="picker" type="file" multiple hidden :accept="imagesOnly ? IMAGE_ACCEPT : undefined" aria-label="选择要带上的图片或文件" @change="pick" />
             <button type="button" class="lc-icon" :aria-label="imagesOnly ? '添加图片' : '添加图片或文件'" :title="imagesOnly ? '添加图片（对话会话只能带图片）' : '添加图片或文件（文件会放进工作目录）'" :disabled="sending" @click="picker?.click()"><Paperclip aria-hidden="true" /></button>
-            <textarea v-model="draft" rows="2" maxlength="100000" aria-label="消息内容" placeholder="输入消息：Enter 发送，Shift + Enter 换行" @keydown="onKey" />
+            <textarea v-model="draft" rows="2" maxlength="100000" aria-label="消息内容" :placeholder="`输入消息：Enter 发送，Shift + Enter 换行；可以粘贴或拖入${imagesOnly ? '图片' : '图片、文件'}`" @keydown="onKey" @paste="onPaste" />
             <button v-if="activeTurn" type="button" class="secondary-button" :disabled="stopping" @click="stop"><Square aria-hidden="true" />{{ stopping ? '正在停止…' : '停止' }}</button>
             <button type="submit" class="primary-button" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : '发送' }}</button>
           </div>

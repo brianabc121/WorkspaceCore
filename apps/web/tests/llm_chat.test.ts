@@ -393,6 +393,42 @@ describe('大模型聊天', () => {
     expect(screen.queryByText('不能执行命令')).not.toBeInTheDocument()
   })
 
+  it('takes pasted and dropped images as attachments, and refuses other files in a chat session', async () => {
+    const uploads: (string | null)[] = []
+    const file = (id: string, name: string): Schema['LlmChatAttachmentOut'] => ({ id, name, media_type: 'image/png', size: 4, direction: 'input', at: now() })
+    const A3 = `ba_${'3'.repeat(20)}`, A4 = `ba_${'4'.repeat(20)}`
+    setup('owner', {}, async r => {
+      if (path(r) === `${chat}/sessions/${S1}/attachments` && r.method === 'POST') {
+        uploads.push(query(r).get('name'))
+        return Response.json(file(uploads.length === 1 ? A3 : A4, query(r).get('name') ?? ''), { status: 201 })
+      }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const box = await composer()
+    expect(box).toHaveAttribute('placeholder', expect.stringContaining('可以粘贴或拖入图片'))
+    // 粘贴截图：当附件加上，不往输入框里写东西
+    await fireEvent.paste(box, { clipboardData: { files: [new File(['abcd'], 'image.png', { type: 'image/png' })] } })
+    const pendingList = await screen.findByRole('list', { name: '要带上的附件' })
+    await waitFor(() => expect(within(pendingList).getAllByRole('listitem')).toHaveLength(1))
+    expect(box).toHaveValue('')
+    // 拖进来：拖到输入区时有提示；松开后加上图片，别的文件说明为什么不行
+    const form = screen.getByRole('form', { name: '发送消息' })
+    const dropped = { types: ['Files'], files: [new File(['xy'], '拖来的.png', { type: 'image/png' }), new File(['%PDF'], '报告.pdf', { type: 'application/pdf' })] }
+    await fireEvent.dragEnter(form, { dataTransfer: dropped })
+    expect(await screen.findByText('松开鼠标，把图片加到这条消息里。')).toBeVisible()
+    await fireEvent.drop(form, { dataTransfer: dropped })
+    await waitFor(() => expect(within(pendingList).getAllByRole('listitem')).toHaveLength(2))
+    expect(screen.queryByText('松开鼠标，把图片加到这条消息里。')).not.toBeInTheDocument()
+    expect(await screen.findByText('「报告.pdf」不是图片：对话会话只能带图片，别的文件要在开发会话里发。')).toBeVisible()
+    expect(uploads).toEqual(['image.png', '拖来的.png'])
+    // 只粘贴文字时不拦
+    const plain = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData?: unknown }
+    plain.clipboardData = { files: [] }
+    box.dispatchEvent(plain)
+    expect(plain.defaultPrevented).toBe(false)
+  })
+
   const quotaOf = (): Schema['LlmBridgeStatusOut']['quota'] => ({
     claude: { can_refresh: false, reports_quota: true, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 4321, windows: [
       { kind: 'five_hour', used_percent: 62, resets_at: 1794531600, reset_passed: false, status: 'ok', plan: null, observed_at: 1794528000 },

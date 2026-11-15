@@ -283,6 +283,24 @@ async function main() {
     const shown = thread(page).getByRole('img', { name: `验收图 ${run}.png` })
     await shown.waitFor({ timeout: 30000 })
     check(await until(() => shown.evaluate((img) => img.complete && img.naturalWidth === 1)), '提问上的图片应能显示出来（内容从管理器取回）')
+    // 粘贴和拖拽（T-0244）：剪贴板里的截图、拖进输入区的图片都当附件加上；拖进来的别的文件说明为什么不行
+    const give = (kind, files) => page.evaluate(({ kind, files }) => {
+      const data = new DataTransfer()
+      for (const f of files) data.items.add(new File([Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0))], f.name, { type: f.type }))
+      const box = document.querySelector('textarea[aria-label="消息内容"]')
+      if (kind === 'paste') box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }))
+      else for (const type of ['dragenter', 'dragover', 'drop']) box.closest('form').dispatchEvent(new DragEvent(type, { dataTransfer: data, bubbles: true, cancelable: true }))
+    }, { kind, files })
+    const png64 = PNG.toString('base64')
+    await give('paste', [{ name: `粘贴图 ${run}.png`, type: 'image/png', b64: png64 }])
+    await attachedList.getByText(`粘贴图 ${run}.png`).waitFor({ timeout: 30000 })
+    await give('drop', [{ name: `拖入图 ${run}.png`, type: 'image/png', b64: png64 }, { name: '报告.pdf', type: 'application/pdf', b64: 'JVBERg==' }])
+    await attachedList.getByText(`拖入图 ${run}.png`).waitFor({ timeout: 30000 })
+    await page.getByText('「报告.pdf」不是图片：对话会话只能带图片，别的文件要在开发会话里发。').waitFor({ timeout: 30000 })
+    check((await composer(page).inputValue()) === '', '粘贴图片不应往输入框里写东西')
+    await composer(page).fill('看这两张')
+    await composer(page).press('Enter')
+    await thread(page).getByText(':: 看这两张 images=2').waitFor({ timeout: 60000 })
     // 对话会话只能带图片：别的文件接口直接拒绝；内容和扩展名对不上的也拒绝
     const refuse = (name, text) => page.evaluate(async ({ url, workspace, name, text }) => {
       const csrf = document.cookie.split('; ').find((item) => item.startsWith('ws_csrf='))?.slice(8)
