@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlencode
 import httpx
 
 from app.core.errors import ApiError
+from app.domain import secret_scan
 from app.domain.policy import WorkspaceAccess
 from app.integrations.base import ConnectorError
 from app.models import User
@@ -125,6 +126,16 @@ def _queue_out(data: Any, me: str) -> LlmChatQueueOut:
         running=item(running) if running else None,
         queued=[item(row) for row in data.get("queued", [])],
     )
+
+
+def no_secrets(*texts: str | None) -> None:
+    """要发给第三方平台的内容先过密钥扫描：像密钥的不发、不存（和智能体的调用一样）。"""
+    if secret_scan.scan(*(t for t in texts if t)):
+        raise ApiError(
+            422,
+            "VALIDATION_FAILED",
+            "内容里像是有令牌、私钥一类的密钥，没有发送；去掉之后再发",
+        )
 
 
 class LlmChatService:
@@ -269,6 +280,7 @@ class LlmChatService:
         self, access: WorkspaceAccess, row: LlmBridge, body: LlmChatCreateIn
     ) -> LlmChatCreatedOut:
         self._writable(row)
+        no_secrets(body.text, body.title)
         caller, client = await self._caller(access), await self.bridges.client(row)
         me, bridge_id, bridge_name = caller.instance_id, row.id, row.name
         await self.db.commit()
@@ -325,6 +337,7 @@ class LlmChatService:
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str, body: LlmChatSendIn
     ) -> LlmChatTurnOut:
         self._writable(row)
+        no_secrets(body.text)
         caller = await self._caller(access, SCOPES if body.takeover else OWN_SCOPES)
         client, bridge_id, bridge_name = await self.bridges.client(row), row.id, row.name
         await self.db.commit()
@@ -396,6 +409,7 @@ class LlmChatService:
         to: str | None = None,
     ) -> LlmChatQueueOut:
         """改排队中消息的内容，或把它调到队首 / 队尾。已经开始处理的 409。"""
+        no_secrets(text)
         me, client = caller_id(access.user_id), await self.bridges.client(row)
         bridge_id, bridge_name = row.id, row.name
         await self.db.commit()

@@ -248,6 +248,12 @@ class Store:
         columns = {row["name"] for row in self._db.execute("PRAGMA table_info(sessions)")}
         if "imported_at" not in columns:
             self._db.execute("ALTER TABLE sessions ADD COLUMN imported_at REAL")
+        if "request_id" not in columns:  # 新建会话的幂等号（T-0247）：同一个调用方重试不会建出两个
+            self._db.execute("ALTER TABLE sessions ADD COLUMN request_id TEXT")
+        self._db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS sessions_request "
+            "ON sessions (caller_id, request_id) WHERE request_id IS NOT NULL"
+        )
         done = self._db.execute("SELECT value FROM meta WHERE key = 'messages_backfilled'")
         if done.fetchone() is not None:
             return
@@ -438,6 +444,11 @@ class Store:
 
     def get_session(self, session_id: str) -> Row | None:
         return self._one("SELECT * FROM sessions WHERE id = ?", (session_id,))
+
+    def session_by_request(self, caller_id: str, request_id: str) -> Row | None:
+        return self._one(
+            "SELECT * FROM sessions WHERE caller_id = ? AND request_id = ?", (caller_id, request_id)
+        )
 
     def session_by_native(self, slot: str, native_id: str) -> Row | None:
         return self._one(
@@ -827,6 +838,14 @@ class Store:
         self._exec(
             "INSERT INTO events (session_id, turn_id, kind, payload, at) VALUES (?,?,?,?,?)",
             (session_id, turn_id, kind, json.dumps(payload, ensure_ascii=False), time.time()),
+        )
+
+    def last_progress(self, turn_id: str) -> Row | None:
+        """这个回合最新的一条“说了什么 / 在跑什么”：按回合取，会话再长也只读一行。"""
+        return self._one(
+            "SELECT * FROM events WHERE turn_id = ? AND kind IN ('message', 'notice', 'command') "
+            "ORDER BY id DESC LIMIT 1",
+            (turn_id,),
         )
 
     def list_events(self, session_id: str, after_id: int = 0, limit: int = 100) -> list[Row]:

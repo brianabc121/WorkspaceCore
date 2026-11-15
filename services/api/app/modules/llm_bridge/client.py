@@ -78,6 +78,8 @@ class BridgeCaller:
     instance_id: str
     label: str
     scopes: tuple[str, ...]
+    # 只能用哪些平台；None 是不限（人在聊天页）。管理器按会话所属的平台检查
+    platforms: tuple[str, ...] | None = None
 
 
 @dataclass
@@ -115,6 +117,8 @@ class BridgeClient:
             "X-Bridge-Caller-Label": quote(caller.label),
             "X-Bridge-Scopes": ",".join(caller.scopes),
         }
+        if caller.platforms is not None:
+            headers["X-Bridge-Platforms"] = ",".join(caller.platforms)
         body = {
             "jsonrpc": "2.0",
             "id": 1,

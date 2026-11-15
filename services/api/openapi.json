@@ -13221,6 +13221,17 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "environment_ids": {
+            "default": [],
+            "description": "允许用的开发环境（环境编号）；空列表表示一个都不能用，这个实例就不能新建开发会话",
+            "items": {
+              "pattern": "^be_[0-9a-f]{20}$",
+              "type": "string"
+            },
+            "maxItems": 200,
+            "title": "Environment Ids",
+            "type": "array"
+          },
           "platforms": {
             "default": [],
             "description": "允许的平台；空表示都允许",
@@ -13293,6 +13304,14 @@
             "title": "Enabled",
             "type": "boolean"
           },
+          "environment_ids": {
+            "description": "允许用的开发环境；空列表表示一个都不能用",
+            "items": {
+              "type": "string"
+            },
+            "title": "Environment Ids",
+            "type": "array"
+          },
           "instance_id": {
             "format": "uuid",
             "title": "Instance Id",
@@ -13318,7 +13337,8 @@
           "can_account",
           "can_takeover",
           "platforms",
-          "bridge_ids"
+          "bridge_ids",
+          "environment_ids"
         ],
         "title": "LlmBridgeGrantOut",
         "type": "object"

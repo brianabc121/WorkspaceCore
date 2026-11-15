@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from pathlib import Path
+from typing import Any
 
 from bridge.channels import CHANNELS, FAKE_CHANNELS
 from bridge.config import Settings
 from bridge.engine import Engine
 from bridge.store import Store
 from tests.conftest import ADMIN, Bridge
+
+CHAT: dict[str, Any] = {"platform": "fake", "mode": "chat"}
 
 
 async def _session(bridge: Bridge, caller: str, **extra: object) -> str:
@@ -277,6 +281,92 @@ async def test_scopes(bridge: Bridge) -> None:
         "boss", "llm_send", {"session_id": a, "text": "接手", "request_id": "b1"}, scopes=scopes
     )
     assert taken["status"] == "completed"
+
+
+async def _limited(
+    bridge: Bridge, caller: str, platforms: str, name: str, arguments: dict[str, Any]
+) -> dict[str, Any]:
+    """像工作台那样带着“只能用这些平台”调用（X-Bridge-Platforms）。"""
+    headers = {**bridge.headers(caller, "write,account,takeover"), "X-Bridge-Platforms": platforms}
+    response = await bridge.rpc("tools/call", {"name": name, "arguments": arguments}, headers)
+    payload: dict[str, Any] = json.loads(response.json()["result"]["content"][0]["text"])
+    return payload
+
+
+async def test_platform_limit_follows_the_session(bridge: Bridge) -> None:
+    """管理员没给的平台：新建不了，别人建好的会话也读不了、发不了、取不了回合（T-0247）。
+
+    发送、取回合这些调用不带 platform 参数，所以要按会话所属的平台检查。"""
+    a = await _session(bridge, "owner")
+    turn = await _send(bridge, "owner", a, "内容", "r1")
+    # 只给了别的平台：有接手权限也一样
+    assert (await _limited(bridge, "agent", "claude", "llm_session_create", CHAT))["error"][
+        "code"
+    ] == "FORBIDDEN"
+    for name, arguments in (
+        ("llm_session_get", {"session_id": a}),
+        ("llm_send", {"session_id": a, "text": "x", "request_id": "p1"}),
+        ("llm_turn_get", {"turn_id": turn["turn_id"]}),
+        ("llm_turn_cancel", {"turn_id": turn["turn_id"]}),
+        ("llm_queue", {"session_id": a}),
+        ("llm_session_archive", {"session_id": a}),
+    ):
+        denied = await _limited(bridge, "agent", "claude", name, arguments)
+        assert denied["error"]["code"] == "NOT_FOUND", (name, denied)
+    listed = await _limited(bridge, "agent", "claude", "llm_session_list", {"scope": "account"})
+    assert listed["sessions"] == []
+    assert (await _limited(bridge, "agent", "claude", "llm_models", CHAT))["error"][
+        "code"
+    ] == "FORBIDDEN"
+    status = await _limited(bridge, "agent", "claude", "llm_status", {})
+    assert {c["platform"] for c in status["channels"]} <= {"claude"}
+    assert "fake" not in status["accounts"]
+    # 给了这个平台：照常能用；没带这个头（人在聊天页）不限
+    seen = await _limited(bridge, "agent", "fake,claude", "llm_session_get", {"session_id": a})
+    assert len(seen["messages"]) == 2
+    only = await _limited(bridge, "agent", "fake", "llm_status", {})
+    assert {c["platform"] for c in only["channels"]} == {"fake"}
+
+
+async def test_create_with_request_id_is_idempotent(bridge: Bridge) -> None:
+    """新建会话带幂等号：重试、同时到的两次调用，得到的都是同一个会话（T-0247）。"""
+    args = {**CHAT, "request_id": "c-1"}
+    first, second = await asyncio.gather(
+        bridge.tool("c1", "llm_session_create", args),
+        bridge.tool("c1", "llm_session_create", args),
+    )
+    again = await bridge.tool("c1", "llm_session_create", args)
+    assert first["session_id"] == second["session_id"] == again["session_id"]
+    listed = await bridge.tool("c1", "llm_session_list", {})
+    assert len(listed["sessions"]) == 1
+    # 幂等号按调用方算；不带的每次都新建
+    other = await bridge.tool("c2", "llm_session_create", args)
+    assert other["session_id"] != first["session_id"]
+    plain = await bridge.tool("c1", "llm_session_create", CHAT)
+    assert plain["session_id"] != first["session_id"]
+    bad = await bridge.tool("c1", "llm_session_create", {**CHAT, "request_id": "有 空格"})
+    assert bad["error"]["code"] == "VALIDATION_FAILED"
+
+
+async def test_send_says_when_it_is_a_takeover_and_progress_is_the_latest(bridge: Bridge) -> None:
+    a = await _session(bridge, "owner")
+    mine = await _send(bridge, "owner", a, "内容", "r1")
+    assert "takeover" not in mine
+    taken = await bridge.tool(
+        "boss",
+        "llm_send",
+        {"session_id": a, "text": "接手", "request_id": "b1"},
+        scopes="write,account,takeover",
+    )
+    assert taken["takeover"] is True and taken["status"] == "completed"
+    # 进度按回合取最新的一条：会话里之前有多少事件都不影响
+    running = await _send(bridge, "owner", a, "sleep:0.6", "r2", wait=0)
+    assert running["status"] in ("queued", "running")
+    bridge.engine.store.add_event(a, running["turn_id"], "message", {"text": "第一段"})
+    bridge.engine.store.add_event(a, running["turn_id"], "command", {"command": "ls -la"})
+    latest = bridge.engine.store.last_progress(running["turn_id"])
+    assert latest is not None and latest["payload"]["command"] == "ls -la"
+    assert bridge.engine.store.last_progress(mine["turn_id"]) is not None
 
 
 async def test_external_sessions(bridge: Bridge) -> None:
@@ -725,7 +815,6 @@ async def test_platform_failure_during_login_is_reported_not_hidden(bridge: Brid
 
 async def test_connectivity_reports_each_platform_with_latency(bridge: Bridge) -> None:
     """到各平台能不能用、多慢：逐个地址报，分清“连不上”和“被平台拒绝”；一分钟内复用结果。"""
-    from typing import Any
 
     from bridge import connectivity
     from bridge.drivers.fake import FakeDriver

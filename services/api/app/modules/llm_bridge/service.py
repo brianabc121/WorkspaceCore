@@ -532,6 +532,7 @@ class LlmBridgeService:
                 if row is not None and row.bridge_ids is not None
                 else None
             ),
+            environment_ids=list(row.environment_ids or []) if row else [],
         )
 
     async def set_grant(
@@ -561,6 +562,8 @@ class LlmBridgeService:
             if any(i not in known for i in body.bridge_ids):
                 raise _invalid("bridge_ids", "没有这个 MCP 管理器")
             row.bridge_ids = sorted({str(i) for i in body.bridge_ids})
+        # 没有写权限就用不上开发环境：一并收回
+        row.environment_ids = sorted(set(body.environment_ids)) if row.can_write else []
         await self.db.flush()
         await self._audit(
             access,
@@ -574,6 +577,7 @@ class LlmBridgeService:
                 "can_takeover": row.can_takeover,
                 "platforms": row.platforms,
                 "bridge_ids": row.bridge_ids,
+                "environment_ids": row.environment_ids,
             },
         )
         await self.db.commit()

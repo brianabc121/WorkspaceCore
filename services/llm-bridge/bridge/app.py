@@ -111,7 +111,14 @@ def resolve_caller(request: Request) -> Caller:
         label = unquote(request.headers.get("x-bridge-caller-label", ""))[:80] or caller_id
         raw = request.headers.get("x-bridge-scopes", "")
         scopes = frozenset(s for s in (part.strip() for part in raw.split(",")) if s in SCOPES)
-        return Caller(caller_id, label, scopes)
+        # 工作台按管理员给这个实例选的平台带过来；没带这个头是不限（人在聊天页）
+        limited = request.headers.get("x-bridge-platforms")
+        platforms = (
+            None
+            if limited is None
+            else frozenset(p for p in (part.strip() for part in limited.split(",")) if p)
+        )
+        return Caller(caller_id, label, scopes, platforms)
     store: Store = request.app.state.store
     row = store.caller_by_token(token_hash(token))
     if row is None:

@@ -31,6 +31,12 @@ class SessionCreateInput(ChannelInput):
     )
     title: str = Field(default="", max_length=120, description="会话标题；不填用第一条消息")
     effort: str | None = Field(default=None, max_length=20, description="推理强度（平台支持时）")
+    request_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        description="幂等号（建议带）：没等到结果时用同一个重试，得到的是同一个会话，不会建出两个",
+    )
 
 
 class SendInput(_Input):

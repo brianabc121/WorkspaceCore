@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import ManagementSection from '../../components/management/ManagementSection.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
+import GrantEnvironments from './GrantEnvironments.vue'
 import { PLATFORMS, bridgeError, type Bridge, type Grant, type GrantBody, type LlmBridgeApi, type Platform } from './api'
 
 // 按实例的权限：哪个智能体能用大模型会话、能用哪些 MCP 管理器、能做到哪一步。每次改动立即保存（owner）。
@@ -21,7 +22,7 @@ const FLAGS = [
 ] as const
 type Flag = (typeof FLAGS)[number]['key']
 
-const bodyOf = (g: Grant): GrantBody => ({ enabled: g.enabled, can_write: g.can_write, can_account: g.can_account, can_takeover: g.can_takeover, platforms: g.platforms.filter((p): p is Platform => PLATFORMS.some(x => x.id === p)), bridge_ids: g.bridge_ids ?? null })
+const bodyOf = (g: Grant): GrantBody => ({ enabled: g.enabled, can_write: g.can_write, can_account: g.can_account, can_takeover: g.can_takeover, platforms: g.platforms.filter((p): p is Platform => PLATFORMS.some(x => x.id === p)), bridge_ids: g.bridge_ids ?? null, environment_ids: [...g.environment_ids] })
 async function save(g: Grant, body: GrantBody) {
   if (busy.value) return
   busy.value = g.instance_id; error.value = notice.value = ''
@@ -42,6 +43,9 @@ function setBridge(g: Grant, id: string, on: boolean) {
   const current = g.bridge_ids ?? []
   return save(g, { ...bodyOf(g), bridge_ids: props.bridges.map(b => b.id).filter(b => (b === id ? on : current.includes(b))) })
 }
+// 开发环境：一个都不勾 = 这个实例不能新建开发会话；没有“新建会话和发送”时用不上，后端会一并收回
+const setEnvironment = (g: Grant, id: string, on: boolean) => save(g, { ...bodyOf(g), environment_ids: on ? [...new Set([...g.environment_ids, id])] : g.environment_ids.filter(e => e !== id) })
+const usable = (g: Grant) => props.bridges.filter(b => g.bridge_ids == null || g.bridge_ids.includes(b.id))
 const checked = (event: Event) => (event.target as HTMLInputElement).checked
 </script>
 
@@ -52,6 +56,7 @@ const checked = (event: Event) => (event.target as HTMLInputElement).checked
       <li v-for="f in FLAGS" :key="f.key"><strong>{{ f.name }}</strong>：{{ f.help }}</li>
       <li><strong>允许的平台</strong>：一个都不勾表示所有平台都允许。</li>
       <li><strong>允许的 MCP 管理器</strong>：“全部”包括以后添加的；取消后只能用勾选的那几个。</li>
+      <li><strong>可用的开发环境</strong>：只有勾选的开发环境，这个实例才能拿来新建开发会话；一个都不勾就不能新建开发会话（对话不受影响）。</li>
     </ul>
     <ActionFeedback :error="error" :notice="notice" />
     <p v-if="grants.isPending.value" role="status" class="data-state">正在读取实例权限…</p>
@@ -75,6 +80,10 @@ const checked = (event: Event) => (event.target as HTMLInputElement).checked
           <legend>允许的 MCP 管理器</legend>
           <label class="check-field"><input type="checkbox" :checked="g.bridge_ids == null" @change="setAllBridges(g, checked($event))" />全部（包括以后添加的）</label>
           <label v-for="b in bridges" :key="b.id" class="check-field"><input type="checkbox" :disabled="g.bridge_ids == null" :checked="g.bridge_ids == null || g.bridge_ids.includes(b.id)" @change="setBridge(g, b.id, checked($event))" />{{ b.name }}</label>
+        </fieldset>
+        <fieldset v-if="usable(g).length" class="lb-checks" :disabled="!g.enabled || !g.can_write" :aria-label="`${g.instance_name}可用的开发环境`">
+          <legend>可用的开发环境{{ g.enabled && g.can_write && !g.environment_ids.length ? '（现在：一个都不能用）' : '' }}</legend>
+          <GrantEnvironments v-for="b in usable(g)" :key="b.id" :api="api" :bridge="b" :grant="g" @toggle="(id, on) => setEnvironment(g, id, on)" />
         </fieldset>
         <p v-if="g.enabled && g.bridge_ids && !g.bridge_ids.length" role="note" class="lb-warn">这个实例现在一个 MCP 管理器都不能用：勾选至少一个，或者勾“全部”。</p>
       </fieldset>
