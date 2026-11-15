@@ -357,8 +357,8 @@ async function main() {
     await page.reload()
     await page.getByRole('heading', { level: 2, name: TITLE }).waitFor()
     await thread(page).getByText(':: 第二问').waitFor()
-    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条；插入那一步的两条
-    check((await countMessages(page)) === 26, `刷新后十三问十三答都还在：${await countMessages(page)}`)
+    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条，粘贴和拖入图片的那一条；插入那一步的两条
+    check((await countMessages(page)) === 28, `刷新后十四问十四答都还在：${await countMessages(page)}`)
     const info = page.getByRole('complementary', { name: '会话信息' })
     await info.getByText('回合（13）').waitFor()
     await info.getByText(MANAGER).waitFor()
