@@ -360,7 +360,7 @@ async function main() {
     // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条，粘贴和拖入图片的那一条；插入那一步的两条
     check((await countMessages(page)) === 28, `刷新后十四问十四答都还在：${await countMessages(page)}`)
     const info = page.getByRole('complementary', { name: '会话信息' })
-    await info.getByText('回合（13）').waitFor()
+    await info.getByText('回合（14）').waitFor()
     await info.getByText(MANAGER).waitFor()
     step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
 
