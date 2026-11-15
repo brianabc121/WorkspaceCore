@@ -427,6 +427,7 @@ async def test_chat_quota_interruption_and_resume(rig: Rig) -> None:  # noqa: F8
     claude = quota["claude"]
     assert claude["paused_until"] >= until and claude["pause_estimated"] is False
     assert claude["waiting_resume"] == 1 and claude["can_refresh"] is False
+    assert claude["reports_quota"] is True
     (window,) = claude["windows"]
     assert (window["kind"], window["status"], window["used_percent"]) == (
         "five_hour",

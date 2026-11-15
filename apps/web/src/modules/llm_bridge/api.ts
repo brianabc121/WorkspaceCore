@@ -64,13 +64,13 @@ export const isSudoJobError = (code: string | null | undefined) => code === 'sud
 /** 重新部署 / 重启 / 卸载被拒绝（409）：这台服务器的登录账号用 Docker 要 sudo 密码，带上密码重发 */
 export const needsSudoPassword = (error: unknown) => error instanceof ApiError && error.code === 'SUDO_PASSWORD_REQUIRED'
 /** 账号（接口里的 slot）的名字：ChatGPT 和 Codex 用的是同一个 OpenAI 账号 */
-const SLOT_NAME: Record<string, string> = { openai: 'OpenAI', claude: 'Claude', workbuddy: 'WorkBuddy' }
-/** 一组账号的名字，按页面上固定的顺序（OpenAI、Claude、WorkBuddy）；不认识的照原样排在后面 */
+const SLOT_NAME: Record<string, string> = { openai: 'OpenAI', claude: 'Claude', workbuddy: 'CodeBuddy' }
+/** 一组账号的名字，按页面上固定的顺序（OpenAI、Claude、CodeBuddy）；不认识的照原样排在后面 */
 export const slotNames = (slots: readonly string[]) => [...Object.keys(SLOT_NAME).filter(s => slots.includes(s)), ...slots.filter(s => !(s in SLOT_NAME))].map(s => SLOT_NAME[s] ?? s)
 export const newDeployRequestId = () => (typeof crypto.randomUUID === 'function' ? `web-${crypto.randomUUID()}` : `web-${Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')}`)
 
 export const PLATFORMS: readonly { id: Platform; name: string }[] = [
-  { id: 'chatgpt', name: 'ChatGPT' }, { id: 'codex', name: 'Codex' }, { id: 'claude', name: 'Claude' }, { id: 'workbuddy', name: 'WorkBuddy' },
+  { id: 'chatgpt', name: 'ChatGPT' }, { id: 'codex', name: 'Codex' }, { id: 'claude', name: 'Claude' }, { id: 'workbuddy', name: 'CodeBuddy' },
 ]
 export const platformName = (id: string) => PLATFORMS.find(p => p.id === id)?.name ?? id
 /** 平台用哪个账号登录：ChatGPT 聊天和 Codex 用的是同一个 ChatGPT 账号 */
@@ -86,7 +86,7 @@ export const METHODS: Record<LoginMethod, { name: string; help: string }> = {
   api_key: { name: 'API 密钥', help: '密钥保存在会话桥的数据卷里，不保存在工作台。' },
   oauth_token: { name: '订阅令牌', help: '用官方程序生成的长期令牌登录订阅账号；令牌保存在会话桥的数据卷里，不保存在工作台。' },
   existing: { name: '容器里已有的登录', help: '使用已经在容器里完成的登录。' },
-  // WorkBuddy（CodeBuddy）的网页登录：页面给出网址，在自己的浏览器里打开并登录，不用进容器操作官方程序
+  // CodeBuddy的网页登录：页面给出网址，在自己的浏览器里打开并登录，不用进容器操作官方程序
   web_cn: { name: '网页登录（国内站）', help: '页面给出一个登录网址，你在自己的浏览器里打开并登录 CodeBuddy 国内站（copilot.tencent.com）的账号，完成后这里自动更新。' },
   web_intl: { name: '网页登录（国际站）', help: '页面给出一个登录网址，你在自己的浏览器里打开并登录 CodeBuddy 国际站（www.codebuddy.ai）的账号，完成后这里自动更新。' },
 }
@@ -108,6 +108,8 @@ export function quotaUsage(w: QuotaWindow) {
   const used = Math.min(100, Math.max(0, Math.round(w.used_percent)))
   return `已用 ${used}%，剩余 ${100 - used}%`
 }
+/** 平台的官方程序不给额度时（CodeBuddy）页面上的说明：不显示猜的数字 */
+export const NO_QUOTA = '这个平台的官方程序不提供剩余额度和重置时间（CodeBuddy 按积分计费），这里显示不了；剩余积分请到平台官网的账号页面查看。'
 export const seconds = (value: number | null | undefined) => (value ? formatTime(new Date(value * 1000).toISOString()) : '—')
 
 // 工作台自己写的说明；会话桥返回的错误（CONFLICT 等）带的是会话桥写的中文说明，按纯文字显示

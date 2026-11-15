@@ -5,7 +5,7 @@ import ManagementSection from '../../components/management/ManagementSection.vue
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { PLATFORMS, SANDBOX, bridgeError, platformName, type Bridge, type BridgeStatus, type Environment, type EnvironmentBody, type LlmBridgeApi } from './api'
 
-// 开发环境：智能体在哪个代码仓库、用什么权限干活。只有 Codex / Claude / WorkBuddy 有开发模式（ChatGPT 没有）；
+// 开发环境：智能体在哪个代码仓库、用什么权限干活。只有 Codex / Claude / CodeBuddy 有开发模式（ChatGPT 没有）；
 // 用法固定是“开发”（云端通道目前只是占位）。
 // 新增时只能选这个 MCP 管理器控制的平台（状态还没读到时不限制，由后端把关）。
 const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; canWrite: boolean }>()
@@ -44,11 +44,11 @@ function remove(env: Environment) {
 </script>
 
 <template>
-  <ManagementSection title="开发环境" :label="`开发环境：${bridge.name}`" description="开发环境决定智能体让大模型在哪个代码仓库、用什么权限干活。只有 Codex、Claude、WorkBuddy 有开发模式；用法固定是“开发”，云端通道目前只是占位。">
+  <ManagementSection title="开发环境" :label="`开发环境：${bridge.name}`" description="开发环境决定智能体让大模型在哪个代码仓库、用什么权限干活。只有 Codex、Claude、CodeBuddy 有开发模式；用法固定是“开发”，云端通道目前只是占位。">
     <template v-if="canWrite && !form.open && DEV_PLATFORMS.length" #actions>
       <button type="button" class="primary-button" @click="openForm()"><Plus aria-hidden="true" />新增环境</button>
     </template>
-    <p v-if="!DEV_PLATFORMS.length" role="note" class="lb-warn">这个 MCP 管理器没有控制带开发模式的平台（Codex / Claude / WorkBuddy），不能新增开发环境。</p>
+    <p v-if="!DEV_PLATFORMS.length" role="note" class="lb-warn">这个 MCP 管理器没有控制带开发模式的平台（Codex / Claude / CodeBuddy），不能新增开发环境。</p>
     <ActionFeedback :error="error" :notice="notice" />
     <p v-if="environments.isPending.value" role="status" class="data-state">正在读取开发环境…</p>
     <div v-else-if="environments.error.value" class="data-state">

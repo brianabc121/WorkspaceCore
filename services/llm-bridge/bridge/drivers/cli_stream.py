@@ -1,4 +1,4 @@
-"""Claude Code 与 CodeBuddy Code（WorkBuddy）共用的驱动：每个回合起一次官方命令行，
+"""Claude Code 与 CodeBuddy Code共用的驱动：每个回合起一次官方命令行，
 
 `<程序> -p --output-format stream-json --verbose [--session-id <id> | --resume <id>]`，
 消息从标准输入给，逐行读 JSON 事件。两家的参数与事件格式相同（claude 2.1.323、
@@ -79,6 +79,8 @@ class CliProfile:
     models_from_help: bool = False
     # 网页登录（bridge/drivers/web_login.py）：页面上的登录方式 → 官方程序本机服务里的登录方式
     web_login: dict[str, str] = field(default_factory=dict)
+    # 回合输出里带不带额度（已用百分比、重置时间）。CodeBuddy 2.184.0 的 stream-json 输出里没有
+    reports_quota: bool = True
     # 能不能用“容器里已有的登录”（要进容器操作官方程序；有网页登录的平台不再提供）
     allow_existing: bool = True
 
@@ -105,7 +107,7 @@ def claude_profile(binary: str) -> CliProfile:
 def codebuddy_profile(binary: str) -> CliProfile:
     return CliProfile(
         slot="workbuddy",
-        label="WorkBuddy（CodeBuddy Code）",
+        label="CodeBuddy",
         binary=binary,
         config_env="CODEBUDDY_CONFIG_DIR",
         secret_envs={"api_key": "CODEBUDDY_API_KEY"},
@@ -115,6 +117,7 @@ def codebuddy_profile(binary: str) -> CliProfile:
         # 网页登录：国内站 / 国际站（官方程序本机服务里叫 internal / external）
         web_login={"web_cn": "internal", "web_intl": "external"},
         allow_existing=False,
+        reports_quota=False,
     )
 
 
@@ -159,6 +162,10 @@ def parse_transcript_line(record: dict[str, Any]) -> Message | None:
 
 
 class CliStreamDriver(Driver):
+    @property
+    def reports_quota(self) -> bool:  # type: ignore[override]
+        return self.profile.reports_quota
+
     def __init__(
         self,
         profile: CliProfile,

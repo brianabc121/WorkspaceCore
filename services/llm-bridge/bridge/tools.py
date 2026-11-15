@@ -119,7 +119,7 @@ TOOLS: tuple[ToolDef, ...] = (
     ),
     ToolDef(
         "llm_session_create",
-        "在 ChatGPT / Codex / Claude / WorkBuddy 上新建一个会话：选平台、模式、模型；开发模式还要选环境。"
+        "在 ChatGPT / Codex / Claude / CodeBuddy 上新建一个会话：选平台、模式、模型；开发模式还要选环境。"
         "返回 session_id，之后用 llm_send 发消息。",
         SessionCreateInput,
         False,

@@ -13,12 +13,13 @@
 |---|---|---|---|
 | Codex 0.169.0（ChatGPT 与 Codex 共用） | `account/rateLimits/read`（随时可查）、通知 `account/rateLimits/updated` | 每个窗口的 `usedPercent`、`resetsAt`、`windowDurationMins`（主窗口通常是 5 小时，次窗口是一周）；套餐类型；额度用完时的错误类型 `usageLimitExceeded` | 生成的接口定义 |
 | Claude Code 2.1.323 | 回合输出里的 `rate_limit_event`（带 `rate_limit_info`） | 状态（允许 / 快用完 / 被拒绝）、哪个窗口、重置时间、使用比例 | 只在程序文件里看到这两个名字；字段和取值没有账号、不能实测 |
-| CodeBuddy Code 2.184.0（WorkBuddy） | 类型定义里的 `SessionRateLimit` | `kind`（`five_hour` / `seven_day` …）、`percentUsed`、`resetsAt` | 类型定义；回合输出里怎么带出来不能实测 |
+| CodeBuddy Code 2.184.0 | **拿不到**（2026-11-15 更正，T-0242） | 类型定义里的 `SessionRateLimit`（`kind`、`percentUsed`、`resetsAt`）只在程序内部的扩展钩子里能读，`-p --output-format stream-json` 的回合输出里没有 `rate_limit_event`，本机服务也没有查额度的接口；它按积分计费，回合结果里只有 `usage`（token 数） | 锁定版本的程序文件；用真实账号跑过回合，页面上确实没有额度 |
 
 两点要先说清楚：
 
 - **三家给的都是“已用百分比 + 重置时间”，没有“剩余多少 token”这个数。** 页面如实显示“已用 62%，14:30 重置”；另外用管理器自己记的用量显示“最近 5 小时经这个管理器用了多少 token”作参考。
-- **只有 Codex 能随时查。** Claude 和 WorkBuddy 的额度只在跑回合时由官方程序顺带报出来，所以页面上是“上一次回合时看到的”，带着时间；很久没跑回合时会标成“可能已过期”。
+- **CodeBuddy 不给额度。** 页面照实写“官方程序不提供剩余额度和重置时间”，只显示经管理器用掉的 token（接口里 `reports_quota=false`）。
+- **只有 Codex 能随时查。** Claude 的额度只在跑回合时由官方程序顺带报出来，所以页面上是“上一次回合时看到的”，带着时间；很久没跑回合时会标成“可能已过期”。
 
 ## 2. 查看额度
 

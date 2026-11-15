@@ -816,7 +816,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 **限流与消息队列**（T-0236，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 2、4 节）。
 
-- 设置（`PUT .../bridges/{id}/settings`）：`concurrency` 的含义改成“每个**平台**同时进行的会话数”（默认 3，ChatGPT / Codex / Claude / WorkBuddy 各算各的；超过的排队等名额，不拒绝）；新增 `min_start_interval_seconds`（同一个平台两次开始之间至少隔几秒，默认 2，0–60）。
+- 设置（`PUT .../bridges/{id}/settings`）：`concurrency` 的含义改成“每个**平台**同时进行的会话数”（默认 3，ChatGPT / Codex / Claude / CodeBuddy 各算各的；超过的排队等名额，不拒绝）；新增 `min_start_interval_seconds`（同一个平台两次开始之间至少隔几秒，默认 2，0–60）。
 - 状态（`GET .../bridges/{id}/status`）多一个 `load`：每个平台的 `running`（进行中的会话数）、`waiting`（在等的会话数）、`limit`。
 - 会话在处理时再发的消息进这个会话的队列（`status=queued`），不打断正在处理的；队列持久化，管理器重启后继续。
 
@@ -849,7 +849,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 **插入消息**（T-0236 第三步，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 5 节）。
 
 - 发送（`POST .../chat/sessions/{session_id}/messages`）多一项 `mode`：`queue`（默认，排队、不打断）/ `insert`。智能体的 `llm_bridge_send` 同样多 `mode`。
-- 会话正在处理别的消息、`mode=insert` 时：先试着把消息送进正在处理的回合（Codex 的 `turn/steer`）；平台在 10 秒内没有确认收下、或带了附件，就**中断正在处理的回合，把这条消息和“接着刚才没做完的事继续”合成一个新回合**，排在这个会话队列的最前面。Claude / WorkBuddy 目前一律走后一种。
+- 会话正在处理别的消息、`mode=insert` 时：先试着把消息送进正在处理的回合（Codex 的 `turn/steer`）；平台在 10 秒内没有确认收下、或带了附件，就**中断正在处理的回合，把这条消息和“接着刚才没做完的事继续”合成一个新回合**，排在这个会话队列的最前面。Claude / CodeBuddy 目前一律走后一种。
 - 返回多一项 `delivered`：`inserted`（进了正在处理的回合，`turn_id` 是那个回合，没有新回合）/ `merged`（中断后合并重发）/ `queued` / `started`。
 - 被插入打断的回合 `status=interrupted`、`failure.kind=superseded`：不是失败，不参与额度的自动续跑。
 - 会话内容里，提问多一项 `delivery`：`turn` / `inserted` / `merged`。插进去的消息排在它进入的那一回合的提问之后、回答之前。存下来的提问是人发的原话；“接着刚才的做”那一句只给模型看。
@@ -857,7 +857,8 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 **额度与额度用完后的自动继续**（T-0237，`docs/v2/LLM_BRIDGE_QUOTA_PLAN.md`）。
 
-- 平台给的是**已用百分比和重置时间**，不是剩余 token 数。Codex 可以随时查；Claude / WorkBuddy 只在跑回合时顺带报出来，接口给的是最近一次看到的。
+- 平台给的是**已用百分比和重置时间**，不是剩余 token 数。Codex 可以随时查；Claude 只在跑回合时顺带报出来，接口给的是最近一次看到的。
+- 每个平台多一个 `reports_quota`（T-0242）：平台给不给额度。CodeBuddy 是 `false`——锁定版本（2.184.0）的官方程序在回合输出里不带已用百分比和重置时间，也没有能查的接口，所以 `windows` 一直是空的，只有 `tokens_5h`；页面照实说明，不显示猜的数字。旧版本的管理器没有这个字段，按 `true` 处理。
 - 状态（`GET .../bridges/{id}/status`）多一个 `quota`：每个平台的 `windows`（`kind`：`five_hour` / `weekly` / 平台给的别的名字；`used_percent`、`resets_at`、`reset_passed`、`status`：`ok` / `warning` / `exceeded`、`plan`、`observed_at`）、`can_refresh`、`paused_until`、`pause_estimated`、`waiting_resume`、`tokens_5h`（最近 5 小时经这个管理器用掉的 token，管理器自己记的）。
 - 设置多三项：`auto_resume`（默认开）、`auto_resume_max`（同一次中断最多自动续几次，默认 3，1–10）、`resume_text`（自动继续时发的那句话，默认“继续意外中断的任务”，1–200 字）。
 - 回合多一个状态 `interrupted`（`failure.kind = quota_exceeded`）：额度用完被打断，不算失败。这样的回合带 `resume`：`state`（`pending` 到点自动继续 / `forced` 有人点了现在就试 / `done` 已经续跑 / `cancelled` 不要自动继续 / `skipped` / `exhausted` 次数用完）、`at`、`attempt`、`resumed_by`。平台暂停期间新发的消息排队，不去撞限额。
@@ -869,7 +870,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST .../chat/turns/{turn_id}/resume` | 被额度打断的回合，现在就试着继续（admin）。不是被额度打断的、已经续跑过的 `409` |
 | `DELETE .../chat/turns/{turn_id}/resume` | 不要自动继续（admin） |
 
-**WorkBuddy 网页登录**（T-0241）。`POST .../bridges/{id}/accounts/workbuddy/login` 的 `method` 多两种：`web_cn`（国内站）、`web_intl`（国际站）。返回 `state=pending` 和 `verification_url`（没有 `user_code`）：人在自己的浏览器里打开并登录；页面照设备码登录那样轮询 `GET .../login` 直到 `done` / `failed`。WorkBuddy 不再提供 `existing`。
+**CodeBuddy 网页登录**（T-0241）。`POST .../bridges/{id}/accounts/workbuddy/login` 的 `method` 多两种：`web_cn`（国内站）、`web_intl`（国际站）。返回 `state=pending` 和 `verification_url`（没有 `user_code`）：人在自己的浏览器里打开并登录；页面照设备码登录那样轮询 `GET .../login` 直到 `done` / `failed`。CodeBuddy 不再提供 `existing`。
 
 **平台连通性**（T-0240）。`GET /api/v1/llm_bridge/bridges/{bridge_id}/connectivity?refresh=`（admin）：由管理器在它那台服务器上访问各平台的地址（不带凭据）。
 返回 `supported`（旧版本的管理器为 false）和 `slots`（键是账号槽位 `openai` / `claude` / `workbuddy`）：每个槽位 `ok`、`need`（`all` 都要可用 / `any` 有一个就行）、`checked_at`、

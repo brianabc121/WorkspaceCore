@@ -1,5 +1,5 @@
 // 大模型聚合聊天浏览器验收（T-0231、T-0232，docs/v2/LLM_CHAT_PLAN.md）：
-// 真实后端 + 真实前端 + 一个验收用的 MCP 管理器——它里面的 Claude 和 WorkBuddy 程序换成了不访问外网的假程序
+// 真实后端 + 真实前端 + 一个验收用的 MCP 管理器——它里面的 Claude 和 CodeBuddy 程序换成了不访问外网的假程序
 // （services/llm-bridge/tests/fakes/fake_cli.py：参数和事件的形状与真实程序一致，回答是把收到的话原样带回来；
 // 收到 hang 时会一直不回答，用来验收“停止”）。别的都是真的：会话桥、工作台接口、页面。
 //
@@ -146,8 +146,8 @@ async function main() {
     check((await side(page).getByLabel('MCP 管理器').locator('option:checked').innerText()) === MANAGER, '左栏应选中验收用的管理器')
     const filters = side(page).getByRole('group', { name: '按平台筛选' })
     await filters.getByRole('button', { name: 'Claude', exact: true }).waitFor()
-    check(/未登录/.test(await filters.getByRole('button', { name: /WorkBuddy/ }).innerText()), '没登录的平台要在筛选里标出来')
-    check((await filters.getByRole('button').count()) === 3, '筛选里只列这个管理器控制的平台（全部 / Claude / WorkBuddy）')
+    check(/未登录/.test(await filters.getByRole('button', { name: /CodeBuddy/ }).innerText()), '没登录的平台要在筛选里标出来')
+    check((await filters.getByRole('button').count()) === 3, '筛选里只列这个管理器控制的平台（全部 / Claude / CodeBuddy）')
     step('添加管理器并登录后，聊天页列出它控制的平台，没登录的标出来')
 
     // ---------------------------------------------------------------- 新建会话并发第一条
@@ -156,7 +156,7 @@ async function main() {
     const platforms = form.getByRole('group', { name: '平台' })
     await platforms.getByRole('radio', { name: /Claude/ }).waitFor()
     check(await platforms.getByRole('radio', { name: /Claude/ }).isChecked(), '默认选中已登录的平台')
-    check(await platforms.getByRole('radio', { name: /WorkBuddy/ }).isDisabled(), '没登录的平台不能选')
+    check(await platforms.getByRole('radio', { name: /CodeBuddy/ }).isDisabled(), '没登录的平台不能选')
     check(await form.getByRole('group', { name: '用法' }).getByRole('radio', { name: /对话/ }).isChecked(), '默认用法是对话')
     await form.getByLabel('第一条消息').fill(FIRST)
     await form.getByRole('button', { name: '新建并发送' }).click()
@@ -241,6 +241,12 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('textarea[aria-label="消息内容"]')?.value === '', null, { timeout: 30000 })
     await new Promise((resolve) => setTimeout(resolve, 2500))
     check((await thread(page).getByText(':: 中断后再发').count()) === 0, '平台暂停期间，新发的消息应排队等着')
+    // 聊天页的“会话信息”里也有这个平台的额度：用了多少、什么时候重置、暂停到什么时候（T-0242）
+    if (!(await page.getByRole('complementary', { name: '会话信息' }).count())) await page.getByRole('button', { name: '会话信息' }).click()
+    const quotaBox = page.getByRole('region', { name: '额度：Claude' })
+    await quotaBox.getByText('已用 100%，剩余 0%').waitFor({ timeout: 60000 })
+    await quotaBox.getByText('重置时间').waitFor()
+    check(/额度用完，这个平台暂停到 /.test(await quotaBox.getByRole('note').innerText()), '会话信息里应说明平台暂停到什么时候')
     // 管理页的“额度”：窗口、重置时间、暂停
     const manage = await page.context().newPage()
     await manage.goto(`${base}/llm_bridge?view=manage`)
@@ -415,7 +421,7 @@ async function main() {
 
     // ---------------------------------------------------------------- 多模型同问（T-0232）
     const buddyIn = await api(page, workspace, 'POST', `/api/v1/llm_bridge/bridges/${bridgeId}/accounts/workbuddy/login`, { method: 'api_key', api_key: FAKE_KEY })
-    check(buddyIn.status === 200, `WorkBuddy 登录失败：${JSON.stringify(buddyIn)}`)
+    check(buddyIn.status === 200, `CodeBuddy 登录失败：${JSON.stringify(buddyIn)}`)
     const groupsApi = '/api/v1/llm_bridge/chat/groups'
     const tooFew = await api(page, workspace, 'POST', groupsApi, { text: 'x', request_id: requestId(), targets: [{ bridge_id: bridgeId, platform: 'claude', mode: 'chat' }] })
     check(tooFew.status === 422, `只有一个目标应被拒绝：${tooFew.status}`)
@@ -425,14 +431,14 @@ async function main() {
     // 当前管理器上已登录、能对话的平台先加进来
     const chosen = compare.getByRole('list', { name: '发给（2 个）' })
     await chosen.waitFor({ timeout: 60000 })
-    check((await chosen.getByRole('listitem').allInnerTexts()).join('|') === `Claude · 默认模型 · ${MANAGER}|WorkBuddy · 默认模型 · ${MANAGER}`, `默认应选中已登录的两个平台：${await chosen.innerText()}`)
+    check((await chosen.getByRole('listitem').allInnerTexts()).join('|') === `Claude · 默认模型 · ${MANAGER}|CodeBuddy · 默认模型 · ${MANAGER}`, `默认应选中已登录的两个平台：${await chosen.innerText()}`)
     await compare.getByLabel('问题').fill(QUESTION)
     await compare.getByRole('button', { name: '发给 2 个模型' }).click()
     await page.getByRole('heading', { level: 2, name: QUESTION }).waitFor({ timeout: 60000 })
     const groupId = new URL(page.url()).searchParams.get('g')
     check(/^[0-9a-f-]{36}$/.test(groupId || ''), `地址里应带上这一组：${page.url()}`)
     const claudeColumn = page.getByRole('region', { name: `Claude（${MANAGER}）` })
-    const buddyColumn = page.getByRole('region', { name: `WorkBuddy（${MANAGER}）` })
+    const buddyColumn = page.getByRole('region', { name: `CodeBuddy（${MANAGER}）` })
     await claudeColumn.getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
     await buddyColumn.getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
     const entry = side(page).getByRole('region', { name: '同问' }).getByRole('button', { name: new RegExp(QUESTION) })
@@ -505,9 +511,9 @@ async function main() {
     const tabs = phone.page.getByRole('tablist', { name: '这一组里的模型' })
     await tabs.waitFor()
     await phone.page.getByRole('region', { name: `Claude（${MANAGER}）` }).getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
-    check(!(await phone.page.getByRole('region', { name: `WorkBuddy（${MANAGER}）` }).isVisible()), '手机上一次只看一栏')
-    await tabs.getByRole('tab', { name: new RegExp('WorkBuddy') }).click()
-    await phone.page.getByRole('region', { name: `WorkBuddy（${MANAGER}）` }).getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
+    check(!(await phone.page.getByRole('region', { name: `CodeBuddy（${MANAGER}）` }).isVisible()), '手机上一次只看一栏')
+    await tabs.getByRole('tab', { name: new RegExp('CodeBuddy') }).click()
+    await phone.page.getByRole('region', { name: `CodeBuddy（${MANAGER}）` }).getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
     check(await noHorizontalScroll(phone.page), '手机宽度下同问不应横向滚动')
     await phone.context.close()
     step('手机宽度（390）：列表和对话分成两屏，能返回，会话信息从右上角打开；同问一次看一栏；都不横向滚动')

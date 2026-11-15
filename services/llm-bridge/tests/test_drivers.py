@@ -330,6 +330,8 @@ async def test_codebuddy_profile(tmp_path: Path) -> None:
     driver = _cli(tmp_path, codebuddy_profile)
     # 网页登录（国内站 / 国际站）和 API 密钥；不再提供“容器里已有的登录”
     assert driver.slot == "workbuddy"
+    # 官方程序的回合输出里不带额度：页面要照实说明，而不是让人等“跑过回合后会显示”
+    assert driver.reports_quota is False and _cli(tmp_path, claude_profile).reports_quota is True
     assert driver.login_methods == ("web_cn", "web_intl", "api_key")
     with pytest.raises(DriverError, match="不支持登录方式"):
         await driver.login("existing", {})
@@ -369,7 +371,7 @@ async def _login_done(driver: Any, seconds: float = 15) -> Any:
 
 
 async def test_codebuddy_web_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """WorkBuddy 的网页登录：页面拿到网址，人在自己的浏览器里登录完，这里就变成已登录。"""
+    """CodeBuddy 的网页登录：页面拿到网址，人在自己的浏览器里登录完，这里就变成已登录。"""
     from bridge.drivers import web_login
 
     monkeypatch.setattr(web_login, "POLL_SECONDS", 0.1)

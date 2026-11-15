@@ -11,7 +11,7 @@ const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeSt
 const emit = defineEmits<{ reload: [] }>()
 
 const FIELDS = [
-  { key: 'concurrency', label: '每个平台同时进行的会话数', help: '一个平台（ChatGPT / Codex / Claude / WorkBuddy 各算各的）最多同时有几个会话在跑（1–16）；超过的排队等名额。调小可以降低账号被限制的风险。', min: 1, max: 16 },
+  { key: 'concurrency', label: '每个平台同时进行的会话数', help: '一个平台（ChatGPT / Codex / Claude / CodeBuddy 各算各的）最多同时有几个会话在跑（1–16）；超过的排队等名额。调小可以降低账号被限制的风险。', min: 1, max: 16 },
   { key: 'min_start_interval_seconds', label: '两次开始的最小间隔（秒）', help: '同一个平台上两个会话开始处理之间至少隔几秒（0–60），几个名额不会同时起跑。', min: 0, max: 60 },
   { key: 'turn_timeout_seconds', label: '单个回合的时限（秒）', help: '一个回合最长跑多久（30–21600 秒）。', min: 30, max: 21600 },
   { key: 'send_per_hour', label: '每小时发送次数', help: '每个实例每小时最多发多少次指令（1–10000）。', min: 1, max: 10000 },

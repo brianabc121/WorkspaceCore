@@ -1,7 +1,7 @@
 // 大模型客户端管理浏览器验收（T-0229 / T-0230，docs/v2/LLM_BRIDGE_PLAN.md 第 19 节、docs/deployment.md 第 25 节）：
 // 真实后端 + 真实前端 + 真实的 MCP 管理器（会话桥容器，里面是锁定版本的 codex / claude / codebuddy 官方程序，都没有登录）——
-// 应用中心启用模块 → 添加 1 号管理器（只控制 Claude / WorkBuddy；令牌不对不添加、令牌不回显）→
-// 添加 2 号管理器（控制 Codex / Claude / WorkBuddy）→ 两个管理器各自一套账号（在 1 号登录不影响 2 号）→
+// 应用中心启用模块 → 添加 1 号管理器（只控制 Claude / CodeBuddy；令牌不对不添加、令牌不回显）→
+// 添加 2 号管理器（控制 Codex / Claude / CodeBuddy）→ 两个管理器各自一套账号（在 1 号登录不影响 2 号）→
 // 改控制的平台（取消要确认、不能一个都不留）→ Claude 订阅登录先确认风险 → 设置 → 开发环境（只能选控制的平台）→
 // 会话 → 实例权限（含只允许用某个管理器）→ 令牌改错时原地提示 → admin 只读、member 看不到 → 手机宽度 → 停用与删除。
 // 这个脚本同时验证“工作台能连到每个 MCP 管理器”：CI 里用 make llm-bridge-up 和 make llm-bridge-up N=2 启动，
@@ -37,7 +37,7 @@ const ALL_PLATFORMS = ['chatgpt', 'codex', 'claude', 'workbuddy']
 const INSTANCE = `lb-agent-${run}`
 // 假的 API 密钥：只用来验证“保存、显示为已登录、不回显、能退出”，不会发给任何平台
 const FAKE_KEY = `e2e-not-a-real-key-${randomBytes(12).toString('hex')}`
-const WORKBUDDY = 'WorkBuddy（CodeBuddy）'
+const WORKBUDDY = 'CodeBuddy'
 
 function seed(...args) {
   return execFileSync('python3', [path.join(__dirname, 'seed.py'), ...args], {
@@ -101,7 +101,7 @@ const tab = (page, name) => page.getByRole('tab', { name, exact: true })
 const card = (page, name) => page.getByRole('article', { name: `MCP 管理器：${name}` })
 const panel = (page) => page.getByRole('tabpanel', { name: '平台与账号' })
 const control = (page) => panel(page).getByRole('group', { name: '控制的平台' })
-// 卡片上“控制的平台”那几行的文字，例如 ['Claude未登录', 'WorkBuddy（CodeBuddy）…']
+// 卡片上“控制的平台”那几行的文字，例如 ['Claude未登录', 'CodeBuddy…']
 async function platformsOn(page, name) {
   const list = card(page, name).getByRole('list', { name: `${name}控制的平台` })
   await list.waitFor({ timeout: 60000 })
@@ -163,7 +163,7 @@ async function main() {
     await switchIs('true')
     step('模块默认启用（侧栏有入口）；在应用中心停用后接口 404 MODULE_DISABLED、侧栏没有入口；再启用')
 
-    // ---------------------------------------------------------------- 添加 1 号：只控制 Claude / WorkBuddy
+    // ---------------------------------------------------------------- 添加 1 号：只控制 Claude / CodeBuddy
     await page.goto(`${base}/llm_bridge?view=manage`)
     await page.getByRole('heading', { name: '大模型客户端管理', level: 1 }).waitFor()
     await sidebar(page).getByRole('link', { name: '大模型客户端', exact: true }).waitFor()
@@ -185,8 +185,8 @@ async function main() {
     check(!JSON.stringify(listed).includes(bridgeToken), '接口不应回传管理令牌')
     const oneId = listed[0].id
     const onOne = await platformsOn(page, ONE)
-    check(onOne.length === 2 && onOne[0].startsWith('Claude') && onOne[1].startsWith('WorkBuddy'), `1 号卡片上控制的平台不对：${onOne}`)
-    step('添加 1 号管理器（只勾 Claude / WorkBuddy）：令牌太短、令牌不对都被拦下且不添加；添加后令牌不回显，卡片列出它控制的两个平台')
+    check(onOne.length === 2 && onOne[0].startsWith('Claude') && onOne[1].startsWith('CodeBuddy'), `1 号卡片上控制的平台不对：${onOne}`)
+    step('添加 1 号管理器（只勾 Claude / CodeBuddy）：令牌太短、令牌不对都被拦下且不添加；添加后令牌不回显，卡片列出它控制的两个平台')
 
     // ---------------------------------------------------------------- 1 号的平台与账号：只有它控制的平台
     await account(page, WORKBUDDY).getByText('未登录').waitFor({ timeout: 60000 })
@@ -194,7 +194,7 @@ async function main() {
     const claudeState = await account(page, 'Claude').locator('.asv-state').first().innerText()
     check(['未登录', '不可用'].includes(claudeState.trim()), `Claude 的状态不对：${claudeState}`)
     check(await account(page, 'ChatGPT / Codex').count() === 0, '1 号不控制 ChatGPT / Codex，不应显示它的账号')
-    for (const [name, on] of [['ChatGPT', false], ['Codex', false], ['Claude', true], ['WorkBuddy', true]]) {
+    for (const [name, on] of [['ChatGPT', false], ['Codex', false], ['Claude', true], ['CodeBuddy', true]]) {
       check((await control(page).getByLabel(name, { exact: true }).isChecked()) === on, `1 号“控制的平台”里 ${name} 的勾选不对`)
     }
     const channels = page.getByRole('table', { name: '通道' })
@@ -206,9 +206,9 @@ async function main() {
     await page.getByRole('group', { name: '回合' }).getByText('排队中 0').waitFor()
     const refusedLogin = await api(page, workspace, 'POST', `/api/v1/llm_bridge/bridges/${oneId}/accounts/openai/login`, { method: 'api_key', api_key: FAKE_KEY })
     check(refusedLogin.status === 409, `1 号不控制 ChatGPT / Codex，后端也要拒绝在它上面登录：${JSON.stringify(refusedLogin)}`)
-    step(`1 号的“平台与账号”：只有 Claude（${claudeState.trim()}）和 WorkBuddy 的账号与通道；不控制的平台后端也拒绝登录`)
+    step(`1 号的“平台与账号”：只有 Claude（${claudeState.trim()}）和 CodeBuddy 的账号与通道；不控制的平台后端也拒绝登录`)
 
-    // ---------------------------------------------------------------- 添加 2 号：控制 Codex / Claude / WorkBuddy
+    // ---------------------------------------------------------------- 添加 2 号：控制 Codex / Claude / CodeBuddy
     let twoId = null
     if (two) {
       // 每个管理器有自己的令牌：1 号的令牌用不到 2 号上
@@ -220,23 +220,23 @@ async function main() {
       await page.getByText(`已添加「${TWO}」。`).waitFor()
       twoId = (await bridges()).find((b) => b.name === TWO).id
       const onTwo = await platformsOn(page, TWO)
-      check(onTwo.length === 3 && onTwo[0].startsWith('Codex') && onTwo[1].startsWith('Claude') && onTwo[2].startsWith('WorkBuddy'), `2 号卡片上控制的平台不对：${onTwo}`)
+      check(onTwo.length === 3 && onTwo[0].startsWith('Codex') && onTwo[1].startsWith('Claude') && onTwo[2].startsWith('CodeBuddy'), `2 号卡片上控制的平台不对：${onTwo}`)
       check((await card(page, TWO).getAttribute('aria-current')) === 'true', '添加后应选中新的管理器')
       await account(page, 'ChatGPT / Codex').getByText('未登录').waitFor({ timeout: 60000 })
       check(!(await control(page).getByLabel('ChatGPT', { exact: true }).isChecked()), '2 号没有勾 ChatGPT')
       await channels.getByRole('row').filter({ hasText: 'Codex' }).filter({ hasText: '开发' }).getByText('可用', { exact: true }).waitFor()
       check(await channels.getByRole('row').filter({ hasText: 'ChatGPT' }).count() === 0, '2 号没有勾 ChatGPT，通道表不应列出它')
-      step('添加 2 号管理器（勾 Codex / Claude / WorkBuddy）：1 号的令牌用不上；卡片列出三个平台，有 ChatGPT / Codex 的账号但没有 ChatGPT 聊天通道')
+      step('添加 2 号管理器（勾 Codex / Claude / CodeBuddy）：1 号的令牌用不上；卡片列出三个平台，有 ChatGPT / Codex 的账号但没有 ChatGPT 聊天通道')
     } else console.log('跳过  添加 2 号管理器（没有设置 LLM_BRIDGE_ADMIN_TOKEN_2）')
 
-    // ---------------------------------------------------------------- 各自一套账号：在 1 号登录 WorkBuddy
+    // ---------------------------------------------------------------- 各自一套账号：在 1 号登录 CodeBuddy
     await card(page, ONE).getByRole('button', { name: `查看 MCP 管理器：${ONE}` }).click()
     await account(page, WORKBUDDY).getByRole('button', { name: `登录${WORKBUDDY}` }).click()
     form = page.getByRole('form', { name: `登录${WORKBUDDY}` })
-    // WorkBuddy 默认是网页登录（T-0241），没有“容器里已有的登录”；这里验收的是 API 密钥这条路
-    check(await form.getByRole('radio', { name: '网页登录（国内站）' }).isChecked(), 'WorkBuddy 默认应是网页登录（国内站）')
+    // CodeBuddy 默认是网页登录（T-0241），没有“容器里已有的登录”；这里验收的是 API 密钥这条路
+    check(await form.getByRole('radio', { name: '网页登录（国内站）' }).isChecked(), 'CodeBuddy 默认应是网页登录（国内站）')
     await form.getByRole('button', { name: '获取登录网址' }).waitFor()
-    check((await form.getByRole('radio', { name: '容器里已有的登录' }).count()) === 0, 'WorkBuddy 不应再有“容器里已有的登录”')
+    check((await form.getByRole('radio', { name: '容器里已有的登录' }).count()) === 0, 'CodeBuddy 不应再有“容器里已有的登录”')
     await form.getByRole('radio', { name: 'API 密钥' }).check()
     await form.getByRole('button', { name: '登录', exact: true }).click()
     await page.getByText('请填写API 密钥。').waitFor()
@@ -249,12 +249,12 @@ async function main() {
     await account(page, WORKBUDDY).getByText('换一把密钥不算换账号').waitFor()
     check(!(await page.content()).includes(FAKE_KEY), 'API 密钥不应留在页面上')
     check(!JSON.stringify(await statusOf(oneId)).includes(FAKE_KEY), '状态接口不应回传 API 密钥')
-    await card(page, ONE).getByRole('listitem').filter({ hasText: 'WorkBuddy' }).getByText('已登录').waitFor()
+    await card(page, ONE).getByRole('listitem').filter({ hasText: 'CodeBuddy' }).getByText('已登录').waitFor()
     if (two) {
       // 2 号是另一套账号：在 1 号登录不影响它
-      await card(page, TWO).getByRole('listitem').filter({ hasText: 'WorkBuddy' }).getByText('未登录').waitFor()
+      await card(page, TWO).getByRole('listitem').filter({ hasText: 'CodeBuddy' }).getByText('未登录').waitFor()
       const other = (await statusOf(twoId)).accounts.find((a) => a.slot === 'workbuddy')
-      check(other.state === 'logged_out' && !other.registered, `2 号的 WorkBuddy 不应受 1 号影响：${JSON.stringify(other)}`)
+      check(other.state === 'logged_out' && !other.registered, `2 号的 CodeBuddy 不应受 1 号影响：${JSON.stringify(other)}`)
     }
     acceptNext(page)
     await account(page, WORKBUDDY).getByRole('button', { name: `退出登录${WORKBUDDY}` }).click()
@@ -264,7 +264,7 @@ async function main() {
     await account(page, WORKBUDDY).getByText('这个管理器登记过这个平台的账号').waitFor()
     await account(page, WORKBUDDY).getByRole('button', { name: `更换账号${WORKBUDDY}` }).waitFor()
     check(await account(page, WORKBUDDY).locator('dd', { hasText: 'API 密钥' }).count() === 0, '退出登录后不应再显示登录方式')
-    step(`各自一套账号：在 1 号用 API 密钥登录 WorkBuddy（密钥不回显）${two ? '，2 号的 WorkBuddy 仍是未登录' : ''}；退出后回到未登录，登记保留`)
+    step(`各自一套账号：在 1 号用 API 密钥登录 CodeBuddy（密钥不回显）${two ? '，2 号的 CodeBuddy 仍是未登录' : ''}；退出后回到未登录，登记保留`)
 
     // ---------------------------------------------------------------- 改控制的平台
     // 取消勾选要确认；不确认就不改
@@ -279,7 +279,7 @@ async function main() {
     check(await account(page, 'Claude').count() === 0, '取消后不应再显示 Claude 的账号')
     check((await platformsOn(page, ONE)).length === 1, '卡片应只剩一个平台')
     // 最后一个不能取消
-    await control(page).getByLabel('WorkBuddy', { exact: true }).click()
+    await control(page).getByLabel('CodeBuddy', { exact: true }).click()
     await page.getByText('至少要控制一个平台。').waitFor()
     check((await statusOf(oneId)).platforms.join() === 'workbuddy', '不能把控制的平台改成一个都没有')
     // 重新勾选不用确认
@@ -326,7 +326,7 @@ async function main() {
     await page.getByRole('button', { name: '新增环境' }).click()
     form = page.getByRole('form', { name: '新增开发环境' })
     const offered = await form.getByLabel('平台').locator('option').allInnerTexts()
-    check(offered.join() === 'Claude,WorkBuddy', `1 号新增环境时只应能选 Claude / WorkBuddy：${offered}`)
+    check(offered.join() === 'Claude,CodeBuddy', `1 号新增环境时只应能选 Claude / CodeBuddy：${offered}`)
     await form.getByLabel('平台').selectOption({ label: 'Claude' })
     await form.getByLabel('权限').selectOption({ label: '可执行命令' })
     await form.getByRole('note').filter({ hasText: '没有操作系统级沙箱' }).waitFor()
@@ -345,7 +345,7 @@ async function main() {
     await envRow.getByRole('button', { name: '删除环境验收环境' }).click()
     await page.getByText('已删除环境「验收环境」。').waitFor()
     await page.getByText('还没有开发环境。').waitFor()
-    step('开发环境：平台只能选 1 号控制的 Claude / WorkBuddy；“可执行命令”有风险提示；非 https 的仓库地址被拦下；新增后列出，删除后消失')
+    step('开发环境：平台只能选 1 号控制的 Claude / CodeBuddy；“可执行命令”有风险提示；非 https 的仓库地址被拦下；新增后列出，删除后消失')
 
     // ---------------------------------------------------------------- 会话
     await tab(page, '会话').click()

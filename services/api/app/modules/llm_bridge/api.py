@@ -157,7 +157,8 @@ async def llm_bridge_bridge_connectivity(
     summary="各平台的额度：每个窗口已用多少、什么时候重置；是否因为额度暂停着（admin）",
     description="平台给的是已用百分比和重置时间，不是剩余 token 数。"
     "refresh=true 时让管理器向能随时查的平台（Codex）实查一次；"
-    "Claude / WorkBuddy 只在跑回合时顺带报出来，显示的是最近一次看到的。",
+    "Claude 只在跑回合时顺带报出来，显示的是最近一次看到的；"
+    "CodeBuddy 的官方程序不给额度和重置时间（reports_quota=false），只有管理器自己记的用量。",
     responses=_read_errors,
 )
 async def llm_bridge_bridge_quota(

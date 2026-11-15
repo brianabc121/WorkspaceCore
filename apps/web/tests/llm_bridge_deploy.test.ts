@@ -155,11 +155,11 @@ describe('一键部署 MCP 管理器', () => {
     expect(await within(form).findByText('已经有同名的 MCP 管理器，换一个名字。')).toBeVisible()
     await fireEvent.update(within(form).getByLabelText('名字'), '2 号')
     const control = within(form).getByRole('group', { name: '控制的平台' })
-    for (const name of ['ChatGPT', 'Codex', 'Claude', 'WorkBuddy']) await fireEvent.click(within(control).getByLabelText(name))
+    for (const name of ['ChatGPT', 'Codex', 'Claude', 'CodeBuddy']) await fireEvent.click(within(control).getByLabelText(name))
     await start(form)
     expect(await within(form).findByText('至少勾选一个要控制的平台。')).toBeVisible()
     expect(writes(requests)).toEqual([])
-    for (const name of ['WorkBuddy', 'Claude']) await fireEvent.click(within(control).getByLabelText(name))
+    for (const name of ['CodeBuddy', 'Claude']) await fireEvent.click(within(control).getByLabelText(name))
     await start(form)
 
     // 进度：每一步的状态和说明

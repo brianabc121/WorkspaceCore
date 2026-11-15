@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { X } from '@lucide/vue'
-import { MODES, SANDBOX, originName, platformName, seconds } from '../api'
+import { MODES, NO_QUOTA, SANDBOX, originName, platformName, quotaKind, quotaUsage, seconds, type Quota } from '../api'
 import { TURN_STATUS, ownerText, type ChatMessage, type ChatSession } from './chatApi'
 
-// 右栏：这个会话的信息和回合列表。只显示。
-const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; managerName: string }>()
+// 右栏：这个会话的信息、这个平台的额度（T-0242）和回合列表。只显示。
+// quota 来自管理器的状态；旧版本的管理器没有，这一块不显示。
+const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; managerName: string; quota?: Quota | null }>()
 defineEmits<{ close: [] }>()
 
 const turns = computed(() => props.messages.filter(m => m.role === 'assistant' && m.turn_id))
@@ -33,6 +34,19 @@ const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
       <dt>最后活动</dt><dd>{{ seconds(session.updated_at) }}</dd>
       <dt>状态</dt><dd>{{ session.status === 'archived' ? '已归档' : session.busy ? '正在回答' : '进行中' }}</dd>
     </dl>
+    <section v-if="quota" class="lc-quota" :aria-label="`额度：${platformName(session.platform)}`">
+      <h4>额度（{{ platformName(session.platform) }}）</h4>
+      <p v-if="quota.paused_until" role="note" class="lc-note is-red">
+        额度用完，这个平台暂停到 {{ seconds(quota.paused_until) }}{{ quota.pause_estimated ? '（平台没有给出重置时间，这是估计的）' : '' }}；到时间后自动恢复。
+      </p>
+      <p v-if="!quota.windows.length && quota.reports_quota === false" class="lc-note">{{ NO_QUOTA }}</p>
+      <p v-else-if="!quota.windows.length" class="lc-note">还没有看到这个平台的额度{{ quota.can_refresh ? '：到“管理”页的额度里点“向平台查一次”' : '：跑过一个回合后会显示' }}。</p>
+      <dl v-for="w in quota.windows" v-else :key="w.kind" class="lb-meta">
+        <dt>{{ quotaKind(w.kind) }}</dt><dd>{{ quotaUsage(w) }}</dd>
+        <dt>重置时间</dt><dd>{{ w.resets_at ? seconds(w.resets_at) : '平台没有给出' }}</dd>
+      </dl>
+      <p class="lc-note">最近 5 小时经这个管理器用掉 {{ quota.tokens_5h.toLocaleString() }} 个 token（管理器自己记的，不含别处用的）。</p>
+    </section>
     <template v-if="session.origin === 'external'">
       <p class="lc-note">这是官方程序里已有的会话：这里读到的是它的文字记录，没有回合列表。</p>
     </template>

@@ -1644,6 +1644,7 @@ class Engine:
             out[platform] = {
                 "windows": rows.get(platform, []),
                 "can_refresh": bool(getattr(owner, "can_query_quota", False)),
+                "reports_quota": bool(getattr(owner, "reports_quota", True)),
                 "paused_until": pause["until"] if pause else None,
                 "pause_estimated": bool(pause["estimated"]) if pause else False,
                 "waiting_resume": len(self.store.pending_resumes(platform)),

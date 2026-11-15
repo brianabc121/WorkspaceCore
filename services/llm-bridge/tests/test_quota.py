@@ -109,6 +109,7 @@ async def test_quota_interruption_pauses_the_platform_and_resumes_after_reset(
     assert after["paused_until"] is None and after["waiting_resume"] == 0
     assert after["windows"][0]["status"] == "ok" and after["windows"][0]["used_percent"] == 40
     assert after["tokens_5h"] > 0 and after["can_refresh"] is False
+    assert after["reports_quota"] is True
 
 
 async def test_resume_limits_switch_and_manual_control(bridge: Bridge) -> None:
