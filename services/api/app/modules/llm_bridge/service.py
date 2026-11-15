@@ -35,6 +35,8 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeIn,
     LlmBridgeInstallOut,
     LlmBridgeLoadOut,
+    LlmBridgeLocalIn,
+    LlmBridgeLocalOut,
     LlmBridgeOut,
     LlmBridgePatch,
     LlmBridgeQuotaList,
@@ -235,6 +237,48 @@ class LlmBridgeService:
         await self.db.commit()
         return self.bridge_out(row)
 
+    # ---- 本机部署（T-0238）：随工作台一起启动的那个 MCP 管理器 ----
+    def _local(self) -> tuple[str, str] | None:
+        """本机管理器的地址和令牌；没有随带时为 None。令牌只在服务端用，不给页面。"""
+        url, token = self.settings.llm_bridge_local_url, self.settings.llm_bridge_local_token
+        if not url or token is None or len(token.get_secret_value()) < 32:
+            return None
+        return clean_url(url), token.get_secret_value()
+
+    async def local_state(self, workspace_id: uuid.UUID) -> LlmBridgeLocalOut:
+        local = self._local()
+        if local is None:
+            return LlmBridgeLocalOut(available=False, bridge_id=None, taken=False)
+        rows = (
+            await self.db.scalars(select(LlmBridge).where(LlmBridge.base_url == local[0]))
+        ).all()
+        mine = next((row for row in rows if row.workspace_id == workspace_id), None)
+        return LlmBridgeLocalOut(
+            available=True,
+            bridge_id=mine.id if mine is not None else None,
+            taken=mine is None and bool(rows),
+        )
+
+    async def add_local(self, access: WorkspaceAccess, body: LlmBridgeLocalIn) -> LlmBridgeOut:
+        """把随工作台启动的 MCP 管理器登记进这个工作空间：不用填地址、令牌，也不登录服务器。"""
+        local = self._local()
+        if local is None:
+            raise ApiError(
+                409,
+                "LOCAL_UNAVAILABLE",
+                "这个工作台没有随带本机的 MCP 管理器：升级到带它的版本并重新启动工作台后再试",
+            )
+        state = await self.local_state(access.workspace.id)
+        if state.bridge_id is not None:
+            raise ApiError(409, "LOCAL_EXISTS", "本机的 MCP 管理器已经添加过了")
+        if state.taken:
+            # 一个管理器的账号、会话只归一个工作空间：不让第二个工作空间共用
+            raise ApiError(409, "LOCAL_TAKEN", "本机的 MCP 管理器已经被另一个工作空间添加")
+        url, token = local
+        return await self.create_bridge(
+            access, LlmBridgeIn(name=body.name, base_url=url, token=token, platforms=body.platforms)
+        )
+
     async def update_bridge(
         self, access: WorkspaceAccess, bridge_id: uuid.UUID, body: LlmBridgePatch
     ) -> LlmBridgeOut:
@@ -245,6 +289,13 @@ class LlmBridgeService:
             row.name = body.name.strip()
             changed.append("name")
         moved = body.base_url is not None and clean_url(body.base_url) != row.base_url
+        local = self._local()
+        if (moved or body.token is not None) and local is not None and row.base_url == local[0]:
+            raise ApiError(
+                409,
+                "BRIDGE_MANAGED",
+                "这是随工作台启动的本机 MCP 管理器：地址和令牌由工作台管理，不能在这里改",
+            )
         if (moved or body.token is not None) and await self.install(row.id) is not None:
             raise ApiError(
                 409,

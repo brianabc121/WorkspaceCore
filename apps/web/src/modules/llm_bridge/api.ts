@@ -165,6 +165,14 @@ export function useLlmBridge(scope: string) {
     useTurns: (id: Ref<string>, session: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'turns', session.value)), enabled: computed(() => active() && !!session.value),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/turns', { params: { header, path: { bridge_id: id.value, session_id: session.value! } }, signal })).turns }),
     // 一键部署能选的服务器（智能体服务器和容器服务器两类）：只读工作台里的登记，不连服务器
+    // 本机部署（T-0238）：随工作台一起启动的那个 MCP 管理器能不能添加、这个工作空间加没加
+    useLocal: () => useQuery({ queryKey: key(user, scope, 'local'), enabled: computed(active),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/local', { params: { header }, signal })) }),
+    // 把本机的管理器添加进来：不用填地址、令牌，也不登录服务器
+    async addLocal(body: { name: string; platforms: Platform[] }) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/local', { params: { header }, body }))
+      await Promise.all([invalidate('bridges'), invalidate('local')]); return out
+    },
     useDeployTargets: () => useQuery({ queryKey: key(user, scope, 'deploy-targets'), enabled: computed(active),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/deployments/targets', { params: { header }, signal })) }),
     // 某台服务器上由工作台部署的 MCP 管理器，带现在连不连得上（两个服务器页面的区块用）

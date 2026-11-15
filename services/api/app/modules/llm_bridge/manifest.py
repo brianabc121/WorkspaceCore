@@ -15,8 +15,10 @@ MANIFEST = ModuleManifest(
     "智能体经它发指令并管理会话。"
     "每个管理器是独立部署的容器（会话桥）。",
     version="0.1.0",
-    # 新模块默认停用：owner 在“应用中心”启用
-    default_enabled=False,
+    # 默认启用（人类 2026-11-15 要求）：没有启用 / 停用记录的工作空间直接有入口，
+    # owner 可以在“应用中心”停用。启用只是有了页面和接口：没有添加 MCP 管理器、
+    # 没有给实例打开“大模型会话权限”时，智能体什么都用不了
+    default_enabled=True,
     models="app.modules.llm_bridge.models",
     router="app.modules.llm_bridge.api:router",
     tools="app.modules.llm_bridge.tools:SPECS",

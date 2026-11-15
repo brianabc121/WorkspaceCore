@@ -71,6 +71,23 @@ class LlmBridgeOut(BaseModel):
     updated_at: datetime
 
 
+class LlmBridgeLocalIn(_In):
+    name: str = Field(default="本机", min_length=1, max_length=40, description="显示名")
+    platforms: list[Platform] = Field(
+        min_length=1, max_length=4, description="这个 MCP 管理器控制的平台"
+    )
+
+
+class LlmBridgeLocalOut(BaseModel):
+    """随工作台一起启动的那个 MCP 管理器（“本机部署”，T-0238）。"""
+
+    available: bool = Field(description="这个工作台随带着本机的 MCP 管理器，可以直接添加")
+    bridge_id: UUID | None = Field(description="这个工作空间已经添加了它：对应的管理器")
+    taken: bool = Field(
+        description="已经被别的工作空间添加：一个管理器的账号和会话只归一个工作空间，这里不能再加"
+    )
+
+
 class LlmBridgeList(BaseModel):
     bridges: list[LlmBridgeOut]
 

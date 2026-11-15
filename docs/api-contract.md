@@ -869,6 +869,15 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST .../chat/turns/{turn_id}/resume` | 被额度打断的回合，现在就试着继续（admin）。不是被额度打断的、已经续跑过的 `409` |
 | `DELETE .../chat/turns/{turn_id}/resume` | 不要自动继续（admin） |
 
+**本机部署**（T-0238，`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md` 第 9 节）。模块 `llm_bridge` 现在默认启用。
+
+| 接口 | 说明 |
+|---|---|
+| `GET /api/v1/llm_bridge/local` | 随工作台一起启动的 MCP 管理器（admin）：`available`（这个工作台随带着它）、`bridge_id`（这个工作空间已经添加）、`taken`（被别的工作空间添加了） |
+| `POST /api/v1/llm_bridge/local` | 把它添加进来（owner）：`name`（默认“本机”）、`platforms`。地址和令牌由服务端填。`409 LOCAL_UNAVAILABLE` / `LOCAL_EXISTS` / `LOCAL_TAKEN`；还没启动好 `503` |
+
+本机管理器的地址和令牌不能改（`PATCH .../bridges/{id}` 带 `base_url` / `token` 时 `409 BRIDGE_MANAGED`），名字可以改。
+
 **一键部署**（T-0234，`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md`；都在 `/api/v1/llm_bridge` 下，写操作带 CSRF、只有 owner 能做，读 owner / admin）。
 MCP 管理器部署到“智能体服务器”或“容器服务器”登记的服务器上；任务在后台进行，进度用任务接口读。
 部署 MCP 管理器不看这两类服务器自己的准入（资源、配额、正在进行的任务）；管理器的容器不受那两个页面的管理程序影响。

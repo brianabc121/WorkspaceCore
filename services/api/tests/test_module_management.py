@@ -140,7 +140,13 @@ async def test_management_projection_is_read_only_and_declarative(
     before = len(trendradar.calls)
     data = await _management(env)
     assert len(trendradar.calls) == before  # GET 不探测外部服务
-    assert data["summary"] == {"registered": len(registry.MODULES), "enabled": 1, "attention": 0}
+    # 没有启用 / 停用记录时按各模块清单的默认值
+    by_default = sum(1 for m in registry.MODULES if m.default_enabled)
+    assert data["summary"] == {
+        "registered": len(registry.MODULES),
+        "enabled": by_default,
+        "attention": 0,
+    }
     news = next(item for item in data["items"] if item["module"]["key"] == "news")
     assert news == await _news(env)
     assert news["module"]["state_version"] == 0 and news["module"]["version"] == "1.0.0"

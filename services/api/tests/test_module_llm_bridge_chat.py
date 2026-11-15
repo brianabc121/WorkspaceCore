@@ -633,3 +633,77 @@ async def test_chat_insert_message(rig: Rig) -> None:  # noqa: F811
     )
     assert plain.json()["delivered"] == "started"
     await wait_idle(rig, session_id)
+
+
+async def test_local_manager_is_added_without_address_or_token(rig: Rig) -> None:  # noqa: F811
+    """本机部署（T-0238）：随工作台启动的管理器，选了平台就能添加；地址和令牌不经过页面。"""
+    env = rig.env
+    # 这个夹具的工作台没有随带本机管理器：页面上不能选，接口也拒绝
+    assert (await rig.api("GET", "/local")).json() == {
+        "available": False,
+        "bridge_id": None,
+        "taken": False,
+    }
+    none = await rig.api("POST", "/local", json={"platforms": ["claude"]})
+    assert none.status_code == 409 and none.json()["error"]["code"] == "LOCAL_UNAVAILABLE"
+
+    token = "l" * 40
+    await rig.spawn("local.test", token)
+    settings = {
+        **CONNECTOR_SETTINGS,
+        **SETTINGS,
+        "llm_bridge_local_url": "http://local.test:8787",
+        "llm_bridge_local_token": token,
+    }
+    password = "local owner password 1234"  # noqa: S105 - 测试密码
+    scope = {"X-Workspace-Id": env.workspace_id}
+    owner_id = await add_user(env.database_url, "second-owner@example.com", password)
+    await add_member(env.database_url, uuid.UUID(env.workspace_id), owner_id, "owner")
+    admin_id = await add_user(env.database_url, "local-admin@example.com", password)
+    await add_member(env.database_url, uuid.UUID(env.workspace_id), admin_id, "admin")
+    async with env.make_client(**settings) as owner, env.make_client(**settings) as admin:
+        for client, email in (
+            (owner, "second-owner@example.com"),
+            (admin, "local-admin@example.com"),
+        ):
+            client._transport.app.state.connectors.transport = rig.transport  # type: ignore[attr-defined]
+            login = await client.post(
+                "/api/v1/auth/login", json={"email": email, "password": password}
+            )
+            assert login.status_code == 200, login.text
+        base = "/api/v1/llm_bridge"
+        state = (await admin.get(f"{base}/local", headers=scope)).json()
+        assert state == {"available": True, "bridge_id": None, "taken": False}
+        # 只有 owner 能添加；要选平台
+        write = {**scope, **csrf(admin)}
+        denied = await admin.post(f"{base}/local", json={"platforms": ["claude"]}, headers=write)
+        assert denied.status_code == 403
+        write = {**scope, **csrf(owner)}
+        empty = await owner.post(f"{base}/local", json={"platforms": []}, headers=write)
+        assert empty.status_code == 422
+        made = await owner.post(
+            f"{base}/local", json={"platforms": ["claude", "workbuddy"]}, headers=write
+        )
+        assert made.status_code == 201, made.text
+        bridge = made.json()
+        assert (bridge["name"], bridge["base_url"], bridge["has_token"]) == (
+            "本机",
+            "http://local.test:8787",
+            True,
+        )
+        assert token not in made.text
+        status = (await owner.get(f"{base}/bridges/{bridge['id']}/status", headers=scope)).json()
+        assert status["reachable"] is True and status["platforms"] == ["claude", "workbuddy"]
+        state = (await owner.get(f"{base}/local", headers=scope)).json()
+        assert state == {"available": True, "bridge_id": bridge["id"], "taken": False}
+        again = await owner.post(f"{base}/local", json={"platforms": ["claude"]}, headers=write)
+        assert again.status_code == 409 and again.json()["error"]["code"] == "LOCAL_EXISTS"
+        # 地址和令牌由工作台管理，不能在页面上改
+        moved = await owner.patch(
+            f"{base}/bridges/{bridge['id']}", json={"token": "x" * 40}, headers=write
+        )
+        assert moved.status_code == 409 and moved.json()["error"]["code"] == "BRIDGE_MANAGED"
+        renamed = await owner.patch(
+            f"{base}/bridges/{bridge['id']}", json={"name": "本机一号"}, headers=write
+        )
+        assert renamed.status_code == 200

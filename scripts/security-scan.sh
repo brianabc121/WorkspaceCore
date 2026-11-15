@@ -99,7 +99,8 @@ third_party_images() {
   local project
   project="$(env_value COMPOSE_PROJECT_NAME my-workspace)"
   {
-    docker compose --profile monitoring --profile agents config --images
+    # 本机的 MCP 管理器（llm-bridge-local）是本仓库构建的镜像，由 ci-llm-bridge 扫描
+    docker compose --profile monitoring --profile agents config --images | grep -v '^myworkspace/llm-bridge:'
     # V2（方案第 7 节）：OpenIM 的依赖镜像；openim-server 是本仓库按补丁构建的（my-workspace/…），由 ci-openim 扫描
     WORKSPACE_PROJECT="$project" docker compose -p "$project-openim" -f infra/openim/compose.yaml --env-file .env config --images \
       | grep -v '^my-workspace/'

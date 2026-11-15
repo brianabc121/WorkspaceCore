@@ -49,6 +49,8 @@ function readOperations(workspace, dashboard, role) {
     completed_after: '2026-01-05T00:00:00+08:00', completed_before: '2026-01-12T00:00:00+08:00',
     // 知识总览“本周更新”的时间窗（T-0172）
     updated_after: '2026-01-05T00:00:00+08:00', updated_before: '2026-01-12T00:00:00+08:00',
+    // 大模型客户端（默认启用，T-0238）：某台服务器上的 MCP 管理器。给一台不存在的服务器，应返回空列表
+    target_kind: 'agent_server', target_id: '00000000-0000-4000-8000-000000000000',
   }
   const known = { workspace_id: workspace, dashboard_id: dashboard }
   const operations = []
