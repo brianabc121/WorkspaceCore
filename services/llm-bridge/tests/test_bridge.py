@@ -703,3 +703,21 @@ async def test_restart_recovery(tmp_path: Path) -> None:
     assert done["status"] == "completed" and done["result"] == "[fake-1] 还没开始"
     await engine.shutdown()
     store.close()
+
+
+async def test_platform_failure_during_login_is_reported_not_hidden(bridge: Bridge) -> None:
+    """登录时平台那边出错：管理接口带着原因回 424，不回 5xx——工作台会把 5xx 当成“管理器连不上”。"""
+    bridge.fake.login_error = "向平台申请验证码没有成功：连不上平台"
+    failed = await bridge.admin(
+        "POST", "/admin/accounts/fake/login", json={"method": "api_key", "api_key": "k"}
+    )
+    assert failed.status_code == 424, failed.text
+    assert failed.json()["error"] == {
+        "code": "UNAVAILABLE",
+        "message": "向平台申请验证码没有成功：连不上平台",
+    }
+    bridge.fake.login_error = None
+    ok = await bridge.admin(
+        "POST", "/admin/accounts/fake/login", json={"method": "api_key", "api_key": "k"}
+    )
+    assert ok.status_code == 200, ok.text

@@ -707,3 +707,27 @@ async def test_local_manager_is_added_without_address_or_token(rig: Rig) -> None
             f"{base}/bridges/{bridge['id']}", json={"name": "本机一号"}, headers=write
         )
         assert renamed.status_code == 200
+
+
+async def test_platform_failure_at_login_shows_the_reason(rig: Rig) -> None:  # noqa: F811
+    """登录时平台那边没成功：页面拿到管理器写的原因，不是“MCP 管理器连不上”；之后管理器照常可用。"""
+    fake = rig.bridge_app.state.engine.drivers["claude"]
+    fake.login_error = "向平台申请验证码没有成功：这台服务器访问不了平台"
+    for _ in range(6):  # 连着失败几次也不该把管理器当成坏了（熔断）
+        failed = await rig.api(
+            "POST",
+            f"/bridges/{rig.bridge_id}/accounts/claude/login",
+            json={"method": "api_key", "api_key": "k" * 20},
+        )
+        assert failed.status_code == 503, failed.text
+        assert failed.json()["error"]["code"] == "UNAVAILABLE"
+        assert failed.json()["error"]["message"] == fake.login_error
+    status = await rig.api("GET", f"/bridges/{rig.bridge_id}/status")
+    assert status.status_code == 200 and status.json()["reachable"] is True
+    fake.login_error = None
+    done = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/accounts/claude/login",
+        json={"method": "api_key", "api_key": "k" * 20},
+    )
+    assert done.status_code == 200, done.text

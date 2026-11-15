@@ -51,7 +51,9 @@ _STATUS = {
     "NOT_SUPPORTED": 422,
     "NOT_LOGGED_IN": 409,
     "ACCOUNT_MISMATCH": 409,
-    "UNAVAILABLE": 503,
+    # 平台那边没有成功（连不上平台、平台拒绝、超时）：管理器自己是好的，所以不用 5xx——
+    # 工作台把 5xx 当成“管理器连不上”，会把真正的原因盖住，还会计入熔断
+    "UNAVAILABLE": 424,
 }
 
 

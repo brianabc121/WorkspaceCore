@@ -57,6 +57,13 @@ def _json(response: httpx.Response) -> Any:
         raise _invalid() from error
 
 
+def _json_or_none(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        return None
+
+
 def _error_of(body: Any) -> BridgeCallError | None:
     error = body.get("error") if isinstance(body, dict) else None
     if isinstance(error, dict) and isinstance(error.get("code"), str):
@@ -164,6 +171,11 @@ class BridgeClient:
         return response
 
     def _payload(self, response: httpx.Response) -> Any:
+        if response.status_code >= 500:
+            # 旧版本的管理器在平台出错时回 503 并带着原因：照它写的报，不说成“管理器连不上”
+            told = _error_of(_json_or_none(response))
+            if told is not None:
+                raise told
         self._check_status(response)
         if response.status_code == 204:  # 没有内容的成功应答
             return None

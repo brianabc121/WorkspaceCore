@@ -65,6 +65,29 @@ async def codex(tmp_path: Path):
     await driver.stop()
 
 
+def _login_fails(tmp_path: Path, on: bool) -> None:
+    """仿真的 codex 看到这个记号文件，申请设备码时就回一个错误。"""
+    marker = tmp_path / "home" / "login-fails"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    if on:
+        marker.touch()
+    else:
+        marker.unlink()
+
+
+async def test_codex_device_code_failure_says_why(codex: CodexDriver, tmp_path: Path) -> None:
+    """申请设备码没成功（例如服务器访问不了 OpenAI）：错误里带着原因和可能的情况。"""
+    _login_fails(tmp_path, True)
+    with pytest.raises(DriverError) as caught:
+        await codex.login("device_code", {})
+    assert caught.value.kind == "platform_error"
+    message = caught.value.message
+    assert "向 OpenAI 申请设备码没有成功：error sending request for url" in message
+    assert "auth.openai.com" in message and "API 密钥" in message
+    _login_fails(tmp_path, False)
+    assert (await codex.login("device_code", {})).user_code == "ABCD-1234"
+
+
 async def test_codex_account_and_models(codex: CodexDriver) -> None:
     assert not (await codex.status()).logged_in
     challenge = await codex.login("device_code", {})

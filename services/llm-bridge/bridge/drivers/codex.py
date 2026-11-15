@@ -271,7 +271,21 @@ class CodexDriver(Driver):
             # 上一次登录的结果作废；从这里起到拿到应答之前到达的完成通知都先记下
             self._login, self._login_id = None, None
             self._early_logins.clear()
-            result = await self._call("account/login/start", {"type": "chatgptDeviceCode"}, wait=60)
+            try:
+                result = await self._call(
+                    "account/login/start", {"type": "chatgptDeviceCode"}, wait=60
+                )
+            except DriverError as error:
+                if error.kind not in ("platform_error", "timeout", "unavailable"):
+                    raise
+                # 申请设备码要访问 OpenAI：把原因和常见的两种情况写给人看
+                raise DriverError(
+                    error.kind,
+                    f"向 OpenAI 申请设备码没有成功：{error.message}。"
+                    "常见原因：这个 MCP 管理器所在的服务器访问不了 OpenAI"
+                    "（auth.openai.com、chatgpt.com）；或者这个 ChatGPT 账号（工作区）"
+                    "没有打开设备码登录。也可以改用“API 密钥”登录",
+                ) from error
             raw_id = result.get("loginId")
             self._login_id = raw_id if isinstance(raw_id, str) else None
             # 完成通知已经先到了：直接是最终结果，不再让页面去等
