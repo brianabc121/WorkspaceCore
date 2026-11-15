@@ -6,18 +6,24 @@ owner 和 admin 都能用；写操作带 CSRF。浏览器不直连 MCP 管理器
 """
 
 from typing import Annotated, Literal
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import Depends, Path, Query, status
+from fastapi import Depends, Path, Query, Request, Response, status
 
 from app.api.deps import csrf_protected
+from app.core.errors import ApiError
 from app.modules.llm_bridge.chat import LlmChatService
 from app.modules.llm_bridge.chat_schemas import (
+    LlmChatAttachmentOut,
     LlmChatConversationOut,
     LlmChatCreatedOut,
     LlmChatCreateIn,
     LlmChatEventsOut,
     LlmChatOptionsOut,
+    LlmChatQueueEditIn,
+    LlmChatQueueMoveIn,
+    LlmChatQueueOut,
     LlmChatRenameIn,
     LlmChatSendIn,
     LlmChatSessionList,
@@ -31,6 +37,18 @@ from app.schemas.common import error_responses
 
 SessionId = Annotated[str, Path(pattern=r"^bs_[0-9a-f]{20}$")]
 TurnId = Annotated[str, Path(pattern=r"^bt_[0-9a-f]{20}$")]
+AttachmentId = Annotated[str, Path(pattern=r"^ba_[0-9a-f]{20}$")]
+# 和管理器的上限一致；这里先挡一次，超过的不往管理器转
+MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+INLINE_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+_FILE_BODY = {
+    "required": True,
+    "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+}
+_FILE_RESPONSE = {
+    "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+    "description": "文件内容。四种图片内联显示，别的按附件下载",
+}
 write = [Depends(csrf_protected)]
 read_errors = error_responses(401, 403, 404, 503)
 write_errors = error_responses(401, 403, 404, 409, 422, 503)
@@ -154,6 +172,74 @@ async def llm_chat_cancel_turn(
     return await LlmChatService(bridges).cancel(access, row, turn_id)
 
 
+@router.post(
+    f"{prefix}/turns/{{turn_id}}/resume",
+    summary="聊天：被额度打断的回合，现在就试着继续（admin）",
+    description="不等重置时间；“自动继续”关着或自动续的次数用完时也用它。"
+    "不是被额度打断的、已经续跑过的 409。",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_resume_now(
+    access: Admin, bridges: Bridges, bridge_id: UUID, turn_id: TurnId
+) -> LlmChatTurnOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).resume(access, row, turn_id, now=True)
+
+
+@router.delete(
+    f"{prefix}/turns/{{turn_id}}/resume",
+    summary="聊天：被额度打断的回合，不要自动继续（admin）",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_resume_cancel(
+    access: Admin, bridges: Bridges, bridge_id: UUID, turn_id: TurnId
+) -> LlmChatTurnOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).resume(access, row, turn_id, now=False)
+
+
+@router.get(
+    f"{prefix}/sessions/{{session_id}}/queue",
+    summary="聊天：一个会话的消息队列（admin）",
+    description="正在处理的那一条和排队中的各条，按将要处理的顺序。会话在处理时再发的消息进队列，前面的做完才发给模型。",
+    responses=read_errors,
+)
+async def llm_chat_queue(
+    access: Admin, bridges: Bridges, bridge_id: UUID, session_id: SessionId
+) -> LlmChatQueueOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).queue(access, row, session_id)
+
+
+@router.patch(
+    f"{prefix}/turns/{{turn_id}}",
+    summary="聊天：修改排队中的一条消息（admin）",
+    description="只能改还没开始处理的；已经开始的 409。",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_edit_queued(
+    access: Admin, bridges: Bridges, bridge_id: UUID, turn_id: TurnId, body: LlmChatQueueEditIn
+) -> LlmChatQueueOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).change_queued(access, row, turn_id, text=body.text)
+
+
+@router.post(
+    f"{prefix}/turns/{{turn_id}}/move",
+    summary="聊天：把排队中的一条消息调到队首或队尾（admin）",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_move_queued(
+    access: Admin, bridges: Bridges, bridge_id: UUID, turn_id: TurnId, body: LlmChatQueueMoveIn
+) -> LlmChatQueueOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).change_queued(access, row, turn_id, to=body.to)
+
+
 @router.patch(
     f"{prefix}/sessions/{{session_id}}",
     summary="聊天：改会话标题（admin）",
@@ -178,3 +264,103 @@ async def llm_chat_archive_session(
 ) -> LlmChatSessionOut:
     row = await bridges.bridge(access.workspace.id, bridge_id)
     return await LlmChatService(bridges).archive(access, row, session_id)
+
+
+@router.post(
+    f"{prefix}/sessions/{{session_id}}/attachments",
+    status_code=status.HTTP_201_CREATED,
+    summary="聊天：上传一个要随下一条消息发出去的图片 / 文件（admin）",
+    description="请求体就是文件内容，文件名在查询参数 name 里。单个最多 20 MB；"
+    "图片（PNG / JPEG / GIF / WebP）在哪种会话里都能带，别的文件只能在开发会话里带。"
+    "返回的 id 在发送时放进 attachments。文件存在管理器那里。",
+    dependencies=write,
+    responses=error_responses(401, 403, 404, 409, 413, 422, 503),
+    openapi_extra={"requestBody": _FILE_BODY},
+)
+async def llm_chat_upload(
+    request: Request,
+    access: Admin,
+    bridges: Bridges,
+    bridge_id: UUID,
+    session_id: SessionId,
+    name: Annotated[str, Query(min_length=1, max_length=255, description="文件名")],
+) -> LlmChatAttachmentOut:
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_ATTACHMENT_BYTES:
+        raise _too_large()
+    body = bytearray()
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_ATTACHMENT_BYTES:
+            raise _too_large()
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).upload(access, row, session_id, name, bytes(body))
+
+
+def _too_large() -> ApiError:
+    return ApiError(413, "PAYLOAD_TOO_LARGE", "文件太大（单个最多 20 MB）")
+
+
+@router.delete(
+    f"{prefix}/sessions/{{session_id}}/attachments/{{attachment_id}}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="聊天：去掉一个上传了还没发出去的附件（admin）",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_discard_upload(
+    access: Admin,
+    bridges: Bridges,
+    bridge_id: UUID,
+    session_id: SessionId,
+    attachment_id: AttachmentId,
+) -> Response:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    await LlmChatService(bridges).discard(row, session_id, attachment_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get(
+    f"{prefix}/sessions/{{session_id}}/attachments/{{attachment_id}}",
+    summary="聊天：下载一个附件（admin）",
+    response_class=Response,
+    responses={200: _FILE_RESPONSE, **read_errors},
+)
+async def llm_chat_download(
+    access: Admin,
+    bridges: Bridges,
+    bridge_id: UUID,
+    session_id: SessionId,
+    attachment_id: AttachmentId,
+) -> Response:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    content, media_type, name = await LlmChatService(bridges).download(
+        row, session_id, attachment_id
+    )
+    # 文件是别人（或模型）给的：只有四种图片内联，别的一律下载；不许浏览器猜类型、不许执行
+    inline = media_type in INLINE_TYPES
+    return Response(
+        content=content,
+        media_type=media_type if inline else "application/octet-stream",
+        headers={
+            "Content-Disposition": f"{'inline' if inline else 'attachment'}; "
+            f"filename*=UTF-8''{quote(name)}",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.post(
+    f"{prefix}/sessions/{{session_id}}/reimport",
+    summary="聊天：官方程序里已有的会话，重新导入一次内容（admin）",
+    description="第一次打开时已经导入过；官方程序里又有了新内容时用。不是这类会话 409。",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_reimport(
+    access: Admin, bridges: Bridges, bridge_id: UUID, session_id: SessionId
+) -> LlmChatConversationOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).reimport(access, row, session_id)

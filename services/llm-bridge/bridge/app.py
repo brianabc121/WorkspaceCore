@@ -21,12 +21,13 @@ from typing import Annotated, Any, Literal
 from urllib.parse import unquote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
 from bridge import __version__
+from bridge import attachments as attachment_rules
 from bridge.channels import CHANNELS, FAKE_CHANNELS, SLOT_LABELS, find
 from bridge.config import Settings, get_settings
 from bridge.drivers.base import Driver
@@ -155,6 +156,14 @@ class EnvironmentBody(_Body):
 
 class SessionPatchBody(_Body):
     title: str = Field(min_length=1, max_length=200)
+
+
+class TurnEditBody(_Body):
+    text: str = Field(min_length=1)
+
+
+class TurnMoveBody(_Body):
+    to: Literal["first", "last"]
 
 
 class CallerBody(_Body):
@@ -380,6 +389,74 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, session_id: str, body: SessionPatchBody, _: Admin
     ) -> dict[str, Any]:
         return engine_of(request).rename_session(session_id, body.title)
+
+    @app.post("/admin/sessions/{session_id}/reimport")
+    async def admin_session_reimport(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
+        return await engine_of(request).reimport(session_id)
+
+    @app.post("/admin/sessions/{session_id}/attachments", status_code=201)
+    async def admin_attachment_upload(
+        request: Request, session_id: str, name: str, _: Admin
+    ) -> dict[str, Any]:
+        """请求体就是文件内容；文件名在查询参数 name 里。边收边数，超过上限就不再收。"""
+        chunks: list[bytes] = []
+        size = 0
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > attachment_rules.MAX_BYTES:
+                raise BridgeError("VALIDATION_FAILED", "文件太大（单个最多 20 MB）")
+            chunks.append(chunk)
+        return engine_of(request).upload_attachment(session_id, name, b"".join(chunks))
+
+    @app.delete("/admin/sessions/{session_id}/attachments/{attachment_id}", status_code=204)
+    async def admin_attachment_discard(
+        request: Request, session_id: str, attachment_id: str, _: Admin
+    ) -> Response:
+        engine_of(request).discard_upload(session_id, attachment_id)
+        return Response(status_code=204)
+
+    @app.get("/admin/sessions/{session_id}/attachments/{attachment_id}")
+    async def admin_attachment_download(
+        request: Request, session_id: str, attachment_id: str, _: Admin
+    ) -> FileResponse:
+        row, path = engine_of(request).attachment_file(session_id, attachment_id)
+        # 只有四种图片内联显示；别的一律按附件下载，浏览器不许猜类型
+        inline = attachment_rules.is_image(row["media_type"])
+        return FileResponse(
+            path,
+            media_type=row["media_type"],
+            filename=row["name"],
+            content_disposition_type="inline" if inline else "attachment",
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+        )
+
+    @app.get("/admin/sessions/{session_id}/queue")
+    async def admin_queue(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
+        return engine_of(request).queue_view(session_id)
+
+    @app.patch("/admin/turns/{turn_id}")
+    async def admin_turn_edit(
+        request: Request, turn_id: str, body: TurnEditBody, _: Admin
+    ) -> dict[str, Any]:
+        return engine_of(request).edit_queued(turn_id, body.text)
+
+    @app.post("/admin/turns/{turn_id}/move")
+    async def admin_turn_move(
+        request: Request, turn_id: str, body: TurnMoveBody, _: Admin
+    ) -> dict[str, Any]:
+        return engine_of(request).move_queued(turn_id, body.to)
+
+    @app.get("/admin/quota")
+    async def admin_quota(request: Request, _: Admin, refresh: bool = False) -> dict[str, Any]:
+        return await engine_of(request).quota_view(refresh)
+
+    @app.post("/admin/turns/{turn_id}/resume")
+    async def admin_turn_resume(request: Request, turn_id: str, _: Admin) -> dict[str, Any]:
+        return engine_of(request).resume_now(turn_id)
+
+    @app.delete("/admin/turns/{turn_id}/resume")
+    async def admin_turn_resume_cancel(request: Request, turn_id: str, _: Admin) -> dict[str, Any]:
+        return engine_of(request).cancel_resume(turn_id)
 
     @app.get("/admin/sessions/{session_id}/turns")
     async def admin_turns(request: Request, session_id: str, _: Admin) -> dict[str, Any]:

@@ -5,9 +5,11 @@ import { useAuthStore } from '../../stores/auth'
 import { formatTime } from '../time'
 import { HOST_STATUS, POLICY_FIELDS, downloadRunnerBundle, useRunnerAction } from './api'
 import RunnerSshDeploy from './RunnerSshDeploy.vue'
+import ModuleServerPanels from '../../modules/ModuleServerPanels.vue'
 
 // 设置（RUNNER_PLAN 第 9、11 节）：添加、重新部署（重新下载接入包，旧凭证立即失效）、移除容器服务器；
 // 回收策略（各类别时长、水位、快照上限），保存带版本号，防止两个人同时改。
+// “通过 SSH 部署”后面是插拔式模块提供的区块（例如大模型客户端的“MCP 管理器”，T-0234）：经 ModuleServerPanels 渲染，这里不导入模块的代码。
 const props = defineProps<{ host: Schema['RunnerHostOut'] | null }>()
 const auth = useAuthStore(), scope = auth.workspaceId!
 const { busy, error, notice, act, header } = useRunnerAction(scope)
@@ -82,6 +84,8 @@ async function savePolicy() {
   </section>
 
   <RunnerSshDeploy v-if="host && host.backend !== 'kubernetes'" :key="host.id" :host-id="host.id" />
+
+  <ModuleServerPanels v-if="host" place="runnerHost" :server-id="host.id" :server-name="host.name" />
 
   <form v-if="host" class="panel runner-card runner-form" aria-label="回收策略" @submit.prevent="savePolicy">
     <h2>回收策略</h2>

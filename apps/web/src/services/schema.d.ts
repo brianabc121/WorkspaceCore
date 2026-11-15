@@ -3164,6 +3164,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：上传一个要随下一条消息发出去的图片 / 文件（admin）
+         * @description 请求体就是文件内容，文件名在查询参数 name 里。单个最多 20 MB；图片（PNG / JPEG / GIF / WebP）在哪种会话里都能带，别的文件只能在开发会话里带。返回的 id 在发送时放进 attachments。文件存在管理器那里。
+         */
+        post: operations["llm_chat_upload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 聊天：下载一个附件（admin） */
+        get: operations["llm_chat_download"];
+        put?: never;
+        post?: never;
+        /** 聊天：去掉一个上传了还没发出去的附件（admin） */
+        delete: operations["llm_chat_discard_upload"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -3204,6 +3242,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 聊天：一个会话的消息队列（admin）
+         * @description 正在处理的那一条和排队中的各条，按将要处理的顺序。会话在处理时再发的消息进队列，前面的做完才发给模型。
+         */
+        get: operations["llm_chat_queue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/reimport": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：官方程序里已有的会话，重新导入一次内容（admin）
+         * @description 第一次打开时已经导入过；官方程序里又有了新内容时用。不是这类会话 409。
+         */
+        post: operations["llm_chat_reimport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 聊天：修改排队中的一条消息（admin）
+         * @description 只能改还没开始处理的；已经开始的 409。
+         */
+        patch: operations["llm_chat_edit_queued"];
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/cancel": {
         parameters: {
             query?: never;
@@ -3216,6 +3314,44 @@ export interface paths {
         /** 聊天：停止一个排队中或进行中的回合（admin） */
         post: operations["llm_chat_cancel_turn"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 聊天：把排队中的一条消息调到队首或队尾（admin） */
+        post: operations["llm_chat_move_queued"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：被额度打断的回合，现在就试着继续（admin）
+         * @description 不等重置时间；“自动继续”关着或自动续的次数用完时也用它。不是被额度打断的、已经续跑过的 409。
+         */
+        post: operations["llm_chat_resume_now"];
+        /** 聊天：被额度打断的回合，不要自动继续（admin） */
+        delete: operations["llm_chat_resume_cancel"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3252,6 +3388,66 @@ export interface paths {
         post?: never;
         /** 删除开发环境（owner） */
         delete: operations["llm_bridge_delete_environment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 各平台的额度：每个窗口已用多少、什么时候重置；是否因为额度暂停着（admin）
+         * @description 平台给的是已用百分比和重置时间，不是剩余 token 数。refresh=true 时让管理器向能随时查的平台（Codex）实查一次；Claude / WorkBuddy 只在跑回合时顺带报出来，显示的是最近一次看到的。
+         */
+        get: operations["llm_bridge_bridge_quota"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/redeploy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 一键部署：重新部署（升级）工作台部署的 MCP 管理器（owner）
+         * @description 同一个目录、同一枚令牌、同一个数据卷、同一条通道：登录状态和会话记录保留。登录账号用 Docker 要 sudo 密码时带 sudo_password（只用这一次，不保存、不进日志）；需要却没带：409 SUDO_PASSWORD_REQUIRED。409 NOT_DEPLOYED_HERE：这个管理器不是工作台部署的；409 SERVER_REMOVED：那台服务器已经从工作台移除。
+         */
+        post: operations["llm_bridge_redeploy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 一键部署：重启工作台部署的 MCP 管理器（owner）
+         * @description docker compose restart，再确认工作台连得上。进行中的回合会中断。登录账号用 Docker 要 sudo 密码时带 sudo_password（只用这一次，不保存、不进日志）；需要却没带：409 SUDO_PASSWORD_REQUIRED。
+         */
+        post: operations["llm_bridge_restart"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3331,6 +3527,168 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/uninstall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 一键部署：卸载工作台部署的 MCP 管理器并去掉登记（owner）
+         * @description 停掉并删除容器、删除部署目录和转发密钥、去掉登记；数据卷默认保留，remove_data=true 时一起删除。force=true：不连服务器，只删除工作台里的登记（服务器连不上或已移除时用），返回的任务里写明服务器上还留着什么。登录账号用 Docker 要 sudo 密码时带 sudo_password（只用这一次，不保存、不进日志）；需要却没带：409 SUDO_PASSWORD_REQUIRED。
+         */
+        post: operations["llm_bridge_uninstall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/chat/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 聊天：多模型同问的分组（admin）
+         * @description 按最后活动排序；每一组带它的成员（哪个 MCP 管理器、平台、模型、会话）。
+         */
+        get: operations["llm_chat_list_groups"];
+        put?: never;
+        /**
+         * 聊天：把同一个问题同时发给几个模型（admin）
+         * @description 每个目标各开一个会话并发出问题，可以跨 MCP 管理器；某个目标失败只影响它自己，原因在这个成员的 error 里。一个会话都没建成时 409。用同一个 request_id 再建一次，得到的是同一组。
+         */
+        post: operations["llm_chat_create_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/chat/groups/{group_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 聊天：一组同问和它的成员（admin） */
+        get: operations["llm_chat_get_group"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/chat/groups/{group_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：归档一组同问（admin）
+         * @description 只是不再把它们并排显示；每个模型的会话不受影响，还能单独继续。
+         */
+        post: operations["llm_chat_archive_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/chat/groups/{group_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：向一组里的每个模型继续发（admin）
+         * @description 立刻返回每个会话的回合，不等回答。发不出去的（管理器停用、会话没建成）给出原因。409 TAKEOVER_REQUIRED：不是自己建的一组，要带 takeover=true。
+         */
+        post: operations["llm_chat_send_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 一键部署：最近的部署任务（admin）
+         * @description available 为 false 时这个工作台不能一键部署（镜像里没有 MCP 管理器的构建文件）。
+         */
+        get: operations["llm_bridge_list_deployments"];
+        put?: never;
+        /**
+         * 一键部署：把一个 MCP 管理器部署到智能体服务器或容器服务器上并登记（owner）
+         * @description 立刻返回任务，部署在后台进行，进度用任务接口读。和工作台同一台服务器：加入工作台的内部网络；其他服务器：只监听那台服务器的本机地址，工作台经专用的 SSH 通道访问。登录账号用 Docker 要 sudo 密码却没带 sudo_password 时，任务在“检查”一步失败（error_code=sudo_password_required），带上密码重新提交。409 DEPLOY_BLOCKED：工作台现在登录不上这台服务器；409 DEPLOY_BUSY：这台服务器上有 MCP 管理器的任务在进行；503 DEPLOY_UNAVAILABLE：这个工作台不能一键部署。
+         */
+        post: operations["llm_bridge_deploy"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/deployments/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 一键部署：可以部署到哪些服务器（admin）
+         * @description 智能体服务器和容器服务器两类；不能部署的带上原因。只读工作台里的登记，不连服务器。部署 MCP 管理器不看这两类服务器自己的准入（资源、配额、正在进行的任务）。
+         */
+        get: operations["llm_bridge_deploy_targets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/deployments/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一键部署：一个任务的步骤和日志（admin） */
+        get: operations["llm_bridge_get_deployment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/grants": {
         parameters: {
             query?: never;
@@ -3361,6 +3719,26 @@ export interface paths {
          * @description enabled 关掉时其余权限一并收回；platforms 为空表示所有平台。
          */
         put: operations["llm_bridge_set_grant"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/installs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 某台服务器上的 MCP 管理器（admin）
+         * @description 智能体服务器页面和容器服务器页面的“MCP 管理器”入口用：这台服务器上由工作台部署的管理器，带现在连不连得上、已登录的账号。这些容器不受那两个页面的管理程序影响。
+         */
+        get: operations["llm_bridge_installs"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -5000,7 +5378,7 @@ export interface paths {
         put?: never;
         /**
          * 部署或重新部署运行服务器（owner）
-         * @description 上传接入包到 ~/myworkspace-runner（签发新凭证，旧的立即失效），以 root 运行 install.sh（Docker 29.9.1、gVisor release-20261019.0、runner-agent），等 runner-agent 连上工作台。不是 root 账号时用 sudo，要填登录密码（只用这一次，不保存）。返回 202，进度看 GET /ssh。
+         * @description 上传接入包到 ~/myworkspace-runner（签发新凭证，旧的立即失效），以 root 运行 install.sh（Docker 29.9.1、gVisor release-20261019.0、runner-agent），等 runner-agent 连上工作台。不是 root 账号时用 sudo，要填登录密码（只用这一次，不保存）。返回 202，进度看 GET /ssh。启用 gVisor 时先让 Docker 重新加载配置；仍然要重启 Docker、而服务器上有运行中的 MCP 管理器时，任务以 error_code=gvisor_needs_docker_restart 失败，确认后带 allow_docker_restart=true 重新部署。
          */
         post: operations["install_runner_ssh"];
         delete?: never;
@@ -7536,22 +7914,6 @@ export interface components {
             /**
              * Version
              * @description 乐观并发版本号；写请求带上读取时的版本
-             */
-            version: number;
-        };
-        /**
-         * AgentSshInstall
-         * @description 开始自动安装。登录密码只用于这一次（登录、装专用公钥、需要时用 sudo 装 Docker），不保存。
-         */
-        AgentSshInstall: {
-            /**
-             * Password
-             * @description SSH 登录密码；已经装了专用公钥、且 Docker 可以直接使用时可以不填
-             */
-            password?: string | null;
-            /**
-             * Version
-             * @description 目标服务器的当前版本号
              */
             version: number;
         };
@@ -11049,6 +11411,177 @@ export interface components {
             /** Slot */
             slot: string;
         };
+        /** LlmBridgeDeployIn */
+        LlmBridgeDeployIn: {
+            /**
+             * Name
+             * @description MCP 管理器的名字
+             */
+            name: string;
+            /**
+             * Network
+             * @description auto：和工作台同一台服务器时加入工作台的内部网络，否则经 SSH 通道；tunnel：即使同机也只监听服务器的本机地址、经 SSH 通道访问
+             * @default auto
+             * @enum {string}
+             */
+            network: "auto" | "tunnel";
+            /**
+             * Platforms
+             * @description 它控制的平台
+             */
+            platforms: ("chatgpt" | "codex" | "claude" | "workbuddy")[];
+            /**
+             * Request Id
+             * @description 幂等号：用同一个再提交一次，得到的是同一个任务
+             */
+            request_id: string;
+            /**
+             * Sudo Password
+             * @description 登录账号用 Docker 要 sudo 密码时填：只用这一次，不保存、不进日志
+             */
+            sudo_password?: string | null;
+            /**
+             * Target Id
+             * Format: uuid
+             * @description 那台服务器的 id
+             */
+            target_id: string;
+            /**
+             * Target Kind
+             * @description agent_server：智能体服务器；runner_host：容器服务器
+             * @enum {string}
+             */
+            target_kind: "agent_server" | "runner_host";
+        };
+        /** LlmBridgeDeployJobList */
+        LlmBridgeDeployJobList: {
+            /**
+             * Available
+             * @description 这个工作台带着 MCP 管理器的构建文件，可以一键部署
+             */
+            available: boolean;
+            /** Jobs */
+            jobs: components["schemas"]["LlmBridgeDeployJobOut"][];
+        };
+        /** LlmBridgeDeployJobOut */
+        LlmBridgeDeployJobOut: {
+            /**
+             * Bridge Id
+             * @description 登记成功后是那个 MCP 管理器；登记被删除后为空
+             */
+            bridge_id: string | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message */
+            error_message: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @description deploy / redeploy / restart / uninstall
+             */
+            kind: string;
+            /**
+             * Log
+             * @description 脱敏后的输出；只在读单个任务时给出
+             */
+            log?: string | null;
+            /**
+             * Mode
+             * @description same_host：加入工作台的内部网络；tunnel：只监听服务器本机，经 SSH 通道访问
+             */
+            mode: string | null;
+            /** Name */
+            name: string;
+            /** Platforms */
+            platforms: string[];
+            /** Server Name */
+            server_name: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Status
+             * @description running / succeeded / failed / interrupted
+             */
+            status: string;
+            /**
+             * Steps
+             * @description 每一步的 key、status、detail
+             */
+            steps: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Target Id
+             * @description 服务器已从工作台移除时为空
+             */
+            target_id: string | null;
+            /**
+             * Target Kind
+             * @enum {string}
+             */
+            target_kind: "agent_server" | "runner_host";
+        };
+        /** LlmBridgeDeployTargetList */
+        LlmBridgeDeployTargetList: {
+            /**
+             * Available
+             * @description 这个工作台带着 MCP 管理器的构建文件，可以一键部署
+             */
+            available: boolean;
+            /** Targets */
+            targets: components["schemas"]["LlmBridgeDeployTargetOut"][];
+        };
+        /** LlmBridgeDeployTargetOut */
+        LlmBridgeDeployTargetOut: {
+            /**
+             * Block Message
+             * @description 不能部署的原因（给人看的）
+             */
+            block_message: string | null;
+            /**
+             * Block Reason
+             * @description 不能部署的原因（代码）
+             */
+            block_reason: string | null;
+            /** Deployable */
+            deployable: boolean;
+            /**
+             * Host
+             * @description 登记的地址；没有用 SSH 登记时为空
+             */
+            host: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "agent_server" | "runner_host";
+            /**
+             * Managers
+             * @description 这台服务器上已经部署的 MCP 管理器数量
+             */
+            managers: number;
+            /**
+             * May Need Password
+             * @description 登录账号不是 root、也不在 docker 组：sudo 要密码时部署要填一次登录密码
+             */
+            may_need_password: boolean;
+            /** Name */
+            name: string;
+        };
         /** LlmBridgeEnvironmentIn */
         LlmBridgeEnvironmentIn: {
             /** Branch */
@@ -11205,10 +11738,72 @@ export interface components {
              */
             token: string;
         };
+        /**
+         * LlmBridgeInstallOut
+         * @description 工作台部署出去的 MCP 管理器在哪（docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）。
+         */
+        LlmBridgeInstallOut: {
+            /**
+             * Deployed At
+             * Format: date-time
+             */
+            deployed_at: string;
+            /**
+             * Mode
+             * @description same_host：加入工作台的内部网络；tunnel：只监听服务器本机，经 SSH 通道访问
+             */
+            mode: string;
+            /**
+             * Needs Sudo
+             * @description 重新部署、重启、卸载时要填一次服务器的登录密码
+             */
+            needs_sudo: boolean;
+            /**
+             * Outdated
+             * @description 工作台带的构建文件比部署的新：可以重新部署来升级
+             */
+            outdated: boolean;
+            /**
+             * Port
+             * @description tunnel：服务器本机地址上的端口
+             */
+            port: number | null;
+            /** Server Name */
+            server_name: string;
+            /**
+             * Target Id
+             * @description 服务器已从工作台移除时为空
+             */
+            target_id: string | null;
+            /**
+             * Target Kind
+             * @description agent_server：智能体服务器；runner_host：容器服务器
+             * @enum {string}
+             */
+            target_kind: "agent_server" | "runner_host";
+        };
         /** LlmBridgeList */
         LlmBridgeList: {
             /** Bridges */
             bridges: components["schemas"]["LlmBridgeOut"][];
+        };
+        /** LlmBridgeLoadOut */
+        LlmBridgeLoadOut: {
+            /**
+             * Limit
+             * @description 同时进行的上限
+             */
+            limit: number;
+            /**
+             * Running
+             * @description 这个平台进行中的会话数
+             */
+            running: number;
+            /**
+             * Waiting
+             * @description 在排队等名额的会话数
+             */
+            waiting: number;
         };
         /** LlmBridgeLoginIn */
         LlmBridgeLoginIn: {
@@ -11248,6 +11843,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** @description 工作台一键部署的管理器：部署在哪台智能体服务器上；手动添加的为空 */
+            deployment?: components["schemas"]["LlmBridgeInstallOut"] | null;
             /** Enabled */
             enabled: boolean;
             /** Has Token */
@@ -11276,10 +11873,159 @@ export interface components {
             /** Token */
             token?: string | null;
         };
+        /** LlmBridgeQuotaList */
+        LlmBridgeQuotaList: {
+            /** Platforms */
+            platforms: {
+                [key: string]: components["schemas"]["LlmBridgeQuotaOut"];
+            };
+        };
+        /**
+         * LlmBridgeQuotaOut
+         * @description 一个平台的额度（docs/v2/LLM_BRIDGE_QUOTA_PLAN.md）。
+         *
+         *     平台给的是已用百分比，不是剩余 token 数。
+         */
+        LlmBridgeQuotaOut: {
+            /**
+             * Can Refresh
+             * @description 能不能随时向平台查（Codex 能；Claude / WorkBuddy 只在跑回合时顺带报出来）
+             */
+            can_refresh: boolean;
+            /**
+             * Pause Estimated
+             * @description 平台没说什么时候重置，暂停的时间是估计的
+             */
+            pause_estimated: boolean;
+            /**
+             * Paused Until
+             * @description 因为额度用完暂停到什么时候；没暂停为空
+             */
+            paused_until: number | null;
+            /**
+             * Tokens 5H
+             * @description 最近 5 小时经这个管理器用掉的 token（管理器自己记的）
+             */
+            tokens_5h: number;
+            /**
+             * Waiting Resume
+             * @description 有几个被打断的会话在等自动续跑
+             */
+            waiting_resume: number;
+            /** Windows */
+            windows: components["schemas"]["LlmBridgeQuotaWindowOut"][];
+        };
+        /** LlmBridgeQuotaWindowOut */
+        LlmBridgeQuotaWindowOut: {
+            /**
+             * Kind
+             * @description 哪个窗口：five_hour / weekly / 平台给的别的名字
+             */
+            kind: string;
+            /**
+             * Observed At
+             * @description 什么时候看到的
+             */
+            observed_at: number;
+            /**
+             * Plan
+             * @description 套餐（平台给了才有）
+             */
+            plan?: string | null;
+            /**
+             * Reset Passed
+             * @description 重置时间已经过了：等下一次回合确认新的用量
+             */
+            reset_passed: boolean;
+            /**
+             * Resets At
+             * @description 什么时候重置（时间戳）
+             */
+            resets_at: number | null;
+            /**
+             * Status
+             * @description ok / warning / exceeded
+             */
+            status: string;
+            /**
+             * Used Percent
+             * @description 已用百分比；重置时间已过或平台没给时为空
+             */
+            used_percent: number | null;
+        };
+        /** LlmBridgeRedeployIn */
+        LlmBridgeRedeployIn: {
+            /**
+             * Request Id
+             * @description 幂等号：用同一个再提交一次，得到的是同一个任务
+             */
+            request_id: string;
+            /**
+             * Sudo Password
+             * @description 登录账号用 Docker 要 sudo 密码时填：只用这一次，不保存、不进日志
+             */
+            sudo_password?: string | null;
+        };
         /** LlmBridgeResetOut */
         LlmBridgeResetOut: {
             /** Archived Sessions */
             archived_sessions: number;
+        };
+        /** LlmBridgeRestartIn */
+        LlmBridgeRestartIn: {
+            /**
+             * Request Id
+             * @description 幂等号：用同一个再提交一次，得到的是同一个任务
+             */
+            request_id: string;
+            /**
+             * Sudo Password
+             * @description 登录账号用 Docker 要 sudo 密码时填：只用这一次，不保存、不进日志
+             */
+            sudo_password?: string | null;
+        };
+        /** LlmBridgeServerManagerList */
+        LlmBridgeServerManagerList: {
+            /**
+             * Available
+             * @description 这个工作台可以一键部署
+             */
+            available: boolean;
+            /** Managers */
+            managers: components["schemas"]["LlmBridgeServerManagerOut"][];
+        };
+        /**
+         * LlmBridgeServerManagerOut
+         * @description 某台服务器上的一个 MCP 管理器（两个服务器页面的入口用）。
+         */
+        LlmBridgeServerManagerOut: {
+            /**
+             * Bridge Id
+             * Format: uuid
+             */
+            bridge_id: string;
+            deployment: components["schemas"]["LlmBridgeInstallOut"];
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Logged In
+             * @description 已经登录的账号（openai / claude / workbuddy）
+             */
+            logged_in: string[];
+            /** Name */
+            name: string;
+            /**
+             * Platforms
+             * @description 它控制的平台
+             */
+            platforms: string[];
+            /**
+             * Reachable
+             * @description 工作台现在连不连得上它；停用的不探测，为空
+             */
+            reachable: boolean | null;
+            /** Version */
+            version: string | null;
         };
         /** LlmBridgeSessionList */
         LlmBridgeSessionList: {
@@ -11322,17 +12068,35 @@ export interface components {
         /** LlmBridgeSettings */
         LlmBridgeSettings: {
             /**
+             * Auto Resume
+             * @description 额度用完被打断的会话，到重置时间后自动发一句“继续”；旧版本的管理器没有这一项
+             * @default false
+             */
+            auto_resume: boolean;
+            /**
+             * Auto Resume Max
+             * @description 同一次中断最多自动续几次
+             * @default 3
+             */
+            auto_resume_max: number;
+            /**
              * Claude Subscription Ack
              * @description 已确认了解 Claude 订阅登录的合规风险
              */
             claude_subscription_ack: boolean;
             /**
              * Concurrency
-             * @description 每个账号同时进行的回合数
+             * @description 每个平台同时进行的会话数（超过的排队等名额）
              */
             concurrency: number;
             /** Max Text Chars */
             max_text_chars: number;
+            /**
+             * Min Start Interval Seconds
+             * @description 同一个平台两次开始之间至少隔几秒；旧版本的管理器没有这一项
+             * @default 0
+             */
+            min_start_interval_seconds: number;
             /**
              * Platforms
              * @description 这个 MCP 管理器控制的平台
@@ -11345,6 +12109,12 @@ export interface components {
              */
             platforms: string[];
             /**
+             * Resume Text
+             * @description 自动续跑时发的那句话
+             * @default
+             */
+            resume_text: string;
+            /**
              * Send Per Hour
              * @description 每个实例每小时的发送次数
              */
@@ -11354,17 +12124,25 @@ export interface components {
         };
         /** LlmBridgeSettingsPatch */
         LlmBridgeSettingsPatch: {
+            /** Auto Resume */
+            auto_resume?: boolean | null;
+            /** Auto Resume Max */
+            auto_resume_max?: number | null;
             /** Claude Subscription Ack */
             claude_subscription_ack?: boolean | null;
             /** Concurrency */
             concurrency?: number | null;
             /** Max Text Chars */
             max_text_chars?: number | null;
+            /** Min Start Interval Seconds */
+            min_start_interval_seconds?: number | null;
             /**
              * Platforms
              * @description 这个 MCP 管理器控制的平台（至少一个）。取消勾选的平台不能登录、不能新建会话和发送；已有的登录和会话记录保留
              */
             platforms?: ("chatgpt" | "codex" | "claude" | "workbuddy")[] | null;
+            /** Resume Text */
+            resume_text?: string | null;
             /** Send Per Hour */
             send_per_hour?: number | null;
             /** Turn Timeout Seconds */
@@ -11389,6 +12167,14 @@ export interface components {
              */
             error: string;
             /**
+             * Load
+             * @description 每个平台的进行中 / 等待 / 上限；旧版本的管理器没有
+             * @default {}
+             */
+            load: {
+                [key: string]: components["schemas"]["LlmBridgeLoadOut"];
+            };
+            /**
              * Platforms
              * @description 这个 MCP 管理器控制的平台
              * @default []
@@ -11399,6 +12185,14 @@ export interface components {
              * @default 0
              */
             queued: number;
+            /**
+             * Quota
+             * @description 每个平台的额度与暂停情况；旧版本的管理器没有
+             * @default {}
+             */
+            quota: {
+                [key: string]: components["schemas"]["LlmBridgeQuotaOut"];
+            };
             /** Reachable */
             reachable: boolean;
             /**
@@ -11438,6 +12232,52 @@ export interface components {
             text: string;
             /** Turn Id */
             turn_id: string;
+        };
+        /** LlmBridgeUninstallIn */
+        LlmBridgeUninstallIn: {
+            /**
+             * Force
+             * @description 不连服务器，只删除工作台里的登记和部署记录（服务器连不上或已移除时用）
+             * @default false
+             */
+            force: boolean;
+            /**
+             * Remove Data
+             * @description 同时删除数据卷（登录状态和会话记录，不能恢复）
+             * @default false
+             */
+            remove_data: boolean;
+            /**
+             * Request Id
+             * @description 幂等号：用同一个再提交一次，得到的是同一个任务
+             */
+            request_id: string;
+            /**
+             * Sudo Password
+             * @description 登录账号用 Docker 要 sudo 密码时填：只用这一次，不保存、不进日志
+             */
+            sudo_password?: string | null;
+        };
+        /**
+         * LlmChatAttachmentOut
+         * @description 随消息带上的图片 / 文件（input），或模型产出的图片 / 文件（output）。内容另外下载。
+         */
+        LlmChatAttachmentOut: {
+            /** At */
+            at?: number | null;
+            /**
+             * Direction
+             * @description input：人带上的；output：模型产出的
+             */
+            direction: string;
+            /** Id */
+            id: string;
+            /** Media Type */
+            media_type: string;
+            /** Name */
+            name: string;
+            /** Size */
+            size: number;
         };
         /** LlmChatConversationOut */
         LlmChatConversationOut: {
@@ -11535,6 +12375,140 @@ export interface components {
             /** Last Id */
             last_id: number;
         };
+        /** LlmChatGroupCreateIn */
+        LlmChatGroupCreateIn: {
+            /**
+             * Request Id
+             * @description 幂等号：用同一个再建一次，得到的是同一组
+             */
+            request_id: string;
+            /**
+             * Targets
+             * @description 2 ~ 6 个目标，可以跨 MCP 管理器
+             */
+            targets: components["schemas"]["LlmChatTargetIn"][];
+            /**
+             * Text
+             * @description 同时发给每个目标的问题
+             */
+            text: string;
+            /**
+             * Title
+             * @description 不填时取问题的开头
+             * @default
+             */
+            title: string;
+        };
+        /** LlmChatGroupList */
+        LlmChatGroupList: {
+            /** Groups */
+            groups: components["schemas"]["LlmChatGroupOut"][];
+        };
+        /** LlmChatGroupMemberOut */
+        LlmChatGroupMemberOut: {
+            /**
+             * Bridge Enabled
+             * @description 管理器还在并且启用着
+             */
+            bridge_enabled: boolean;
+            /**
+             * Bridge Id
+             * @description MCP 管理器；它的登记被删除后为空
+             */
+            bridge_id: string | null;
+            /** Bridge Name */
+            bridge_name: string;
+            /**
+             * Error
+             * @description 会话没建成、或第一条消息没发出去的原因
+             * @default
+             */
+            error: string;
+            /** Mode */
+            mode: string;
+            /** Model */
+            model: string | null;
+            /** Platform */
+            platform: string;
+            /** Position */
+            position: number;
+            /**
+             * Session Id
+             * @description 这个目标的会话；没建成时为空，原因在 error
+             */
+            session_id: string | null;
+        };
+        /** LlmChatGroupOut */
+        LlmChatGroupOut: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Members */
+            members: components["schemas"]["LlmChatGroupMemberOut"][];
+            /**
+             * Owner
+             * @description 谁建的（显示名）
+             */
+            owner: string | null;
+            /**
+             * Owner Kind
+             * @enum {string}
+             */
+            owner_kind: "me" | "user";
+            /**
+             * Status
+             * @description active / archived
+             */
+            status: string;
+            /** Title */
+            title: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** LlmChatGroupResult */
+        LlmChatGroupResult: {
+            /**
+             * Error
+             * @description 这一个没发出去的原因
+             * @default
+             */
+            error: string;
+            /** Position */
+            position: number;
+            turn?: components["schemas"]["LlmChatTurnOut"] | null;
+        };
+        /** LlmChatGroupSendIn */
+        LlmChatGroupSendIn: {
+            /**
+             * Request Id
+             * @description 幂等号：重试用同一个，每个会话都不会重复发送
+             */
+            request_id: string;
+            /**
+             * Takeover
+             * @description 不是自己建的一组要为 true（页面先让人确认）
+             * @default false
+             */
+            takeover: boolean;
+            /** Text */
+            text: string;
+        };
+        /** LlmChatGroupSentOut */
+        LlmChatGroupSentOut: {
+            group: components["schemas"]["LlmChatGroupOut"];
+            /** Results */
+            results: components["schemas"]["LlmChatGroupResult"][];
+        };
         /** LlmChatMessageOut */
         LlmChatMessageOut: {
             /**
@@ -11545,19 +12519,38 @@ export interface components {
             /** At */
             at?: number | null;
             /**
+             * Attachments
+             * @description 提问带上的图片 / 文件，或这一回合模型产出的图片 / 文件
+             * @default []
+             */
+            attachments: components["schemas"]["LlmChatAttachmentOut"][];
+            /**
              * By
              * @description 谁发的（只有 user 消息有）
              */
             by?: string | null;
+            /**
+             * Delivery
+             * @description 提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；merged 中断上一个回合后合并重发；imported 导入的
+             */
+            delivery?: string | null;
             /** Failure */
             failure?: {
                 [key: string]: unknown;
             } | null;
             /**
+             * Imported
+             * @description 官方程序里原有的内容（第一次打开时导入的）
+             * @default false
+             */
+            imported: boolean;
+            /**
              * Mine
              * @description 是不是当前用户发的（只有 user 消息有）
              */
             mine?: boolean | null;
+            /** @description 被额度打断的回合（status=interrupted）：什么时候自动继续 */
+            resume?: components["schemas"]["LlmChatResumeOut"] | null;
             /**
              * Role
              * @description user / assistant
@@ -11565,7 +12558,7 @@ export interface components {
             role: string;
             /**
              * Status
-             * @description 回答所在回合的状态：queued / running / completed / failed / cancelled / unknown
+             * @description 回答所在回合的状态：queued / running / completed / failed / cancelled / unknown / interrupted
              */
             status?: string | null;
             /**
@@ -11620,13 +12613,105 @@ export interface components {
              */
             models_error: string;
         };
+        /** LlmChatQueueEditIn */
+        LlmChatQueueEditIn: {
+            /** Text */
+            text: string;
+        };
+        /** LlmChatQueueItem */
+        LlmChatQueueItem: {
+            /**
+             * By
+             * @description 谁发的
+             */
+            by: string | null;
+            /**
+             * Mine
+             * @description 是不是我发的
+             */
+            mine: boolean;
+            /** Queued At */
+            queued_at: number;
+            /** Started At */
+            started_at: number | null;
+            /**
+             * Status
+             * @description queued / running
+             */
+            status: string;
+            /** Text */
+            text: string;
+            /** Turn Id */
+            turn_id: string;
+        };
+        /** LlmChatQueueMoveIn */
+        LlmChatQueueMoveIn: {
+            /**
+             * To
+             * @description 调到队首或队尾
+             * @enum {string}
+             */
+            to: "first" | "last";
+        };
+        /** LlmChatQueueOut */
+        LlmChatQueueOut: {
+            /**
+             * Queued
+             * @description 排队中的各条，按将要处理的顺序
+             */
+            queued: components["schemas"]["LlmChatQueueItem"][];
+            /** @description 正在处理的那一条 */
+            running: components["schemas"]["LlmChatQueueItem"] | null;
+            /** Session Id */
+            session_id: string;
+        };
         /** LlmChatRenameIn */
         LlmChatRenameIn: {
             /** Title */
             title: string;
         };
+        /**
+         * LlmChatResumeOut
+         * @description 额度用完被打断后的自动续跑（docs/v2/LLM_BRIDGE_QUOTA_PLAN.md 第 3 节）。
+         */
+        LlmChatResumeOut: {
+            /**
+             * At
+             * @description 打算什么时候继续（时间戳）
+             */
+            at: number | null;
+            /**
+             * Attempt
+             * @description 这是第几次自动续跑的回合（0 = 人发的）
+             * @default 0
+             */
+            attempt: number;
+            /**
+             * Resumed By
+             * @description 续跑它的那个回合
+             */
+            resumed_by?: string | null;
+            /**
+             * State
+             * @description pending：到点自动继续；forced：有人点了现在就试；done：已经续跑；cancelled：有人说不要自动继续；skipped：到点时没有发（开关关着、会话已归档等）；exhausted：自动续的次数用完了
+             */
+            state: string | null;
+        };
         /** LlmChatSendIn */
         LlmChatSendIn: {
+            /**
+             * Attachments
+             * @description 随这条消息带上的附件（先上传得到编号）
+             * @default []
+             */
+            attachments: string[];
+            /**
+             * Mode
+             * @description 会话正在处理别的消息时：queue 排队（不打断）；insert 插入——送进正在处理的回合，平台做不到时中断它、合并重发
+             * @default queue
+             * @enum {string}
+             */
+            mode: "queue" | "insert";
             /**
              * Request Id
              * @description 幂等号：重试同一条消息时用同一个，不会重复发送
@@ -11709,17 +12794,74 @@ export interface components {
             /** At */
             at?: number | null;
             /**
+             * Error
+             * @description 工具报了错
+             * @default false
+             */
+            error: boolean;
+            /**
+             * Exit Code
+             * @description 命令的退出码（平台给了才有）
+             */
+            exit_code?: number | null;
+            /**
              * Kind
              * @description message（中间说的话）/ command / files / notice
              */
             kind: string;
+            /**
+             * Name
+             * @description 工具名（kind 是 tool / tool_result 时）
+             */
+            name?: string | null;
             /** Text */
             text: string;
+            /**
+             * Truncated
+             * @description 内容太长，后面的没有保存
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /** LlmChatTargetIn */
+        LlmChatTargetIn: {
+            /**
+             * Bridge Id
+             * Format: uuid
+             * @description 用哪个 MCP 管理器（它上面登录的账号）
+             */
+            bridge_id: string;
+            /** Effort */
+            effort?: string | null;
+            /**
+             * Environment
+             * @description 开发会话必填
+             */
+            environment?: string | null;
+            /**
+             * Mode
+             * @default chat
+             * @enum {string}
+             */
+            mode: "chat" | "dev";
+            /** Model */
+            model?: string | null;
+            /**
+             * Platform
+             * @enum {string}
+             */
+            platform: "chatgpt" | "codex" | "claude" | "workbuddy";
         };
         /** LlmChatTurnOut */
         LlmChatTurnOut: {
             /** Ahead In Session */
             ahead_in_session?: number | null;
+            /**
+             * Delivered
+             * @description 这条消息实际怎么送出去的：inserted 送进了正在处理的回合（turn_id 是那个回合）；merged 中断了正在处理的回合，和“接着刚才的做”合成新回合；queued 排队；started 直接开始。旧版本的管理器没有这一项
+             */
+            delivered?: string | null;
+            resume?: components["schemas"]["LlmChatResumeOut"] | null;
             /** Session Id */
             session_id: string;
             /** Status */
@@ -16670,6 +17812,11 @@ export interface components {
             /** Load */
             load?: number | null;
             /**
+             * Mcp Manager Containers
+             * @default 0
+             */
+            mcp_manager_containers: number;
+            /**
              * Mem Bytes
              * @default 0
              */
@@ -17051,6 +18198,30 @@ export interface components {
              * @enum {string}
              */
             user: "user" | "root";
+        };
+        /**
+         * RunnerSshInstall
+         * @description 部署或重新部署运行服务器。
+         *
+         *     登录密码只用于这一次（登录、装专用公钥、用 sudo 运行安装脚本），不保存。
+         */
+        RunnerSshInstall: {
+            /**
+             * Allow Docker Restart
+             * @description 允许安装脚本重启 Docker。启用 gVisor 时先重新加载 Docker 的配置；仍然不行、而服务器上有运行中的 MCP 管理器时，任务以 gvisor_needs_docker_restart 失败，管理员确认后带上这一项重新部署（重启会让它们短暂中断，之后自己恢复）
+             * @default false
+             */
+            allow_docker_restart: boolean;
+            /**
+             * Password
+             * @description SSH 登录密码；已经装了专用公钥的 root 账号可以不填，其他账号要用 sudo，必须填
+             */
+            password?: string | null;
+            /**
+             * Version
+             * @description 目标服务器的当前版本号
+             */
+            version: number;
         };
         /**
          * RunnerSshUninstall
@@ -33244,6 +34415,257 @@ export interface operations {
             };
         };
     };
+    llm_chat_upload: {
+        parameters: {
+            query: {
+                /** @description 文件名 */
+                name: string;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": string;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatAttachmentOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求体过大（PAYLOAD_TOO_LARGE） */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_download: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 文件内容。四种图片内联显示，别的按附件下载 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_discard_upload: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_chat_session_events: {
         parameters: {
             query?: {
@@ -33404,7 +34826,496 @@ export interface operations {
             };
         };
     };
+    llm_chat_queue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatQueueOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_reimport: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatConversationOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_edit_queued: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatQueueEditIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatQueueOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_chat_cancel_turn: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatTurnOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_move_queued: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatQueueMoveIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatQueueOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_resume_now: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatTurnOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_resume_cancel: {
         parameters: {
             query?: never;
             header: {
@@ -33807,6 +35718,249 @@ export interface operations {
             };
         };
     };
+    llm_bridge_bridge_quota: {
+        parameters: {
+            query?: {
+                /** @description 向平台实查一次 */
+                refresh?: boolean;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeQuotaList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_redeploy: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeRedeployIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeDeployJobOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_restart: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeRestartIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeDeployJobOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_bridge_list_sessions: {
         parameters: {
             query?: {
@@ -34107,6 +36261,724 @@ export interface operations {
             };
         };
     };
+    llm_bridge_uninstall: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeUninstallIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeDeployJobOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_list_groups: {
+        parameters: {
+            query?: {
+                status?: "active" | "archived" | "all";
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_create_group: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatGroupCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupSentOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_get_group: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_archive_group: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_send_group: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                group_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatGroupSendIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatGroupSentOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_list_deployments: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeDeployJobList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_deploy: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeDeployIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeDeployJobOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_deploy_targets: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeDeployTargetList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_get_deployment: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeDeployJobOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_bridge_list_grants: {
         parameters: {
             query?: never;
@@ -34251,6 +37123,68 @@ export interface operations {
             };
             /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_installs: {
+        parameters: {
+            query: {
+                target_kind: "agent_server" | "runner_host";
+                target_id: string;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeServerManagerList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -40951,7 +43885,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentSshInstall"];
+                "application/json": components["schemas"]["RunnerSshInstall"];
             };
         };
         responses: {
@@ -42000,7 +44934,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["AgentSshInstall"];
+                "application/json": components["schemas"]["RunnerSshInstall"];
             };
         };
         responses: {

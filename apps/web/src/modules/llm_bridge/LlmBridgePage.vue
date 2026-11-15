@@ -10,6 +10,7 @@ import './chat/llm_chat.css'
 // 大模型客户端：一个入口、两个视图。
 // - 聊天（默认，/llm_bridge）：像各家的客户端一样看会话、提问（docs/v2/LLM_CHAT_PLAN.md）。
 // - 管理器与账号（/llm_bridge?view=manage）：添加 MCP 管理器、登录账号、设置、实例权限（LLM_BRIDGE_PLAN.md 第 19 节）。
+//   从服务器页面跳过来时带 &m=<管理器>（选中它）或 &deploy=<类型>:<服务器>（打开一键部署并选好那台服务器，LLM_BRIDGE_DEPLOY_PLAN.md 第 7 节）。
 // owner / admin 能看（管理视图里 admin 只读），其他角色路由已拦截。
 // 换用户或工作空间时整页重建，表单、登录进度、草稿不会串到另一个工作空间。
 const auth = useAuthStore(), route = useRoute()

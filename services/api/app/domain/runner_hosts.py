@@ -549,6 +549,7 @@ class RunnerHosts:
             "volumes": len(body.volumes),
             "images": len(body.images),
             "unlabeled_containers": body.unlabeled_containers,
+            "mcp_manager_containers": body.mcp_manager_containers,
             "mem_bytes": body.mem_bytes,
             "mem_free_bytes": body.mem_free_bytes,
             "disk_bytes": body.disk_bytes,

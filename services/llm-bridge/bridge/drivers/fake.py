@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from typing import Any
 
 from bridge.drivers.base import (
     AccountStatus,
@@ -37,6 +38,15 @@ class FakeDriver(Driver):
         self.running = 0
         self.max_running = 0
         self._cancel: dict[str, asyncio.Event] = {}
+        # 额度：quota_until 之前的回合都以“额度用完”失败；quota_reports_reset=False 时不给重置时间
+        self.last_images: tuple[tuple[str, str], ...] = ()
+        # 插入消息：steerable=True 时回合中追加的消息会被收下（记在 steered 里）
+        self.steerable = False
+        self.steered: list[str] = []
+        self.quota_until = 0.0
+        self.quota_reports_reset = True
+        self.current_quota: list[dict[str, Any]] = []
+        self.can_query_quota = False
 
     def supports(self, mode: Mode) -> bool:
         return mode in ("chat", "dev")
@@ -63,6 +73,34 @@ class FakeDriver(Driver):
         try:
             if text.startswith("fail:"):
                 raise DriverError(text[5:], "模拟的失败")  # type: ignore[arg-type]
+            if self.quota_until > time.time():
+                # 模拟额度用完：到 quota_until 之前谁来都被拒绝，并报出额度
+                windows = [
+                    {
+                        "kind": "five_hour",
+                        "used_percent": 100.0,
+                        "resets_at": self.quota_until if self.quota_reports_reset else None,
+                        "status": "exceeded",
+                        "plan": "fake",
+                    }
+                ]
+                await sink("quota", {"windows": windows})
+                raise DriverError(
+                    "rate_limited",
+                    "You've hit your usage limit",
+                    quota=True,
+                    resets_at=self.quota_until if self.quota_reports_reset else None,
+                )
+            self.current_quota = [
+                {
+                    "kind": "five_hour",
+                    "used_percent": 40.0,
+                    "resets_at": time.time() + 3600,
+                    "status": "ok",
+                    "plan": "fake",
+                }
+            ]
+            await sink("quota", {"windows": self.current_quota})
             if text.startswith("sleep:"):
                 waiter = asyncio.create_task(cancel.wait())
                 done, _ = await asyncio.wait({waiter}, timeout=float(text[6:]))
@@ -70,6 +108,9 @@ class FakeDriver(Driver):
                 if done:
                     raise DriverError("platform_error", "回合被中断")
             reply = f"[{spec.model}] {text}"
+            if spec.images:
+                reply += f"（收到 {len(spec.images)} 张图片）"
+            self.last_images = spec.images
             commands: list[str] = []
             files: list[str] = []
             if text.startswith("work:"):
@@ -83,6 +124,18 @@ class FakeDriver(Driver):
                 waiter.cancel()
                 if done:
                     raise DriverError("platform_error", "回合被中断")
+            if text.startswith("read:"):
+                # 模拟读文件这类工具调用和它的结果
+                await sink("tool", {"name": "Read", "input": '{"file_path": "' + text[5:] + '"}'})
+                await sink("tool_result", {"name": "Read", "text": "文件内容", "error": False})
+            if text.startswith("write:"):
+                # 模拟开发回合在工作目录里写出一个文件（write:<相对路径>）
+                name = text[6:].split("\n")[0]
+                target = spec.workdir / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text("generated\n")
+                files = [name]
+                await sink("files", {"paths": files})
             history = self.history.setdefault(spec.native_id, [])
             history += [
                 Message("user", text, time.time()),
@@ -103,9 +156,30 @@ class FakeDriver(Driver):
         finally:
             self.running -= 1
 
+    async def quota(self) -> list[dict[str, Any]] | None:
+        if not self.can_query_quota:
+            return None
+        if self.quota_until > time.time():
+            return [
+                {
+                    "kind": "five_hour",
+                    "used_percent": 100.0,
+                    "resets_at": self.quota_until,
+                    "status": "exceeded",
+                    "plan": "fake",
+                }
+            ]
+        return self.current_quota
+
     async def cancel(self, spec: SessionSpec) -> None:
         if spec.native_id in self._cancel:
             self._cancel[spec.native_id].set()
+
+    async def steer(self, spec: SessionSpec, text: str) -> bool:
+        if not self.steerable or self.running == 0:
+            return False
+        self.steered.append(text)
+        return True
 
     async def list_native(self, limit: int) -> list[NativeSession]:
         return self.external[:limit]

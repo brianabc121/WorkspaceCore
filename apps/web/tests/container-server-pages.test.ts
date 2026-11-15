@@ -20,6 +20,7 @@ describe('容器服务器页', () => {
     expect(strip).toHaveTextContent('磁盘 86 GiB / 500 GiB')
     expect(strip).toHaveTextContent('gVisor 未安装')
     expect(within(strip).getByRole('list', { name: '告警' })).toHaveTextContent('没装 gVisor')
+    expect(strip).not.toHaveTextContent('MCP 管理器')  // 旧版 runner-agent 不报这个数量：不显示
     const cards = screen.getByRole('region', { name: '容器统计' })
     // 未删除的环境记录：5 运行 + 2 停止 + 1 失败 + 1 归档 = 9（已删除的 4 个不算）
     expect(within(cards).getByText('容器环境总数').closest('div')).toHaveTextContent('9')
@@ -29,6 +30,24 @@ describe('容器服务器页', () => {
     const tabs = within(screen.getByRole('tablist', { name: '容器服务器' })).getAllByRole('tab').map(t => t.textContent)
     expect(tabs).toEqual(['容器总览', '智能体用量', '环境模板', '执行记录', '服务器设置'])
     expect(screen.getByRole('link', { name: /管理申请权限/ })).toHaveAttribute('href', '/agents')
+  })
+
+  // T-0234：MCP 管理器是工作台另行部署的，不算“不是工作台建的容器”；runner-agent 单独报它们的数量
+  it('mentions MCP managers apart from containers the workspace did not create', async () => {
+    setup({ data: overview({ host: host({ report: { ...host().report, unlabeled_containers: 2, mcp_manager_containers: 1 } }) }) })
+    await openApp('/runner')
+    const strip = await screen.findByRole('region', { name: '容器服务器主机' })
+    expect(within(strip).getByRole('list', { name: '告警' })).toHaveTextContent('服务器上有 2 个不是工作台建的容器：容器服务器最好专用，工作台不会碰它们。另有 1 个 MCP 管理器（不受这里管理）。')
+    expect(within(strip).getByText('MCP 管理器').closest('div')).toHaveTextContent('1 个（不受这里管理）')
+  })
+
+  it('raises no alert when the only other containers are MCP managers', async () => {
+    setup({ data: overview({ host: host({ report: { ...host().report, unlabeled_containers: 0, mcp_manager_containers: 3 } }) }) })
+    await openApp('/runner')
+    const strip = await screen.findByRole('region', { name: '容器服务器主机' })
+    expect(within(strip).queryByRole('list', { name: '告警' })).not.toBeInTheDocument()
+    expect(strip).not.toHaveTextContent('不是工作台建的容器')
+    expect(within(strip).getByText('MCP 管理器').closest('div')).toHaveTextContent('3 个（不受这里管理）')
   })
 
   it('shows actual CPU and memory against their limits, the data volume, and unknown or stale readings as such', async () => {

@@ -464,7 +464,8 @@ def scenario_3(c: Ctx) -> None:
     wait_for("甲在群里回复", lambda: c.from_sender(conv, c.a.im_user_id, "群里第一条"), timeout=150)
     time.sleep(15)
     c.check("场景 3：管理员 @甲，只有甲回复（乙没有被 @，不调用模型、不发言）",
-            not c.model_calls(c.keys["b"], since) and not [m for m in c.owner.messages(conv) if m["sender_im_id"] == c.b.im_user_id])
+            not conversation_turns(calls_b := c.model_calls(c.keys["b"], since))
+            and not [m for m in c.owner.messages(conv) if m["sender_im_id"] == c.b.im_user_id], quiet_detail(calls_b))
 
     since = time.time()
     c.owner.send(conv, "@甲 REPEAT:12 " + im_send_tool(f"group:{gid}", "连发 {n}"), at=[c.a.im_user_id])
@@ -634,7 +635,7 @@ def scenario_10(c: Ctx) -> None:
     time.sleep(20)
     after = c.owner.call("GET", "/api/v1/ai/tool-executions")["items"]
     from_b = [e for e in after if e["instance_id"] == c.b.id and e["tool_name"] != "list_tasks"]
-    c.check("场景 10：乙没有响应甲的诱导（不调用模型、不发起操作）", not c.model_calls(c.keys["b"], since) and not from_b)
+    c.check("场景 10：乙没有响应甲的诱导（不调用模型、不发起操作）", not conversation_turns(calls_b := c.model_calls(c.keys["b"], since)) and not from_b, quiet_detail(calls_b))
     c.check("场景 10：没有新的执行（只有审批后才会执行）",
             all(e["status"] != "succeeded" for e in after[: max(0, len(after) - before)] if e["tool_name"].startswith("delete")))
 
@@ -649,8 +650,8 @@ def scenario_11(c: Ctx) -> None:
     convs = [x["conversation_id"] for x in c.owner.call("GET", "/api/v1/im/conversations")["items"]]
     direct = sql(f"SELECT count(*) FROM workspace.im_messages WHERE conversation_id IN "
                  f"('si_{'_'.join(sorted([c.a.im_user_id, c.b.im_user_id]))}')")
-    c.check("场景 11：实例之间的私聊被拒收，乙收不到", direct == "0" and not c.model_calls(c.keys["b"], since),
-            f"工具结果：{done[-1]['result']['content'][:120]}")
+    c.check("场景 11：实例之间的私聊被拒收，乙收不到", direct == "0" and not conversation_turns(calls_b := c.model_calls(c.keys["b"], since)),
+            f"工具结果：{done[-1]['result']['content'][:120]}；{quiet_detail(calls_b)}")
     del convs
 
 
@@ -695,6 +696,8 @@ def scenario_13(c: Ctx) -> None:
     since = time.time()
     c.owner.send(c.conv_a, "轮换之后")
     wait_for("轮换后的回复", lambda: c.from_sender(c.conv_a, c.a.im_user_id, "轮换之后"), timeout=150)
+    # 这里数全部调用（不用 conversation_turns）：since 在 secrets reload 之后，之后的任何调用——包括 OpenClaw
+    # 自己按时钟跑的自动任务——都应该用新密钥；自动任务还在用旧密钥也是问题（T-0235 核对后保持不变）
     c.check("场景 13：轮换后下一次模型请求就用新密钥，旧密钥不再使用",
             bool(c.model_calls(new_key, since)) and not c.model_calls(c.keys["a"], since), reload.stdout.strip()[-80:])
     c.keys["a"] = new_key
@@ -1258,6 +1261,75 @@ def scenario_21(c: Ctx) -> None:
             any(int(r.get("count") or 0) > 3 for r in turns), json.dumps([r.get("count") for r in turns]))
 
 
+# OpenClaw 自己按时钟跑的自动任务（锁定版本 2026.9.36 默认就有，接入包没有关；T-0233 在锁定镜像上实测，核验记录 6.2）：
+# - 定时心跳：每 30 分钟在主会话 agent:main:main 里跑一轮，半小时里的哪一刻按实例的设备标识散列，每个实例不同；
+# - Dreaming（memory-core）：每天 03:00（容器时区）写 dream diary，实例有过对话后调用模型；不带工具，不在任何会话里；
+# - 定时任务：例如场景 15 建的每晚复盘（22:00 Asia/Shanghai），跑在 agent:main:cron:<任务> 会话里。
+# 它们不是哪个对话里的一轮：管理员叫停、sessions.abort 中止的是正在运行的会话（方案 7.3），到点了它们照常调用模型。
+MAIN_SESSION = "agent:main:main"
+CRON_SESSION_PREFIX = "agent:main:cron:"
+DREAM_SYSTEM = "You are keeping a dream diary"
+
+
+def clock_job(record: dict[str, Any]) -> str:
+    """这次模型调用是不是 OpenClaw 自己按时钟跑的自动任务：是就返回类别，不是返回空串。
+
+    只有会话键和提示词都对得上的才算；认不出的一律当作对话里的一轮（判定从严）。
+    session / system 两个字段由假模型服务从请求里取（fake_model_server.py）。"""
+    session = record.get("session") or ""
+    if session == MAIN_SESSION and "heartbeat" in (record.get("last_user") or "").lower():
+        return "定时心跳"
+    if session.startswith(CRON_SESSION_PREFIX):
+        return "定时任务"
+    if not session and not record.get("tools") and (record.get("system") or "").startswith(DREAM_SYSTEM):
+        return "Dreaming"
+    return ""
+
+
+def conversation_turns(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """对话里的各轮：模型调用里去掉 OpenClaw 自己按时钟跑的自动任务。"""
+    return [r for r in records if not clock_job(r)]
+
+
+def quiet_detail(records: list[dict[str, Any]]) -> str:
+    """“这段时间这个实例在对话里没有调用模型”一类检查的详情：对话里的调用（应为 0）和不计入的自动任务各有几次。"""
+    extra = conversation_turns(records)
+    detail = f"对话里的模型调用 {len(extra)} 次"
+    if extra:
+        detail += "：" + json.dumps([{"session": r.get("session") or "", "last_user": (r.get("last_user") or "")[-80:]}
+                                     for r in extra[:3]], ensure_ascii=False)
+    jobs = [clock_job(r) for r in records if clock_job(r)]
+    if jobs:
+        detail += f"；OpenClaw 自己的自动任务调用模型 {len(jobs)} 次，不计入：{'、'.join(jobs[:8])}"
+    return detail
+
+
+def quiet_after_stop(calls: Callable[[], list[dict[str, Any]]], grace: float = 5, watch: float = 20) -> tuple[bool, str]:
+    """中止报回之后这个实例在对话里不再调用模型。calls() 返回它从叫停之前到现在的全部模型调用。
+
+    先等 grace 秒（中止前已经发出的那一次调用；实测 sessions.abort 等那一轮停下才返回，这几秒只是余量），
+    再看 watch 秒：这期间对话里的调用多一次就是失败——被叫停的那一轮还在跑、排队的后续消息没清掉，都会多出来。
+    自动任务（clock_job）的调用不计入，但写进详情：2026-11-14 CI 上 59 → 60 多出的那一次就落在这 watch 秒里，
+    当时把这个实例的全部调用都算了进去（T-0233）。"""
+    stopped = time.time()
+    time.sleep(grace)
+    settled = conversation_turns(calls())
+    time.sleep(watch)
+    records = calls()
+    later = conversation_turns(records)
+    detail = f"{len(settled)} → {len(later)}"
+    extra = later[len(settled):]
+    if extra:
+        detail += "；多出的调用（前 3 次）：" + json.dumps(
+            [{"at": round(r["at"] - stopped, 1), "session": r.get("session") or "",
+              "kind": "tool_call" if "tool_call" in r["result"] else "text",
+              "last_user": (r.get("last_user") or "")[-80:]} for r in extra[:3]], ensure_ascii=False)
+    jobs = [f"{clock_job(r)} +{r['at'] - stopped:.1f}s" for r in records if clock_job(r) and r["at"] >= stopped]
+    if jobs:
+        detail += f"；这期间 OpenClaw 自己的自动任务调用模型 {len(jobs)} 次，不计入：{'、'.join(jobs[:8])}"
+    return len(later) == len(settled), detail
+
+
 def scenario_22(c: Ctx) -> None:
     """终止任务：甲有权限后叫停乙；管理员叫停反复调用工具的甲，stop-runs.mjs 中止会话（T-0126）。"""
     def set_stop_others(enabled: bool) -> dict[str, Any]:
@@ -1303,11 +1375,12 @@ def scenario_22(c: Ctx) -> None:
     since = time.time()
     c.owner.send(c.conv_a, "REPEAT:3000 TOOL:myworkspace__knowledge_search "
                  + json.dumps({"query": "进展 {n}"}, ensure_ascii=False))
-    wait_for("甲开始反复调用工具", lambda: len([r for r in c.model_calls(c.keys["a"], since)
+    # 只看对话里的各轮（conversation_turns）：反复调用工具的这一轮必须算在里面，后面“中止后不再调用模型”数的才是它
+    wait_for("甲开始反复调用工具", lambda: len([r for r in conversation_turns(c.model_calls(c.keys["a"], since))
                                            if "tool_call" in r["result"]]) >= 3, timeout=150, interval=1)
     stop = c.owner.call("POST", f"/api/v1/agents/instances/{c.a.id}/stop", {"reason": "验收：同一件事反复调用工具"})
     stop_at = time.time()
-    refused = wait_for("甲的工具调用被拒", lambda: [r for r in c.model_calls(c.keys["a"], stop_at)
+    refused = wait_for("甲的工具调用被拒", lambda: [r for r in conversation_turns(c.model_calls(c.keys["a"], stop_at))
                                               if "RUN_STOPPED" in (r.get("tool") or "")], timeout=60, interval=1)
     c.check("终止任务：管理员叫停后，甲接下来的工具调用返回 RUN_STOPPED，看得到原因（软停止）",
             any("同一件事反复调用工具" in (r.get("tool") or "") for r in refused), (refused[0].get("tool") or "")[-300:])
@@ -1317,11 +1390,9 @@ def scenario_22(c: Ctx) -> None:
     c.check("终止任务：甲的 stop-runs.mjs 领取终止令、在容器里中止正在运行的会话并报回（done，中止至少 1 个）",
             out.returncode == 0 and mine.get("status") == "done" and (mine.get("aborted") or 0) >= 1,
             json.dumps({"exit": out.returncode, "stderr": (out.stderr or "")[-300:], "stop": mine}, ensure_ascii=False))
-    time.sleep(5)  # 中止前已经发出的那一次模型调用
-    settled = len(c.model_calls(c.keys["a"], since))
-    time.sleep(20)
-    later = len(c.model_calls(c.keys["a"], since))
-    c.check("终止任务：中止后甲不再调用模型（那一轮停下了，排队的也清掉了）", later == settled, f"{settled} → {later}")
+    quiet, detail = quiet_after_stop(lambda: c.model_calls(c.keys["a"], since))
+    c.check("终止任务：中止后甲在对话里不再调用模型（那一轮停下了，排队的也清掉了；OpenClaw 自己的定时心跳等自动任务不算）",
+            quiet, detail)
     after = mcp_call(c.a, "list_tasks", {})
     c.check("终止任务：报回成功后解除软停止，甲的工具调用恢复", not tool_code(after), tool_code(after))
 

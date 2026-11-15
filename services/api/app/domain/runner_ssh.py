@@ -8,11 +8,15 @@
 运行服务器的部署：上传接入包到 ~/myworkspace-runner，以 root 运行其中的 install.sh
 （装锁定版本的 Docker 与 gVisor、启动 runner-agent），再等 runner-agent 用新凭证连上工作台。
 install.sh 要 root：root 账号直接运行；其他账号用 sudo，所以每次部署都要填登录密码（只用这一次）。
+启用 gVisor 时脚本先让 Docker 重新加载配置；非重启 Docker 不可、而服务器上有运行中的 MCP 管理器时，
+脚本以固定的退出码停下，任务的错误码是 gvisor_needs_docker_restart：owner 在页面上确认后
+带 allow_docker_restart 重新部署（T-0234，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 8 节）。
 卸载：停止 runner-agent（同样要 root），可选删除接入包目录；环境的容器与数据卷由工作台先删掉。
 """
 
 import asyncio
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -60,12 +64,11 @@ from app.integrations import ssh
 from app.models import RunnerEnvironment, RunnerHost, RunnerSshJob, RunnerSshTarget
 from app.schemas.agents import (
     AgentSshConfirm,
-    AgentSshInstall,
     AgentSshRevoke,
     AgentSshState,
     AgentSshTargetSet,
 )
-from app.schemas.runner import RunnerSshUninstall
+from app.schemas.runner import RunnerSshInstall, RunnerSshUninstall
 
 INSTALL_DIR_NAME = "myworkspace-runner"
 STEPS = ("connect", "inspect", "authorize_key", "upload", "install", "online")
@@ -74,6 +77,13 @@ INSTALL_TIMEOUT = DOCKER_TIMEOUT + 900.0  # Docker 与 gVisor 的下载
 ONLINE_TIMEOUT = 5 * 60.0
 ONLINE_POLL = 3.0
 AUDIT = ("runner.ssh", "runner_host")
+# install-gvisor.sh：启用 gVisor 要重启 Docker，而服务器上有运行中的 MCP 管理器、又没有得到允许时，
+# 向 stderr 输出 gvisor_needs_docker_restart <数量> 并以这个退出码结束（install.sh 原样传出来）
+GVISOR_RESTART_EXIT = 6
+GVISOR_RESTART_CODE = "gvisor_needs_docker_restart"
+_GVISOR_RESTART = re.compile(rf"^{GVISOR_RESTART_CODE} (\d{{1,6}})\s*$", re.M)
+# 允许安装脚本重启 Docker（owner 在页面上确认过）
+RESTART_ENV = "MW_ALLOW_DOCKER_RESTART"
 
 logger = logging.getLogger("app.runner")
 
@@ -89,6 +99,26 @@ def _now() -> datetime:
 
 def _sudo(command: str, *, root: bool) -> str:
     return command if root else f"sudo -S -p '' -k {command}"
+
+
+def install_command(directory: str, *, root: bool, allow_docker_restart: bool = False) -> str:
+    """以 root 运行接入包里的 install.sh。
+
+    允许重启 Docker 时用 env 把变量交给脚本：sudo 默认不保留调用者的环境变量，
+    写成 `sudo … env 变量=1 bash …` 才真的传得进去（root 账号也用同一种写法）。
+    """
+    command = f"bash {prov.q(directory + '/install.sh')}"
+    if allow_docker_restart:
+        command = f"env {RESTART_ENV}=1 {command}"
+    return _sudo(command, root=root)
+
+
+def gvisor_restart_needed(result: ssh.CommandResult) -> int | None:
+    """安装脚本是不是因为“要重启 Docker、但有 MCP 管理器在运行”停下的；是就返回管理器的数量。"""
+    if result.exit_status != GVISOR_RESTART_EXIT:
+        return None
+    found = _GVISOR_RESTART.search(result.stderr)
+    return int(found.group(1)) if found else None
 
 
 # ---------------------------------------------------------------- 接口
@@ -354,7 +384,7 @@ class RunnerSshService:
             raise ApiError(503, "EXTERNAL_UNAVAILABLE", "密钥库未配置加密密钥")
 
     async def install(
-        self, access: WorkspaceAccess, body: AgentSshInstall, *, client_ip: str
+        self, access: WorkspaceAccess, body: RunnerSshInstall, *, client_ip: str
     ) -> AgentSshState:
         """开始部署。密码只交给后台协程，不写进任务记录、审计或日志。"""
         target = await self._existing(access)
@@ -378,12 +408,14 @@ class RunnerSshService:
             target,
             kind="install",
             password=body.password,
+            allow_docker_restart=body.allow_docker_restart,
             metadata={
                 "host": target.host,
                 "port": target.port,
                 "username": target.username,
                 "host_key_fingerprint": target.host_key_fingerprint,
                 "with_password": body.password is not None,
+                "allow_docker_restart": body.allow_docker_restart,
             },
             client_ip=client_ip,
         )
@@ -439,6 +471,7 @@ class RunnerSshService:
         client_ip: str,
         password: SecretStr | None = None,
         remove_files: bool = False,
+        allow_docker_restart: bool = False,
     ) -> AgentSshState:
         assert self.jobs is not None  # noqa: S101 - _ready 已检查
         steps = STEPS if kind == "install" else UNINSTALL_STEPS
@@ -474,6 +507,7 @@ class RunnerSshService:
                 OneTimePassword(password),
                 client_ip=client_ip,
                 remove_files=remove_files,
+                allow_docker_restart=allow_docker_restart,
             ),
         )
         await self.db.refresh(target)
@@ -652,7 +686,7 @@ class RunnerInstaller(Installer):
             if name.startswith(prefix) and name != prefix
         }
 
-    async def deploy(self, secret: OneTimePassword) -> None:
+    async def deploy(self, secret: OneTimePassword, *, allow_docker_restart: bool = False) -> None:
         if not self.target.host_key_confirmed:
             raise InstallFailed("host_key_unconfirmed", "服务器的主机公钥还没有确认")
         key = self._existing_key()
@@ -702,7 +736,9 @@ class RunnerInstaller(Installer):
             result = await self._run(
                 conn,
                 "运行 install.sh",
-                _sudo(f"bash {prov.q(directory + '/install.sh')}", root=info.root),
+                install_command(
+                    directory, root=info.root, allow_docker_restart=allow_docker_restart
+                ),
                 stdin=sudo,
                 seconds=INSTALL_TIMEOUT,
             )
@@ -712,6 +748,13 @@ class RunnerInstaller(Installer):
             secret.clear()
             password = None
             sudo = None
+            managers = gvisor_restart_needed(result)
+            if managers is not None:
+                raise InstallFailed(
+                    GVISOR_RESTART_CODE,
+                    f"启用 gVisor 需要重启 Docker，这台服务器上有 {managers} 个 MCP 管理器在运行"
+                    "（重启会让它们短暂中断，之后自己恢复）：确认后重新部署并勾选“允许重启 Docker”",
+                )
             if not result.ok or "runner_agent_started" not in result.stdout:
                 raise InstallFailed("install_failed", "安装脚本没有成功，详见日志")
             await self.rec.step("install", "done", "Docker、gVisor 与 runner-agent 已就绪")
@@ -848,6 +891,7 @@ async def run_job(
     *,
     client_ip: str | None = None,
     remove_files: bool = False,
+    allow_docker_restart: bool = False,
 ) -> None:
     """后台协程：部署或卸载运行服务器（按任务记录的 kind）。"""
     try:
@@ -881,7 +925,7 @@ async def run_job(
     installer = RunnerInstaller(sessionmaker, settings, recorder, target, client_ip=client_ip)
     try:
         if target.kind == "install":
-            await installer.deploy(secret)
+            await installer.deploy(secret, allow_docker_restart=allow_docker_restart)
         else:
             await installer.remove(secret, remove_files=remove_files)
     except JobGone:

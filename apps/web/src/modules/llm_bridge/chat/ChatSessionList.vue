@@ -1,22 +1,24 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Plus, RefreshCw, Search } from '@lucide/vue'
+import { Columns3, Plus, RefreshCw, Search } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { MODES, platformName, seconds, type Bridge, type Platform } from '../api'
-import { groupByDay, ownerText, type ChatSession, type PlatformChoice, type SessionFilter } from './chatApi'
+import { PLATFORM_MARK as MARK, groupByDay, ownerText, type ChatGroup, type ChatSession, type PlatformChoice, type SessionFilter } from './chatApi'
 
 // 左栏：选 MCP 管理器、新建、按标题搜索、按平台筛选，会话按“今天 / 昨天 / 更早”分组。
+// 最上面是“同问”：多模型同问的分组，可以跨管理器，所以不随选中的管理器和平台筛选变（按标题搜索、看已归档的照常）。
 // 只显示和发出事件，不发请求；数据由 LlmChatWorkspace 给。
 const props = defineProps<{
   bridges: Bridge[]; managerId: string | null; choices: PlatformChoice[]
   sessions: ChatSession[]; loading: boolean; error: unknown
+  groups: ChatGroup[]; selectedGroup: string | null; canCompare: boolean
   filter: SessionFilter; selected: string | null; canCreate: boolean
   syncing: boolean; syncNotice: string; syncError: string
 }>()
-const emit = defineEmits<{ 'update:managerId': [id: string]; 'update:filter': [filter: SessionFilter]; select: [id: string]; create: []; sync: []; retry: [] }>()
+const emit = defineEmits<{ 'update:managerId': [id: string]; 'update:filter': [filter: SessionFilter]; select: [id: string]; create: []; sync: []; retry: []; compare: []; 'open-group': [id: string] }>()
 
-const MARK: Record<string, string> = { chatgpt: 'G', codex: 'Cx', claude: 'Cl', workbuddy: 'W' }
-const groups = computed(() => groupByDay(props.sessions))
+const days = computed(() => groupByDay(props.sessions))
+const asked = computed(() => { const q = props.filter.q.toLowerCase(); return q ? props.groups.filter(g => g.title.toLowerCase().includes(q)) : props.groups })
 const set = (patch: Partial<SessionFilter>) => emit('update:filter', { ...props.filter, ...patch })
 
 // 搜索框：停止输入一小会儿再查，不是每个字都发请求
@@ -41,6 +43,7 @@ const emptyText = computed(() => {
         <option v-for="b in bridges" :key="b.id" :value="b.id">{{ b.name }}{{ b.enabled ? '' : '（已停用）' }}</option>
       </select>
       <button type="button" class="primary-button lc-new" :disabled="!canCreate" @click="emit('create')"><Plus aria-hidden="true" />新建会话</button>
+      <button type="button" class="asv-link lc-compare-link" :disabled="!canCompare" @click="emit('compare')"><Columns3 aria-hidden="true" />多模型同问</button>
     </div>
     <div class="lc-search">
       <Search aria-hidden="true" />
@@ -54,9 +57,23 @@ const emptyText = computed(() => {
     </div>
 
     <div class="lc-list">
+      <section v-if="asked.length" aria-label="同问">
+        <h3>同问</h3>
+        <ul>
+          <li v-for="g in asked" :key="g.id">
+            <button type="button" class="lc-item" :aria-current="g.id === selectedGroup ? 'true' : undefined" @click="emit('open-group', g.id)">
+              <span class="lc-mark is-group" aria-hidden="true">同</span>
+              <span class="lc-item-main">
+                <strong>{{ g.title || '（没有标题）' }}</strong>
+                <span class="lc-item-meta">同问 {{ g.members.length }} 个模型 · {{ g.owner_kind === 'me' ? '我' : g.owner || '别的管理员' }}</span>
+              </span>
+            </button>
+          </li>
+        </ul>
+      </section>
       <DataState v-if="loading || error" :loading="loading" :error="error" :empty="false" empty-text="" @retry="emit('retry')" />
       <p v-else-if="!sessions.length" class="lc-none">{{ emptyText }}</p>
-      <section v-for="g in groups" v-else :key="g.name" :aria-label="g.name">
+      <section v-for="g in days" v-else :key="g.name" :aria-label="g.name">
         <h3>{{ g.name }}</h3>
         <ul>
           <li v-for="s in g.items" :key="s.session_id">

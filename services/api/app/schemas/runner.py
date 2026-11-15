@@ -395,6 +395,9 @@ class RunnerReport(BaseModel):
     volumes: list[RunnerReportVolume] = Field(default_factory=list, max_length=2000)
     images: list[RunnerReportImage] = Field(default_factory=list, max_length=2000)
     unlabeled_containers: int = 0
+    # 带 myworkspace.mcp-manager 标签的容器（T-0234）：不算进上面的外来容器；
+    # 旧版 runner-agent 不报，按 0
+    mcp_manager_containers: int = 0
     egress: dict[str, list[RunnerEgress]] = Field(default_factory=dict)
     mem_bytes: int = 0
     mem_free_bytes: int = 0
@@ -577,6 +580,27 @@ class RunnerOverview(BaseModel):
     environments: dict[str, int]
     instances: list[RunnerInstanceUsage]
     recent: list[dict[str, Any]]
+
+
+class RunnerSshInstall(_Strict):
+    """部署或重新部署运行服务器。
+
+    登录密码只用于这一次（登录、装专用公钥、用 sudo 运行安装脚本），不保存。
+    """
+
+    version: int = Field(ge=1, description="目标服务器的当前版本号")
+    password: SecretStr | None = Field(
+        default=None,
+        min_length=1,
+        max_length=1024,
+        description="SSH 登录密码；已经装了专用公钥的 root 账号可以不填，其他账号要用 sudo，必须填",
+    )
+    allow_docker_restart: bool = Field(
+        default=False,
+        description="允许安装脚本重启 Docker。启用 gVisor 时先重新加载 Docker 的配置；仍然不行、"
+        "而服务器上有运行中的 MCP 管理器时，任务以 gvisor_needs_docker_restart 失败，"
+        "管理员确认后带上这一项重新部署（重启会让它们短暂中断，之后自己恢复）",
+    )
 
 
 class RunnerSshUninstall(_Strict):

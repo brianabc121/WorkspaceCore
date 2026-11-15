@@ -109,6 +109,11 @@ async function platformsOn(page, name) {
 }
 async function addManager(page, { name, url, token, uncheck }) {
   await page.getByRole('button', { name: '添加 MCP 管理器', exact: true }).click()
+  // 这个工作台带着管理器的构建文件（T-0234）：默认打开的是“一键部署到服务器”，这里验收手动添加
+  const manual = page.getByRole('group', { name: '添加方式' }).getByRole('button', { name: /手动添加/ })
+  await manual.waitFor({ timeout: 30000 })
+  check(await page.getByRole('form', { name: '一键部署 MCP 管理器' }).count() === 1, '添加管理器时应先给出“一键部署到服务器”')
+  await manual.click()
   const form = page.getByRole('form', { name: '添加 MCP 管理器' })
   await form.getByLabel('名字').fill(name)
   await form.getByLabel('地址').fill(url)
@@ -294,17 +299,17 @@ async function main() {
     await tab(page, '设置').click()
     form = page.getByRole('form', { name: 'MCP 管理器设置' })
     await form.getByText('已确认').waitFor()
-    await form.getByLabel('同时进行的回合数').fill('99')
+    await form.getByLabel('每个平台同时进行的会话数').fill('99')
     await form.getByRole('button', { name: '保存设置' }).click()
-    await page.getByText('「同时进行的回合数」要填 1–16 之间的整数。').waitFor()
-    await form.getByLabel('同时进行的回合数').fill('3')
+    await page.getByText('「每个平台同时进行的会话数」要填 1–16 之间的整数。').waitFor()
+    await form.getByLabel('每个平台同时进行的会话数').fill('4')
     await form.getByRole('button', { name: '保存设置' }).click()
     await page.getByText('设置已保存。').waitFor()
     await page.reload()
     await tab(page, '设置').click()
-    await page.waitForFunction(() => document.querySelector('#lb-set-concurrency')?.value === '3')
+    await page.waitForFunction(() => document.querySelector('#lb-set-concurrency')?.value === '4')
     check((await statusOf(oneId)).platforms.join() === 'claude,workbuddy', '改别的设置不应动控制的平台')
-    step('设置：超出范围被拦下；并发改成 3，刷新后还在，控制的平台不受影响')
+    step('设置：超出范围被拦下；每个平台的会话数改成 4，刷新后还在，控制的平台不受影响')
 
     // ---------------------------------------------------------------- 开发环境：只能选这个管理器控制的平台
     await tab(page, '开发环境').click()

@@ -5,6 +5,7 @@
 浏览器的请求 → 工作台接口（角色、接手确认、审计）→ 会话桥（会话归属、事件）→ 驱动。
 """
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -211,6 +212,74 @@ async def test_chat_stop_rename_archive(rig: Rig) -> None:  # noqa: F811
     assert refused.status_code == 409 and refused.json()["error"]["code"] == "BRIDGE_DISABLED"
 
 
+async def test_chat_queue_view_edit_and_reorder(rig: Rig) -> None:  # noqa: F811
+    """会话在处理时再发的消息进队列：能看、能改内容、能置顶；已经开始的不能改。"""
+    created = await new_chat(rig, "sleep:1.5")
+    session_id, running = created["session"]["session_id"], created["turn"]["turn_id"]
+    turns = []
+    for index, text in enumerate(("第二条", "第三条")):
+        sent = await rig.api(
+            "POST",
+            chat(rig, f"/sessions/{session_id}/messages"),
+            json={"text": text, "request_id": f"q{index}"},
+        )
+        assert sent.status_code == 200 and sent.json()["status"] == "queued", sent.text
+        turns.append(sent.json()["turn_id"])
+    second, third = turns
+    queue = (await rig.api("GET", chat(rig, f"/sessions/{session_id}/queue"))).json()
+    assert queue["running"]["turn_id"] == running and queue["running"]["mine"] is True
+    assert [(q["text"], q["mine"]) for q in queue["queued"]] == [("第二条", True), ("第三条", True)]
+
+    moved = await rig.api("POST", chat(rig, f"/turns/{third}/move"), json={"to": "first"})
+    assert moved.status_code == 200, moved.text
+    assert [q["turn_id"] for q in moved.json()["queued"]] == [third, second]
+    edited = await rig.api("PATCH", chat(rig, f"/turns/{third}"), json={"text": "改过的第三条"})
+    assert edited.status_code == 200 and edited.json()["queued"][0]["text"] == "改过的第三条"
+    for refused in (
+        await rig.api("PATCH", chat(rig, f"/turns/{running}"), json={"text": "x"}),
+        await rig.api("POST", chat(rig, f"/turns/{running}/move"), json={"to": "last"}),
+    ):
+        assert refused.status_code == 409, refused.text
+    assert (
+        await rig.api("POST", chat(rig, f"/turns/{second}/move"), json={"to": "middle"})
+    ).status_code == 422
+    assert (await rig.api("GET", chat(rig, f"/sessions/{MISSING}/queue"))).status_code == 404
+
+    await wait_idle(rig, session_id)
+    view = (await rig.api("GET", chat(rig, f"/sessions/{session_id}"))).json()
+    asked = [m["text"] for m in view["messages"] if m["role"] == "user"]
+    assert asked == ["sleep:1.5", "改过的第三条", "第二条"], asked
+    empty = (await rig.api("GET", chat(rig, f"/sessions/{session_id}/queue"))).json()
+    assert empty == {"session_id": session_id, "running": None, "queued": []}
+
+    # 状态里有每个平台的进行中 / 等待 / 上限，设置里有两项限流
+    status = (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).json()
+    assert status["load"]["claude"] == {"running": 0, "waiting": 0, "limit": 3}
+    assert status["settings"]["concurrency"] == 3
+    saved = await rig.api(
+        "PUT",
+        f"/bridges/{rig.bridge_id}/settings",
+        json={"concurrency": 2, "min_start_interval_seconds": 5},
+    )
+    assert saved.status_code == 200, saved.text
+    assert (saved.json()["concurrency"], saved.json()["min_start_interval_seconds"]) == (2, 5)
+    # 审计记动作，不记消息内容
+    from tests.helpers import run_sql
+
+    actions = await run_sql(
+        rig.env.database_url,
+        "SELECT string_agg(action, ',') FROM workspace.audit_logs WHERE action LIKE $1",
+        "llm_bridge.chat_queue_%",
+    )
+    assert "llm_bridge.chat_queue_edited" in actions and "llm_bridge.chat_queue_moved" in actions
+    leaked = await run_sql(
+        rig.env.database_url,
+        "SELECT count(*) FROM workspace.audit_logs a WHERE a::text LIKE $1",
+        "%改过的第三条%",
+    )
+    assert leaked == 0
+
+
 async def test_chat_takeover_needs_confirmation(rig: Rig) -> None:  # noqa: F811
     """智能体的会话可以看；接着发要带确认，后端不靠页面把关。"""
     env = rig.env
@@ -333,3 +402,234 @@ async def test_chat_roles(rig: Rig) -> None:  # noqa: F811
     # 别的工作空间的管理器编号：404
     stranger = await rig.api("GET", f"/bridges/{uuid.uuid4()}/chat/sessions")
     assert stranger.status_code == 404
+
+
+async def test_chat_quota_interruption_and_resume(rig: Rig) -> None:  # noqa: F811
+    """额度用完：回合记成中断，页面看得到额度、重置时间和“什么时候自动继续”；能取消，也能现在就试。"""
+    import time
+
+    engine = rig.bridge_app.state.engine
+    fake = engine.drivers["claude"]
+    until = time.time() + 3600
+    fake.quota_until = until
+    created = await new_chat(rig, "跑一个长任务")
+    session_id, turn_id = created["session"]["session_id"], created["turn"]["turn_id"]
+    await wait_idle(rig, session_id)
+    view = (await rig.api("GET", chat(rig, f"/sessions/{session_id}"))).json()
+    reply = view["messages"][-1]
+    assert reply["status"] == "interrupted" and reply["failure"]["kind"] == "quota_exceeded"
+    assert reply["resume"]["state"] == "pending" and reply["resume"]["at"] >= until
+
+    # 状态和额度接口：窗口、已用百分比、重置时间、暂停到什么时候、有几个会话在等
+    status = (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).json()
+    quota = (await rig.api("GET", f"/bridges/{rig.bridge_id}/quota")).json()["platforms"]
+    assert status["quota"]["claude"] == quota["claude"]
+    claude = quota["claude"]
+    assert claude["paused_until"] >= until and claude["pause_estimated"] is False
+    assert claude["waiting_resume"] == 1 and claude["can_refresh"] is False
+    (window,) = claude["windows"]
+    assert (window["kind"], window["status"], window["used_percent"]) == (
+        "five_hour",
+        "exceeded",
+        100,
+    )
+    assert window["resets_at"] == pytest.approx(until) and window["reset_passed"] is False
+    refreshed = await rig.api("GET", f"/bridges/{rig.bridge_id}/quota", params={"refresh": "true"})
+    assert refreshed.status_code == 200 and "claude" in refreshed.json()["platforms"]
+
+    # 设置里有三项，能改；发的那句话不能是空的
+    assert status["settings"]["auto_resume"] is True and status["settings"]["auto_resume_max"] == 3
+    assert status["settings"]["resume_text"] == "继续意外中断的任务"
+    saved = await rig.api(
+        "PUT",
+        f"/bridges/{rig.bridge_id}/settings",
+        json={"auto_resume_max": 5, "resume_text": "接着做刚才的任务"},
+    )
+    assert saved.status_code == 200, saved.text
+    assert (saved.json()["auto_resume_max"], saved.json()["resume_text"]) == (5, "接着做刚才的任务")
+    empty = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"resume_text": ""})
+    assert empty.status_code == 422
+
+    # 不要自动继续 → 现在就试（额度已经恢复）：系统替人发那句话，回合完成
+    cancelled = await rig.api("DELETE", chat(rig, f"/turns/{turn_id}/resume"))
+    assert cancelled.status_code == 200 and cancelled.json()["resume"]["state"] == "cancelled"
+    fake.quota_until = 0
+    forced = await rig.api("POST", chat(rig, f"/turns/{turn_id}/resume"))
+    assert forced.status_code == 200 and forced.json()["resume"]["state"] == "forced", forced.text
+    for _ in range(100):
+        view = (await rig.api("GET", chat(rig, f"/sessions/{session_id}"))).json()
+        if view["messages"][-1]["status"] == "completed":
+            break
+        await asyncio.sleep(0.1)
+    asked = [(m["text"], m["by"]) for m in view["messages"] if m["role"] == "user"]
+    assert [text for text, _ in asked] == ["跑一个长任务", "接着做刚才的任务"], view["messages"]
+    assert asked[1][1] == "系统（自动续跑）" and asked[0][1] != asked[1][1]
+    interrupted = next(m for m in view["messages"] if m.get("status") == "interrupted")
+    assert interrupted["resume"]["state"] == "done" and interrupted["resume"]["resumed_by"]
+    again = await rig.api("POST", chat(rig, f"/turns/{turn_id}/resume"))
+    assert again.status_code == 409, again.text
+    assert (
+        await rig.api("POST", chat(rig, "/turns/bt_" + "0" * 20 + "/resume"))
+    ).status_code == 404
+
+    # 只有管理员能操作；审计记了动作
+    async with login_as(rig, "quota-member@example.com", "member") as member:
+        denied = await member.post(
+            f"/api/v1/llm_bridge{chat(rig, f'/turns/{turn_id}/resume')}",
+            headers={"X-Workspace-Id": rig.env.workspace_id, **csrf(member)},
+        )
+        assert denied.status_code == 403
+    from tests.helpers import run_sql
+
+    actions = await run_sql(
+        rig.env.database_url,
+        "SELECT string_agg(action, ',') FROM workspace.audit_logs WHERE action LIKE $1",
+        "llm_bridge.chat_resume_%",
+    )
+    assert "llm_bridge.chat_resume_now" in actions and "llm_bridge.chat_resume_cancelled" in actions
+
+
+async def test_chat_attachments_and_stored_content(rig: Rig) -> None:  # noqa: F811
+    """图片随消息发给模型、存在管理器里、能下载；过程里有工具调用；自己建的会话不需要重新导入。"""
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+    session_id = (await new_chat(rig, None))["session"]["session_id"]
+    base = chat(rig, f"/sessions/{session_id}")
+
+    async def upload(name: str, data: bytes) -> httpx.Response:
+        return await rig.env.client.post(
+            f"/api/v1/llm_bridge{base}/attachments",
+            params={"name": name},
+            content=data,
+            headers={**rig.env.headers(write=True), "Content-Type": "application/octet-stream"},
+        )
+
+    made = await upload("机密截图.png", png)
+    assert made.status_code == 201, made.text
+    image = made.json()
+    assert (image["name"], image["media_type"], image["size"], image["direction"]) == (
+        "机密截图.png",
+        "image/png",
+        len(png),
+        "input",
+    )
+    # 不收的：对话会话里的非图片、内容和扩展名对不上、太大（工作台先挡）
+    assert (await upload("说明.txt", b"hello")).status_code == 422
+    assert (await upload("假的.png", b"<html>")).status_code == 422
+    assert (await upload("大.png", png + b"0" * (20 * 1024 * 1024))).status_code == 413
+    spare = (await upload("多余.png", png)).json()
+    dropped = await rig.api("DELETE", f"{base}/attachments/{spare['id']}")
+    assert dropped.status_code == 204
+
+    sent = await rig.api(
+        "POST",
+        f"{base}/messages",
+        json={"text": "read:README.md", "request_id": "a1", "attachments": [image["id"]]},
+    )
+    assert sent.status_code == 200, sent.text
+    await wait_idle(rig, session_id)
+    assert rig.bridge_app.state.engine.drivers["claude"].last_images[0][1] == "image/png"
+    view = (await rig.api("GET", base)).json()
+    asked, reply = view["messages"]
+    assert [a["id"] for a in asked["attachments"]] == [image["id"]] and asked["imported"] is False
+    assert reply["text"].endswith("（收到 1 张图片）")
+    assert [(s["kind"], s["name"]) for s in reply["steps"]] == [
+        ("tool", "Read"),
+        ("tool_result", "Read"),
+    ]
+    again = await rig.api(
+        "POST",
+        f"{base}/messages",
+        json={"text": "再发", "request_id": "a2", "attachments": [image["id"]]},
+    )
+    assert again.status_code == 409, again.text
+    bad = await rig.api(
+        "POST", f"{base}/messages", json={"text": "x", "request_id": "a3", "attachments": ["x"]}
+    )
+    assert bad.status_code == 422
+
+    got = await rig.api("GET", f"{base}/attachments/{image['id']}")
+    assert got.status_code == 200 and got.content == png
+    assert got.headers["content-type"] == "image/png"
+    assert got.headers["content-disposition"].startswith("inline; filename*=UTF-8''")
+    assert got.headers["x-content-type-options"] == "nosniff"
+    assert "sandbox" in got.headers["content-security-policy"]
+    missing = await rig.api("GET", f"{base}/attachments/ba_{'0' * 20}")
+    assert missing.status_code == 404
+    assert (await rig.api("POST", f"{base}/reimport")).status_code == 409
+
+    # member 不能上传也不能下载；审计只记类型和大小，不记文件名
+    async with login_as(rig, "files-member@example.com", "member") as member:
+        scope = {"X-Workspace-Id": rig.env.workspace_id}
+        url = f"/api/v1/llm_bridge{base}/attachments"
+        denied = await member.post(
+            url, params={"name": "a.png"}, content=png, headers={**scope, **csrf(member)}
+        )
+        assert denied.status_code == 403
+        assert (await member.get(f"{url}/{image['id']}", headers=scope)).status_code == 403
+    from tests.helpers import run_sql
+
+    logged = await run_sql(
+        rig.env.database_url,
+        "SELECT count(*) FROM workspace.audit_logs WHERE action = $1",
+        "llm_bridge.chat_attachment_uploaded",
+    )
+    assert logged == 2
+    leaked = await run_sql(
+        rig.env.database_url,
+        "SELECT count(*) FROM workspace.audit_logs a WHERE a::text LIKE $1",
+        "%机密截图%",
+    )
+    assert leaked == 0
+
+
+async def test_chat_insert_message(rig: Rig) -> None:  # noqa: F811
+    """插入消息：平台收得下就进正在处理的回合；收不下就中断它、合并重发。页面拿到实际用了哪种。"""
+    fake = rig.bridge_app.state.engine.drivers["claude"]
+    created = await new_chat(rig, "sleep:30")
+    session_id, running = created["session"]["session_id"], created["turn"]["turn_id"]
+    base = chat(rig, f"/sessions/{session_id}")
+    for _ in range(100):
+        if fake.running:
+            break
+        await asyncio.sleep(0.05)
+
+    fake.steerable = True
+    inserted = await rig.api(
+        "POST",
+        f"{base}/messages",
+        json={"text": "顺便看日志", "request_id": "i1", "mode": "insert"},
+    )
+    assert inserted.status_code == 200, inserted.text
+    assert (inserted.json()["delivered"], inserted.json()["turn_id"]) == ("inserted", running)
+    view = (await rig.api("GET", base)).json()
+    assert [(m["role"], m["text"], m["delivery"]) for m in view["messages"][:2]] == [
+        ("user", "sleep:30", "turn"),
+        ("user", "顺便看日志", "inserted"),
+    ]
+    assert view["messages"][1]["mine"] is True
+
+    fake.steerable = False
+    merged = await rig.api(
+        "POST", f"{base}/messages", json={"text": "先改这里", "request_id": "i2", "mode": "insert"}
+    )
+    assert merged.status_code == 200 and merged.json()["delivered"] == "merged", merged.text
+    assert merged.json()["turn_id"] != running
+    await wait_idle(rig, session_id)
+    view = (await rig.api("GET", base)).json()
+    first = next(
+        m for m in view["messages"] if m["role"] == "assistant" and m["turn_id"] == running
+    )
+    assert first["status"] == "interrupted" and first["failure"]["kind"] == "superseded"
+    last_ask, last_reply = view["messages"][-2:]
+    assert (last_ask["text"], last_ask["delivery"]) == ("先改这里", "merged")
+    assert last_reply["status"] == "completed"
+    bad = await rig.api(
+        "POST", f"{base}/messages", json={"text": "x", "request_id": "i3", "mode": "now"}
+    )
+    assert bad.status_code == 422
+    # 空闲时插入就是普通的发送
+    plain = await rig.api(
+        "POST", f"{base}/messages", json={"text": "你好", "request_id": "i4", "mode": "insert"}
+    )
+    assert plain.json()["delivered"] == "started"
+    await wait_idle(rig, session_id)

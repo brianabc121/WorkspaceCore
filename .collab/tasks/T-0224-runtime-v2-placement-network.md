@@ -8,7 +8,7 @@ branch: codex/T-0224-two-server-acceptance
 paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows,docs/tailscale-development-guide.md,README.md,services/runtime-helper
 depends_on:
 created: 2026-11-11
-updated: 2026-11-14
+updated: 2026-11-15
 ---
 
 # T-0224 按人类确认设计落实双服务器池调度、容器配额审批与跨节点网络
@@ -83,3 +83,6 @@ updated: 2026-11-14
 - 2026-11-14 13:30 UTC · codex · 用户再次澄清接入方式任选Tailscale/公网IP/内网IP，无需强制域名或三种同时开启；计划与Runtime说明已同步，默认现有Tailscale，公网专项不阻塞私网功能。新增实际localhostTLS正反例2pass0.08s：IP SAN匹配通过、仅DNS证书拒绝；这是TLS边界验证不是公网来源验收。Ruff/format及mypy该测试通过。
 - 2026-11-14 13:31 UTC · codex · Task3A独立node-root固定ext4卷基础通过审查：41项隔离测试、Ruff/mypy通过，规则限制仅新建自有文件，预分配/nodiscard、immutable卷/挂载receipt、data子目录、Unix peercred、启动恢复和保留数据；不声称真实磁盘配额已验收。实机实际Python3.11/3.9兼容导入正在核对，随后仅新测试卷做ENOSPC。Task2A已提交516137c，父级额外验证捕获进程组异步SIGKILL竞态，正在定向修复后复审；Task2B2回执复审发现并修复旧Pod/停止后快照顺序边界，未开放未验证功能。
 - 2026-11-14 13:34 UTC · codex · Task2B2回执/快照分片授权基础完成：所有Kube成功/失败先校验当前host/allocation/generation，扩展操作需要当前绑定+workload/volume-helper证明；命令有效期内按snapshot/restore引用授权分片，失败仅存安全证明和generic错误。相关128项通过；审查P1旧Pod回执、停止后快照顺序均RED复现后修复，最终变更分别33项/7项通过并复审Approved，Ruff/mypy通过。Task3A已在真实A(Python3.11.2)/B(3.9.2)仅导入exit0，未写磁盘。Task2A额外子进程竞态原count50失败，aabf26a有界组退出确认后count50/full/race/vet/static通过，独立审查进行中。
+- 2026-11-15 03:18 UTC · codex · 用户2026-11-15继续，环境恢复后保留全部未提交实现；专用PG/Redis已恢复。实机A固定卷预分配后loop身份核验发现util-linux JSON设备号空格问题，未格式化或删除，原inode/receipt保留；正在补回归后显式恢复。最新main已推进d4e0a4b，clean no-commit合入后发现正式0069/0070与本分支旧0069冲突，启动严格历史兼容后续修复并改用唯一runtime迁移标识，避免占用主干后续编号。Task3B增加确定性独立恢复scratch卷接口，要求真实占额与有界清理；未开放未验收功能。
+- 2026-11-15 09:26 UTC · codex · Task1R复审通过：保留main正式0069/0070，运行层改用rv2_20261115，严格识别旧PR0069及历史0068，仅真实升级事务内补齐授权scope和历史映射。初轮62项聚合通过，复审P1分段0068→0069/0070→head真实RED后修复，19项覆盖通过，Ruff/strict mypy78文件、CLI五步通过，canonical DDL字节不变。独立复审spec/quality PASS；当前准备提交pending主干合并及该迁移修复，其他进行中运行操作保留未提交，不宣称全任务完成。存储3B/3C已修复审查问题并通过99/100项及严格测试类型检查；纯IP私网中继B实测health/ready200、docs404、无凭据401、错误SAN/CA拒绝，需精确核验并允许Cilium节点内部路由/32；无域名要求、无生产切换。
+- 2026-11-15 09:29 UTC · codex · 主干协作表仍将T-0234标为claude进行中，目录声明与本任务广泛重叠，但其MCP管理器功能已随main整合；本会话人类已持续明确要求codex继续T-0224，旧D-0007暂停记录不阻断该明确指派。本轮仅修改T-0224运行控制/调度轮询及独立迁移兼容，不改T-0234的owner/status或MCP功能；保留collab check路径警告供审查。快照恢复按ready对象与DB固定摘要清单做内容身份围栏，所有材料预验证后才改代次/预约，节点完整验证后才写目标；为避免清理竞态，必要范围增加runner_reclaim._purge的snapshot行锁与活动恢复引用保护。

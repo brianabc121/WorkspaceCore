@@ -1,26 +1,21 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue'
-import { Archive, ArrowLeft, Info, Pencil, Send, Square } from '@lucide/vue'
+import { computed, nextTick, ref, toRef } from 'vue'
+import { Archive, ArrowLeft, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { MODES, platformName, type Bridge } from '../api'
-import { TERMINAL_EVENTS, chatError, needsTakeover, newRequestId, ownerText, type ChatConversation, type ChatEvent, type ChatMessage as Message, type LlmChatApi } from './chatApi'
+import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, needsTakeover, newRequestId, ownerText, type ChatAttachment, type LlmChatApi } from './chatApi'
+import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
 import ChatInfoPanel from './ChatInfoPanel.vue'
+import ChatQueue from './ChatQueue.vue'
 
 // 中间一栏：一个会话的对话。父组件按“管理器 + 会话”给 key，换会话时整个重建。
-// 进度：有回合没做完时用长轮询读事件（一段回答、一条命令、改动的文件），在本地接到对应的回答上；
-// 回合结束、或出现这里不认识的回合（别人或智能体发的）时重新读整段会话，以服务器给的为准。
+// 内容和进度（长轮询读事件）在 useLiveConversation 里。
 const props = defineProps<{ chat: LlmChatApi; bridge: Bridge; sessionId: string; narrow: boolean; initialDraft?: string; initialError?: string }>()
 const emit = defineEmits<{ back: []; changed: [] }>()
 
 const bridgeId = computed(() => props.bridge.id)
-const conversation = props.chat.useConversation(bridgeId, toRef(props, 'sessionId'))
-const session = computed(() => conversation.data.value?.session ?? null)
-const messages = ref<Message[]>([])
-const lost = ref('')
-let cursor = 0, alive = true, polling = false
-const abort = new AbortController()
 
 // ---- 滚动：人在底部附近时，新内容出来就跟到底部；往上翻着看时不打扰 ----
 const box = ref<HTMLElement | null>(null)
@@ -30,71 +25,16 @@ function scrollDown(force = false) {
   if (force) stick = true
   void nextTick(() => { const el = box.value; if (el && stick) el.scrollTop = el.scrollHeight })
 }
-
-function load(data: ChatConversation) {
-  messages.value = data.messages.map(m => ({ ...m, steps: [...(m.steps ?? [])] }))
-  cursor = data.last_event_id
-  scrollDown()
-  if (data.session.busy) void poll()
-}
-watch(() => conversation.data.value, data => { if (data) load(data) }, { immediate: true })
-async function reload() {
-  const { data } = await conversation.refetch()
-  if (data && alive) load(data)
-}
-
-/** 把新事件接到对应的回答上；返回 true 表示要重新读整段会话 */
-function apply(events: ChatEvent[]): boolean {
-  let stale = false
-  for (const e of events) {
-    if (!e.turn_id) continue
-    const reply = messages.value.find(m => m.role === 'assistant' && m.turn_id === e.turn_id)
-    if (!reply || TERMINAL_EVENTS.includes(e.kind)) { stale = true; continue }
-    const steps = (reply.steps ??= [])
-    if (e.kind === 'started') { reply.status = 'running'; reply.ahead_in_session = null }
-    else if (e.kind === 'message' && e.text) reply.text = reply.text ? `${reply.text}\n\n${e.text}` : e.text
-    else if (e.kind === 'notice' && e.text) steps.push({ kind: 'notice', text: e.text, at: e.at })
-    else if (e.kind === 'command' && e.command) steps.push({ kind: 'command', text: e.command, at: e.at })
-    else if (e.kind === 'files' && e.paths?.length) steps.push({ kind: 'files', text: e.paths.join('、'), at: e.at })
-  }
-  if (events.length) scrollDown()
-  return stale
-}
-const pause = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms) })
-async function poll() {
-  if (polling || !alive) return
-  polling = true
-  let failures = 0
-  try {
-    while (alive) {
-      let out
-      const asked = Date.now()
-      try {
-        out = await props.chat.events(props.bridge.id, props.sessionId, cursor, abort.signal)
-        failures = 0; lost.value = ''
-      } catch (e) {
-        if (!alive) return
-        if (++failures >= 3) { lost.value = `读不到新的进度：${chatError(e)}`; return }
-        await pause(1500 * failures)
-        continue
-      }
-      if (!alive) return
-      const fresh = out.events.filter(e => e.id > cursor)
-      cursor = Math.max(cursor, out.last_id)
-      if (apply(fresh)) { await reload(); emit('changed') }
-      if (!out.busy) return
-      // 服务器本该等到有新事件才返回：万一立刻空着回来，歇一下再问，不空转
-      if (!fresh.length && Date.now() - asked < 1000) await pause(1000)
-    }
-  } finally { polling = false }
-}
-// 智能体可能随时往这个会话里发消息：空闲时隔一会儿重新读一次
-const idle = setInterval(() => { if (!polling && alive && !conversation.isFetching.value) void reload() }, 15000)
-onBeforeUnmount(() => { alive = false; abort.abort(); clearInterval(idle) })
+const { conversation, session, messages, lost, activeTurn, poll, reload, sent, resume, resuming, resumeError } = useLiveConversation(
+  props.chat, bridgeId, toRef(props, 'sessionId'), { activity: () => scrollDown(), changed: () => emit('changed') },
+)
 
 // ---- 发送 ----
 const draft = ref(props.initialDraft ?? ''), sending = ref(false), stopping = ref(false), sendError = ref(props.initialError ?? '')
 const confirmed = ref(false)
+// 会话在处理别的消息时：排队（默认，不打断）还是插入（送进正在处理的回合；平台做不到就中断它、合并重发）
+const sendMode = ref<'queue' | 'insert'>('queue'), sendNotice = ref('')
+const inserting = computed(() => sendMode.value === 'insert' && activeTurn.value?.status === 'running')
 // 结果未知时再点发送：同一段文字用同一个幂等号，不会发两次
 let pending: { text: string; id: string } | null = null
 const foreign = computed(() => !!session.value && session.value.owner_kind !== 'me')
@@ -111,10 +51,6 @@ const blocked = computed(() => {
   if (!props.bridge.enabled) return '这个 MCP 管理器已停用：可以查看，不能发送。到“管理器与账号”里启用后再试。'
   return ''
 })
-const activeTurn = computed(() => {
-  const open = messages.value.filter(m => m.role === 'assistant' && (m.status === 'running' || m.status === 'queued'))
-  return open.find(m => m.status === 'running') ?? open[0] ?? null
-})
 function allowTakeover() {
   if (confirmed.value) return true
   confirmed.value = window.confirm(takeoverText.value)
@@ -124,9 +60,11 @@ async function submit() {
   const text = draft.value.trim()
   if (!text || sending.value || blocked.value) return
   if (foreign.value && !allowTakeover()) return
+  if (uploading.value) { sendError.value = '附件还在上传，传完再发。'; return }
   if (pending?.text !== text) pending = { text, id: newRequestId() }
-  const body = { text, request_id: pending.id }
-  sending.value = true; sendError.value = ''
+  const files = [...attached.value]
+  const body = { text, request_id: pending.id, ...(files.length ? { attachments: files.map(a => a.id) } : {}), ...(inserting.value ? { mode: 'insert' as const } : {}) }
+  sending.value = true; sendError.value = sendNotice.value = ''
   try {
     let turn
     try { turn = await props.chat.send(props.bridge.id, props.sessionId, { ...body, takeover: foreign.value }) }
@@ -135,19 +73,50 @@ async function submit() {
       if (!needsTakeover(e) || !allowTakeover()) throw e
       turn = await props.chat.send(props.bridge.id, props.sessionId, { ...body, takeover: true })
     }
-    pending = null; draft.value = ''
-    if (!messages.value.some(m => m.turn_id === turn.turn_id)) {
-      const at = Date.now() / 1000
-      messages.value.push(
-        { role: 'user', turn_id: turn.turn_id, text, at, mine: true, steps: [] },
-        { role: 'assistant', turn_id: turn.turn_id, text: '', at, status: turn.status, steps: [], ahead_in_session: turn.ahead_in_session ?? null },
-      )
+    pending = null; draft.value = ''; attached.value = []; sendMode.value = 'queue'
+    stick = true
+    if (turn.delivered === 'inserted') {
+      // 没有新回合：消息进了正在处理的那一回合，重新读一次把它显示在那一问后面
+      sendNotice.value = '已插入：这条消息送进了正在处理的回合。'
+      await reload()
+    } else {
+      if (turn.delivered === 'merged') sendNotice.value = '平台没有收下插入的消息：已中断上一回合，这条消息会带着“接着刚才没做完的继续”重新开始。'
+      sent(turn, text, files)
+      if (turn.delivered === 'merged') void reload()
     }
-    scrollDown(true); emit('changed'); void poll()
+    emit('changed')
+    void props.chat.invalidateQueue(props.bridge.id, props.sessionId)
   } catch (e) {
     sendError.value = needsTakeover(e) ? '没有发送：接着别人建的会话发消息前需要确认。' : chatError(e)
   } finally { sending.value = false }
 }
+// ---- 附件：先上传到管理器，发送时带上编号；对话会话只能带图片 ----
+const attached = ref<ChatAttachment[]>([]), uploading = ref(0), picker = ref<HTMLInputElement | null>(null)
+const imagesOnly = computed(() => session.value?.mode !== 'dev')
+async function pick(event: Event) {
+  const input = event.target as HTMLInputElement, chosen = Array.from(input.files ?? [])
+  input.value = ''
+  sendError.value = ''
+  for (const file of chosen) {
+    if (attached.value.length + uploading.value >= ATTACHMENTS.max) { sendError.value = `一条消息最多带 ${ATTACHMENTS.max} 个附件。`; break }
+    if (file.size > ATTACHMENTS.bytes) { sendError.value = `「${file.name}」太大：单个最多 20 MB。`; continue }
+    uploading.value += 1
+    try { attached.value.push(await props.chat.upload(props.bridge.id, props.sessionId, file)) }
+    catch (e) { sendError.value = `「${file.name}」没有传上去：${chatError(e)}` }
+    finally { uploading.value -= 1 }
+  }
+}
+async function detach(item: ChatAttachment) {
+  attached.value = attached.value.filter(a => a.id !== item.id)
+  // 管理器那边的文件一起去掉；去不掉也没关系，没发出去的附件过一天会自动清
+  try { await props.chat.discardUpload(props.bridge.id, props.sessionId, item.id) } catch { /* 见上 */ }
+}
+const source = computed(() => ({ chat: props.chat, bridgeId: props.bridge.id, sessionId: props.sessionId }))
+function reimport() {
+  if (!window.confirm('重新向官方程序读一次这个会话的内容？\n\n官方程序里又有了新内容时用。经工作台发的消息不受影响。')) return
+  return act(() => props.chat.reimport(props.bridge.id, props.sessionId))
+}
+
 function onKey(event: KeyboardEvent) {
   // Enter 发送，Shift + Enter 换行；输入法还在选字时的 Enter 不算
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
@@ -202,6 +171,7 @@ function archive() {
           </p>
         </div>
         <div v-if="session" class="lc-head-actions">
+          <button v-if="session.origin === 'external'" type="button" class="lc-icon" aria-label="重新导入" title="重新向官方程序读一次内容" :disabled="working" @click="reimport"><RefreshCw aria-hidden="true" /></button>
           <button v-if="!renaming && session.origin !== 'external'" type="button" class="lc-icon" aria-label="改标题" title="改标题" :disabled="working" @click="startRename"><Pencil aria-hidden="true" /></button>
           <button v-if="session.status !== 'archived'" type="button" class="lc-icon" aria-label="归档会话" title="归档" :disabled="working" @click="archive"><Archive aria-hidden="true" /></button>
           <button type="button" class="lc-icon" :aria-pressed="infoOpen" aria-label="会话信息" title="会话信息" @click="infoOpen = !infoOpen"><Info aria-hidden="true" /></button>
@@ -214,22 +184,35 @@ function archive() {
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? i}:${m.role}`" :message="m" :platform="platformName(session.platform)" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :resuming="resuming" :source="source" @resume="resume" />
           </ol>
+          <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
         </template>
       </div>
 
+      <ChatQueue v-if="session" :chat="chat" :bridge-id="bridge.id" :session-id="sessionId" :busy="!!activeTurn" @changed="poll()" />
       <form v-if="session" class="lc-composer" aria-label="发送消息" @submit.prevent="submit">
         <p v-if="blocked" class="lc-note" role="note">{{ blocked }}</p>
         <template v-else>
           <p v-if="foreign" class="lc-note" role="note">{{ session.owner_kind === 'external' ? '这是官方程序里已有的会话' : `这是${session.owner_kind === 'agent' ? '智能体' : ''}「${ownerText(session)}」建的会话` }}：可以看；接着发消息前会让你确认一次。</p>
+          <ul v-if="attached.length || uploading" class="lc-attached" aria-label="要带上的附件">
+            <li v-for="a in attached" :key="a.id"><span class="lc-file-name">{{ a.name }}</span><span class="lc-file-size">{{ fileSize(a.size) }}</span><button type="button" class="lc-icon" :aria-label="`去掉附件：${a.name}`" @click="detach(a)"><X aria-hidden="true" /></button></li>
+            <li v-if="uploading" role="status">正在上传 {{ uploading }} 个…</li>
+          </ul>
           <div class="lc-compose-row">
+            <input ref="picker" type="file" multiple hidden :accept="imagesOnly ? IMAGE_ACCEPT : undefined" aria-label="选择要带上的图片或文件" @change="pick" />
+            <button type="button" class="lc-icon" :aria-label="imagesOnly ? '添加图片' : '添加图片或文件'" :title="imagesOnly ? '添加图片（对话会话只能带图片）' : '添加图片或文件（文件会放进工作目录）'" :disabled="sending" @click="picker?.click()"><Paperclip aria-hidden="true" /></button>
             <textarea v-model="draft" rows="2" maxlength="100000" aria-label="消息内容" placeholder="输入消息：Enter 发送，Shift + Enter 换行" @keydown="onKey" />
             <button v-if="activeTurn" type="button" class="secondary-button" :disabled="stopping" @click="stop"><Square aria-hidden="true" />{{ stopping ? '正在停止…' : '停止' }}</button>
             <button type="submit" class="primary-button" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : '发送' }}</button>
           </div>
-          <p v-if="activeTurn" class="lc-hint">上一条还没答完：现在发的会排在它后面。</p>
+          <fieldset v-if="activeTurn?.status === 'running'" class="lc-mode" aria-label="上一条还没答完时怎么发">
+            <label class="check-field"><input v-model="sendMode" type="radio" name="lc-send-mode" value="queue" />排队</label>
+            <label class="check-field"><input v-model="sendMode" type="radio" name="lc-send-mode" value="insert" />插入</label>
+          </fieldset>
+          <p v-if="activeTurn" class="lc-hint">{{ inserting ? '插入：这条消息直接送进正在处理的回合。平台做不到时，会中断正在处理的回合，把这条消息和“接着刚才没做完的继续”一起重新发。' : '上一条还没答完：现在发的不会打断它，会进队列，等前面的做完再发给模型。' }}</p>
+          <p v-if="sendNotice" class="lc-note" role="status">{{ sendNotice }}</p>
         </template>
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>
       </form>

@@ -75,7 +75,10 @@ class Bridge:
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(data_dir=tmp_path / "data", admin_token=ADMIN, enable_fake=True)
+    # 测试里额度“重置”后马上续跑，不再多等一分钟
+    return Settings(
+        data_dir=tmp_path / "data", admin_token=ADMIN, enable_fake=True, resume_margin_seconds=0
+    )
 
 
 @pytest.fixture
@@ -84,4 +87,6 @@ async def bridge(settings: Settings) -> AsyncIterator[Bridge]:
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://bridge") as client:
+            # 测试里不等“两次开始之间的间隔”（默认 2 秒）；专门测它的用例自己设
+            app.state.engine.store.set_setting("min_start_interval_seconds", 0)
             yield Bridge(client, app.state.engine)

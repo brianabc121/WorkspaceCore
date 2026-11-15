@@ -19,9 +19,9 @@ const lbModule: Schema['ModuleOut'] = { ...newsModule, key: 'llm_bridge', name: 
 
 const bridge: Schema['LlmBridgeOut'] = { id: BRIDGE, name: '主账号', base_url: 'http://10.0.0.5:8787', enabled: true, has_token: true, created_at: at, updated_at: at }
 const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', enabled: true, state: 'logged_out', registered: false, identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
-const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
+const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
 const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBridgeStatusOut'] => ({
-  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 1, running: 2, settings,
+  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 1, running: 2, load: {}, quota: {}, settings,
   accounts: [
     account({ state: 'logged_in', registered: true, identity: 'a***@example.com', method: 'device_code', first_login_at: 1794528000 }),
     account({ slot: 'claude', label: 'Claude', login_methods: ['api_key', 'oauth_token', 'existing'] }),
@@ -42,6 +42,8 @@ function setup(role: Role, handler?: (r: Request) => Response | undefined | Prom
     if (p === '/api/v1/llm_bridge/bridges' && r.method === 'GET') return Response.json({ bridges })
     if (p === `${base}/status`) return Response.json(status())
     if (p === '/api/v1/llm_bridge/grants') return Response.json({ grants: [grant()] })
+    // 一键部署（T-0234）在这个文件里按“不可用”处理：添加管理器走手动填写；一键部署见 llm_bridge_deploy.test.ts
+    if (p === '/api/v1/llm_bridge/deployments' && r.method === 'GET') return Response.json({ jobs: [], available: false })
     if (p === `${base}/environments` && r.method === 'GET') return Response.json({ environments: [] })
     if (p === `${base}/sessions`) return Response.json({ sessions: [], sync_failed: '' })
     return undefined
@@ -131,7 +133,7 @@ describe('大模型客户端管理', () => {
     expect(within(env).getByText('可写工作区')).toBeVisible()
     expect(within(env).queryByRole('button')).not.toBeInTheDocument()
     const set = await openTab('设置')
-    expect(within(set).getByLabelText('同时进行的回合数')).toBeDisabled()
+    expect(within(set).getByLabelText('每个平台同时进行的会话数')).toBeDisabled()
     expect(within(set).queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
     expect(writes(requests)).toEqual([])
   })
@@ -395,17 +397,31 @@ describe('大模型客户端管理', () => {
     })
     await openApp('/llm_bridge?view=manage')
     const set = await openTab('设置')
-    const concurrency = await within(set).findByLabelText('同时进行的回合数')
+    const concurrency = await within(set).findByLabelText('每个平台同时进行的会话数')
     expect(concurrency).toHaveValue(2)
     expect(concurrency).toHaveAttribute('max', '16')
     await fireEvent.update(concurrency, '17')
     await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
-    expect(await within(set).findByText('「同时进行的回合数」要填 1–16 之间的整数。')).toBeVisible()
+    expect(await within(set).findByText('「每个平台同时进行的会话数」要填 1–16 之间的整数。')).toBeVisible()
     expect(writes(requests)).toEqual([])
     await fireEvent.update(concurrency, '4')
     await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
     expect(await within(set).findByText('设置已保存。')).toBeVisible()
-    expect(await writes(requests)[0]!.clone().json()).toEqual({ concurrency: 4, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000 })
+    expect(await writes(requests)[0]!.clone().json()).toEqual({ concurrency: 4, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, auto_resume_max: 3, auto_resume: true, resume_text: '继续意外中断的任务' })
+
+    // 额度用完后自动继续（T-0237）：开关、次数、发的那句话；那句话不能空
+    const resume = within(set).getByRole('group', { name: '额度用完后自动继续' })
+    const sentence = within(resume).getByLabelText('自动继续时发的那句话')
+    expect(sentence).toHaveValue('继续意外中断的任务')
+    await fireEvent.update(sentence, '  ')
+    await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
+    expect(await within(set).findByText('「自动继续时发的那句话」要填 1–200 个字。')).toBeVisible()
+    await fireEvent.update(sentence, '接着做')
+    await fireEvent.click(within(resume).getByRole('checkbox'))
+    await fireEvent.update(within(set).getByLabelText('同一次中断最多自动继续几次'), '5')
+    await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(writes(requests)).toHaveLength(2))
+    expect(await writes(requests)[1]!.clone().json()).toMatchObject({ auto_resume: false, auto_resume_max: 5, resume_text: '接着做' })
 
     const env = await openTab('开发环境')
     await fireEvent.click(await within(env).findByRole('button', { name: '新增环境' }))
@@ -422,7 +438,44 @@ describe('大模型客户端管理', () => {
     await fireEvent.click(within(form).getByLabelText('允许联网'))
     await fireEvent.click(within(form).getByRole('button', { name: '保存' }))
     expect(await within(env).findByText('已新增环境「工作台仓库」。')).toBeVisible()
-    expect(await writes(requests)[1]!.clone().json()).toEqual({ platform: 'claude', mode: 'dev', name: '工作台仓库', repo_url: 'https://github.com/o/r', branch: null, sandbox: 'exec', network: true, description: '', enabled: true })
+    expect(await writes(requests)[2]!.clone().json()).toEqual({ platform: 'claude', mode: 'dev', name: '工作台仓库', repo_url: 'https://github.com/o/r', branch: null, sandbox: 'exec', network: true, description: '', enabled: true })
+  })
+
+  it('shows the quota of each platform, when it resets and that it is paused, and asks the platform on request', async () => {
+    const resets = 1794531600, seen = 1794528000
+    const quota: Schema['LlmBridgeStatusOut']['quota'] = {
+      codex: { can_refresh: true, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 12345, windows: [
+        { kind: 'five_hour', used_percent: 42, resets_at: resets, reset_passed: false, status: 'ok', plan: 'plus', observed_at: seen },
+        { kind: 'weekly', used_percent: null, resets_at: resets - 9000, reset_passed: true, status: 'ok', plan: null, observed_at: seen },
+      ] },
+      claude: { can_refresh: false, paused_until: resets, pause_estimated: true, waiting_resume: 2, tokens_5h: 0, windows: [
+        { kind: 'five_hour', used_percent: 100, resets_at: null, reset_passed: false, status: 'exceeded', plan: null, observed_at: seen },
+      ] },
+      workbuddy: { can_refresh: false, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 0, windows: [] },
+    }
+    const requests = setup('owner', r => {
+      if (path(r) === `${base}/status`) return Response.json(status({ quota }))
+      if (path(r) === `${base}/quota`) return Response.json({ platforms: quota })
+      return undefined
+    })
+    await openApp('/llm_bridge?view=manage')
+    const codex = await screen.findByRole('article', { name: '额度：Codex' })
+    expect(within(codex).getByText('5 小时额度')).toBeVisible()
+    expect(within(codex).getByText('已用 42%，剩余 58%')).toBeVisible()
+    expect(within(codex).getByRole('progressbar', { name: '5 小时额度已用' })).toHaveValue(42)
+    expect(within(codex).getByText('plus')).toBeVisible()
+    expect(within(codex).getByText('已过重置时间，等下一次回合确认')).toBeVisible()
+    expect(within(codex).getByText(/最近 5 小时经这个管理器用掉 12,345 个 token/)).toBeVisible()
+    const claude = screen.getByRole('article', { name: '额度：Claude' })
+    expect(within(claude).getByText('已暂停')).toBeVisible()
+    expect(within(claude).getByRole('note')).toHaveTextContent(/额度用完，这个平台暂停到 .+（平台没有给出重置时间，这是估计的）；到时间后自动恢复。\s*有 2 个被打断的会话在等自动继续。/)
+    expect(within(claude).getByText('已用 100%，剩余 0%')).toBeVisible()
+    expect(within(claude).getByText('平台没有给出')).toBeVisible()
+    expect(within(screen.getByRole('article', { name: '额度：WorkBuddy' })).getByText(/还没有看到这个平台的额度：跑过一个回合后会显示/)).toBeVisible()
+
+    await fireEvent.click(screen.getByRole('button', { name: '向平台查一次' }))
+    await waitFor(() => expect(requests.some(r => path(r) === `${base}/quota` && new URL(r.url).searchParams.get('refresh') === 'true')).toBe(true))
+    expect(writes(requests)).toEqual([])
   })
 
   it('lists sessions, syncs on request and shows the turns of a session', async () => {
@@ -455,7 +508,7 @@ describe('大模型客户端管理', () => {
   it('shows an unreachable bridge and a rejected token as readable messages', async () => {
     let mode: 'unreachable' | 'auth' = 'unreachable'
     setup('owner', r => {
-      if (path(r) === `${base}/status`) return mode === 'unreachable' ? Response.json({ reachable: false, error: '连接被拒绝', version: '', accounts: [], channels: [], queued: 0, running: 0, settings: null }) : fail(503, 'BRIDGE_AUTH_FAILED')
+      if (path(r) === `${base}/status`) return mode === 'unreachable' ? Response.json({ reachable: false, error: '连接被拒绝', version: '', accounts: [], channels: [], queued: 0, running: 0, load: {}, settings: null }) : fail(503, 'BRIDGE_AUTH_FAILED')
       if (path(r) === `${base}/environments`) return fail(503, 'EXTERNAL_UNAVAILABLE')
       return undefined
     })

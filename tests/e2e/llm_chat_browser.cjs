@@ -1,11 +1,12 @@
-// 大模型聚合聊天浏览器验收（T-0231，docs/v2/LLM_CHAT_PLAN.md）：
-// 真实后端 + 真实前端 + 一个验收用的 MCP 管理器——它里面的 Claude 程序换成了不访问外网的假程序
+// 大模型聚合聊天浏览器验收（T-0231、T-0232，docs/v2/LLM_CHAT_PLAN.md）：
+// 真实后端 + 真实前端 + 一个验收用的 MCP 管理器——它里面的 Claude 和 WorkBuddy 程序换成了不访问外网的假程序
 // （services/llm-bridge/tests/fakes/fake_cli.py：参数和事件的形状与真实程序一致，回答是把收到的话原样带回来；
 // 收到 hang 时会一直不回答，用来验收“停止”）。别的都是真的：会话桥、工作台接口、页面。
 //
-// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 改标题 → 搜索 →
+// 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 消息队列（排队、置顶、修改、取消）→ 额度用完（中断、暂停、现在就试）→ 图片附件与工具调用 → 插入消息 → 改标题 → 搜索 →
 // 刷新后还在 → 别的管理员建的会话要确认一次才能接着发 → member 用不了 → 归档后不能再发 →
-// 管理器停用后只能看 → 审计里没有消息内容 → 手机宽度两屏。
+// 管理器停用后只能看 → 多模型同问（同一个问题同时发给两个模型、并排看、继续问、回到单会话、别的管理员要确认、归档）→
+// 审计里没有消息内容 → 手机宽度两屏（同问一次看一栏）。
 //
 // 不验证的：各平台的真实登录和真实回答（需要账号）；智能体建的会话（compose job 没有接入入口，
 // 由 services/api/tests/test_module_llm_bridge_chat.py 和前端测试覆盖）。
@@ -30,8 +31,18 @@ const ADMIN_NAME = `聊天管理员 ${run}`
 const MANAGER = `验收用 ${run}`
 const FIRST = `你好，验收 ${run}`
 const TITLE = `验收会话 ${run}`
+const QUESTION = `同问 ${run}`
 // 假的 API 密钥：假程序只看“有没有”，不会发给任何平台
 const FAKE_KEY = `e2e-not-a-real-key-${randomBytes(12).toString('hex')}`
+
+async function until(test, timeout = 30000) {
+  const deadline = Date.now() + timeout
+  while (Date.now() < deadline) {
+    if (await test()) return true
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  return false
+}
 
 function seed(...args) {
   return execFileSync('python3', [path.join(__dirname, 'seed.py'), ...args], {
@@ -184,6 +195,128 @@ async function main() {
     await stop.waitFor({ state: 'detached' })
     step('回答到一半可以停止，这一回合显示“已停止”')
 
+    // ---------------------------------------------------------------- 消息队列（T-0236）
+    await composer(page).fill('hang')
+    await composer(page).press('Enter')
+    await thread(page).getByText('正在回答…').waitFor({ timeout: 30000 })
+    for (const text of ['排队甲', '排队乙']) {
+      await composer(page).fill(text)
+      await composer(page).press('Enter')
+      await page.waitForFunction(() => document.querySelector('textarea[aria-label="消息内容"]')?.value === '', null, { timeout: 30000 })
+    }
+    const queue = page.getByRole('region', { name: '消息队列' })
+    await queue.getByRole('button', { name: /队列里有 2 条消息/ }).waitFor({ timeout: 30000 })
+    const queued = () => queue.getByRole('listitem').allTextContents()
+    check((await queued()).map((t) => (t.includes('排队甲') ? '甲' : '乙')).join('') === '甲乙', `队列应按发送顺序：${await queued()}`)
+    check((await thread(page).getByText(':: 排队甲').count()) === 0, '前面的还没做完：排队的消息不应已经有回答（没有打断正在跑的）')
+    await queue.getByRole('button', { name: '把第 2 条调到最前面' }).click()
+    check(await until(async () => (await queued())[0].includes('排队乙')), `调到最前面后第一条应是“排队乙”：${await queued()}`)
+    await queue.getByRole('button', { name: '修改第 1 条' }).click()
+    const edit = queue.getByRole('form', { name: '修改排队中的第 1 条' })
+    await edit.getByRole('textbox', { name: '消息内容' }).fill('排队乙（改过）')
+    await edit.getByRole('button', { name: '保存' }).click()
+    check(await until(async () => (await queued())[0].includes('排队乙（改过）')), '修改后队列里应是新的内容')
+    await queue.getByRole('button', { name: '取消第 2 条' }).click()
+    check(await until(async () => (await queued()).length === 1), '取消后队列里只剩一条')
+    // 停掉正在跑的那一条：队列里剩下的那条接着被处理
+    await page.getByRole('button', { name: '停止', exact: true }).click()
+    await thread(page).getByText(':: 排队乙（改过）').waitFor({ timeout: 60000 })
+    check((await thread(page).getByText(':: 排队甲').count()) === 0, '取消的那条不应被处理')
+    check(await until(async () => (await queue.count()) === 0), '队列空了之后面板应消失')
+    step('消息队列：会话在跑时再发的消息进队列、不打断；能调到最前面、修改、取消；前面的结束后按顺序处理')
+
+    // ---------------------------------------------------------------- 额度用完：中断、暂停、继续（T-0237）
+    // 假程序收到 limit 时像官方程序那样先报一条被拒绝的额度事件（5 小时额度，带重置时间），再以错误结束
+    await composer(page).fill('limit')
+    await composer(page).press('Enter')
+    await thread(page).getByText(/额度用完，这一回合中断了。.+自动继续。/).waitFor({ timeout: 60000 })
+    await thread(page).getByText('已中断').waitFor()
+    check((await thread(page).getByText(/这一回合失败了/).count()) === 0, '额度用完不应显示成失败')
+    const paused = (await api(page, workspace, 'GET', `/api/v1/llm_bridge/bridges/${bridgeId}/status`)).body?.quota?.claude
+    check(paused?.paused_until > Date.now() / 1000 && paused?.waiting_resume === 1, `Claude 应因为额度暂停，并有一个会话在等：${JSON.stringify(paused)}`)
+    check(paused.windows.some((w) => w.kind === 'five_hour' && w.status === 'exceeded' && w.resets_at === 1900000000), `应记下 5 小时额度已用完和重置时间：${JSON.stringify(paused.windows)}`)
+    // 暂停期间再发的排队，不去撞限额
+    await composer(page).fill('中断后再发')
+    await composer(page).press('Enter')
+    await page.waitForFunction(() => document.querySelector('textarea[aria-label="消息内容"]')?.value === '', null, { timeout: 30000 })
+    await new Promise((resolve) => setTimeout(resolve, 2500))
+    check((await thread(page).getByText(':: 中断后再发').count()) === 0, '平台暂停期间，新发的消息应排队等着')
+    // 管理页的“额度”：窗口、重置时间、暂停
+    const manage = await page.context().newPage()
+    await manage.goto(`${base}/llm_bridge?view=manage`)
+    const card = manage.getByRole('article', { name: '额度：Claude' })
+    await card.getByText('已暂停').waitFor({ timeout: 30000 })
+    await card.getByText('5 小时额度').waitFor()
+    await card.getByText('已用 100%，剩余 0%').waitFor()
+    check(/额度用完，这个平台暂停到 .+有 1 个被打断的会话在等自动继续。/s.test(await card.getByRole('note').innerText()), '额度卡片应说明暂停到什么时候、有几个会话在等')
+    await manage.close()
+    // 不要自动继续 → 现在就试：系统替人发那句话，排在之前排队的那条前面
+    await thread(page).getByRole('button', { name: '不要自动继续' }).click()
+    await thread(page).getByText('额度用完，这一回合中断了。已设成不自动继续。').waitFor({ timeout: 30000 })
+    await thread(page).getByRole('button', { name: '现在就试' }).click()
+    await thread(page).getByText(':: 继续意外中断的任务').waitFor({ timeout: 60000 })
+    await thread(page).getByText(':: 中断后再发').waitFor({ timeout: 60000 })
+    await thread(page).getByText('系统（自动续跑）').waitFor()
+    await thread(page).getByText('额度用完，这一回合中断了；已经在下面自动继续。').waitFor({ timeout: 30000 })
+    const order = await thread(page).locator(':scope > li.is-reply').allInnerTexts()
+    check(order.findIndex((t) => t.includes(':: 继续意外中断的任务')) < order.findIndex((t) => t.includes(':: 中断后再发')), '“继续”应排在之前排队的消息前面')
+    const resumed = (await api(page, workspace, 'GET', `/api/v1/llm_bridge/bridges/${bridgeId}/status`)).body?.quota?.claude
+    check(resumed?.paused_until === null && resumed?.waiting_resume === 0, `继续之后平台不应再暂停：${JSON.stringify(resumed)}`)
+    step('额度用完：回合显示“已中断”和什么时候自动继续，平台暂停、新消息排队；管理页显示额度与重置时间；“不要自动继续”“现在就试”可用，继续的那句话排在最前面')
+
+    // ---------------------------------------------------------------- 图片附件与完整的过程（T-0236 第二步）
+    // 一张 1×1 的真 PNG：上传到管理器，随消息发出去；假程序在回答里报出收到了几张图片
+    const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64')
+    await page.getByLabel('选择要带上的图片或文件').setInputFiles({ name: `验收图 ${run}.png`, mimeType: 'image/png', buffer: PNG })
+    const attachedList = page.getByRole('list', { name: '要带上的附件' })
+    await attachedList.getByText(`验收图 ${run}.png`).waitFor({ timeout: 30000 })
+    await composer(page).fill('看图')
+    await composer(page).press('Enter')
+    await thread(page).getByText(':: 看图 images=1').waitFor({ timeout: 60000 })
+    check(await until(async () => (await attachedList.count()) === 0), '发出去之后，待发的附件应清空')
+    const shown = thread(page).getByRole('img', { name: `验收图 ${run}.png` })
+    await shown.waitFor({ timeout: 30000 })
+    check(await until(() => shown.evaluate((img) => img.complete && img.naturalWidth === 1)), '提问上的图片应能显示出来（内容从管理器取回）')
+    // 对话会话只能带图片：别的文件接口直接拒绝；内容和扩展名对不上的也拒绝
+    const refuse = (name, text) => page.evaluate(async ({ url, workspace, name, text }) => {
+      const csrf = document.cookie.split('; ').find((item) => item.startsWith('ws_csrf='))?.slice(8)
+      const response = await fetch(`${url}?name=${encodeURIComponent(name)}`, { method: 'POST', body: text, headers: { 'X-Workspace-Id': workspace, 'X-CSRF-Token': decodeURIComponent(csrf || ''), 'Content-Type': 'application/octet-stream' } })
+      return response.status
+    }, { url: `${chat}/sessions/${firstId}/attachments`, workspace, name, text })
+    check((await refuse('说明.txt', 'hello')) === 422, '对话会话里不能带图片以外的文件')
+    check((await refuse('假的.png', '<html>')) === 422, '内容和扩展名对不上的不收')
+    // 读文件这类工具调用和结果也在“过程”里
+    await composer(page).fill('read')
+    await composer(page).press('Enter')
+    await thread(page).getByText(':: read', { exact: false }).last().waitFor({ timeout: 60000 })
+    const steps = thread(page).locator(':scope > li.is-reply').filter({ hasText: ':: read' })
+    // 等这一回合结束（“还在继续…”消失）再把“过程”展开看：回答没完时它本来就是展开的
+    check(await until(async () => (await steps.getAttribute('data-status')) === 'completed', 60000), '读文件那一回合应完成')
+    await steps.locator('details').evaluate((el) => { el.open = true })
+    await steps.getByText('工具 Read').waitFor({ timeout: 30000 })
+    await steps.getByText('结果 Read').waitFor()
+    step('图片随消息发给模型并存在管理器里，页面上能看到；对话会话拒绝别的文件；读文件这类工具调用和结果记在过程里')
+
+    // ---------------------------------------------------------------- 插入消息（T-0236 第三步）
+    // 假程序收不下回合中追加的消息，所以走的是降级：中断正在处理的回合，把新消息和“接着刚才的做”合成新回合
+    await composer(page).fill('hang')
+    await composer(page).press('Enter')
+    await thread(page).getByText('正在回答…').waitFor({ timeout: 30000 })
+    const modes = page.getByRole('group', { name: '上一条还没答完时怎么发' })
+    check(await modes.getByRole('radio', { name: '排队' }).isChecked(), '默认是排队，不打断')
+    await modes.getByRole('radio', { name: '插入' }).check()
+    await composer(page).fill('插入的消息')
+    await composer(page).press('Enter')
+    await page.getByText(/平台没有收下插入的消息：已中断上一回合/).waitFor({ timeout: 60000 })
+    await thread(page).getByText('这一回合被后面插入的消息打断了；新消息里会接着做。').waitFor({ timeout: 60000 })
+    await thread(page).getByText('插入（合并重发）').waitFor()
+    const mergedReply = thread(page).locator(':scope > li.is-reply').filter({ hasText: ':: 插入的消息' })
+    await mergedReply.waitFor({ timeout: 60000 })
+    check(/请先处理它，然后接着刚才没做完的事继续/.test(await mergedReply.innerText()), '给模型的那份应带上“接着刚才没做完的事继续”')
+    check((await thread(page).locator(':scope > li.is-ask').filter({ hasText: '插入的消息' }).innerText()).includes('接着刚才') === false, '页面上的提问是人发的原话')
+    check((await thread(page).getByText(/这一回合失败了/).count()) === 0, '被插入打断的回合不应显示成失败')
+    step('插入消息：会话在跑时选“插入”，平台收不下就中断上一回合、合并重发；被打断的回合不算失败，页面写明实际怎么送出去的')
+
     // ---------------------------------------------------------------- 改标题、搜索、刷新
     await page.getByRole('button', { name: '改标题' }).click()
     const rename = page.getByRole('form', { name: '改会话标题' })
@@ -200,9 +333,10 @@ async function main() {
     await page.reload()
     await page.getByRole('heading', { level: 2, name: TITLE }).waitFor()
     await thread(page).getByText(':: 第二问').waitFor()
-    check((await countMessages(page)) === 6, '刷新后三问三答都还在')
+    // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条；插入那一步的两条
+    check((await countMessages(page)) === 26, `刷新后十三问十三答都还在：${await countMessages(page)}`)
     const info = page.getByRole('complementary', { name: '会话信息' })
-    await info.getByText('回合（3）').waitFor()
+    await info.getByText('回合（13）').waitFor()
     await info.getByText(MANAGER).waitFor()
     step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
 
@@ -279,16 +413,73 @@ async function main() {
     check(on.status === 200, `没能重新启用管理器：${JSON.stringify(on)}`)
     step('管理器停用后会话还能看，页面和接口都不能新建、不能发送')
 
+    // ---------------------------------------------------------------- 多模型同问（T-0232）
+    const buddyIn = await api(page, workspace, 'POST', `/api/v1/llm_bridge/bridges/${bridgeId}/accounts/workbuddy/login`, { method: 'api_key', api_key: FAKE_KEY })
+    check(buddyIn.status === 200, `WorkBuddy 登录失败：${JSON.stringify(buddyIn)}`)
+    const groupsApi = '/api/v1/llm_bridge/chat/groups'
+    const tooFew = await api(page, workspace, 'POST', groupsApi, { text: 'x', request_id: requestId(), targets: [{ bridge_id: bridgeId, platform: 'claude', mode: 'chat' }] })
+    check(tooFew.status === 422, `只有一个目标应被拒绝：${tooFew.status}`)
+    await page.goto(`${base}/llm_bridge?m=${bridgeId}`)
+    await side(page).getByRole('button', { name: '多模型同问' }).click()
+    const compare = page.getByRole('form', { name: '多模型同问' })
+    // 当前管理器上已登录、能对话的平台先加进来
+    const chosen = compare.getByRole('list', { name: '发给（2 个）' })
+    await chosen.waitFor({ timeout: 60000 })
+    check((await chosen.getByRole('listitem').allInnerTexts()).join('|') === `Claude · 默认模型 · ${MANAGER}|WorkBuddy · 默认模型 · ${MANAGER}`, `默认应选中已登录的两个平台：${await chosen.innerText()}`)
+    await compare.getByLabel('问题').fill(QUESTION)
+    await compare.getByRole('button', { name: '发给 2 个模型' }).click()
+    await page.getByRole('heading', { level: 2, name: QUESTION }).waitFor({ timeout: 60000 })
+    const groupId = new URL(page.url()).searchParams.get('g')
+    check(/^[0-9a-f-]{36}$/.test(groupId || ''), `地址里应带上这一组：${page.url()}`)
+    const claudeColumn = page.getByRole('region', { name: `Claude（${MANAGER}）` })
+    const buddyColumn = page.getByRole('region', { name: `WorkBuddy（${MANAGER}）` })
+    await claudeColumn.getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
+    await buddyColumn.getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
+    const entry = side(page).getByRole('region', { name: '同问' }).getByRole('button', { name: new RegExp(QUESTION) })
+    check(/同问 2 个模型 · 我/.test(await entry.innerText()), '列表的“同问”里应有这一组')
+    // 继续问：两个模型都收到
+    const ask = page.getByRole('form', { name: '向这一组继续发' })
+    await ask.getByRole('textbox', { name: '问题内容' }).fill('再问一句')
+    await ask.getByRole('textbox', { name: '问题内容' }).press('Enter')
+    await claudeColumn.getByText(':: 再问一句').waitFor({ timeout: 60000 })
+    await buddyColumn.getByText(':: 再问一句').waitFor({ timeout: 60000 })
+    // 每个模型就是一个普通会话：可以回到单会话里单独继续
+    await claudeColumn.getByRole('link', { name: '在这个会话里继续' }).click()
+    await page.getByRole('heading', { level: 2, name: QUESTION }).waitFor()
+    check(/^bs_/.test(new URL(page.url()).searchParams.get('s') || ''), '应回到单会话')
+    await composer(page).fill('单独继续')
+    await composer(page).press('Enter')
+    await thread(page).getByText(':: 单独继续').waitFor({ timeout: 60000 })
+    // 别的管理员能看到这一组；不确认不能接着发
+    const second = await login(browser, adminEmail, problems, 'admin')
+    await openAs(second.page, workspace, '/llm_bridge')
+    const theirGroups = await api(second.page, workspace, 'GET', groupsApi)
+    check(theirGroups.body?.groups?.find((g) => g.id === groupId)?.owner_kind === 'user', `admin 应看到 owner 建的这一组：${JSON.stringify(theirGroups.body)}`)
+    const noTakeover = await api(second.page, workspace, 'POST', `${groupsApi}/${groupId}/messages`, { text: 'x', request_id: requestId() })
+    check(noTakeover.status === 409 && noTakeover.body?.error?.code === 'TAKEOVER_REQUIRED', `别人建的一组不确认应被拒绝：${JSON.stringify(noTakeover)}`)
+    await second.context.close()
+    // 归档这一组：不再并排显示，每个模型的会话还在
+    await page.goto(`${base}/llm_bridge?m=${bridgeId}&g=${groupId}`)
+    await claudeColumn.getByText(':: 单独继续').waitFor({ timeout: 60000 })
+    page.once('dialog', (dialog) => dialog.accept())
+    await page.getByRole('button', { name: '归档这一组' }).click()
+    await page.getByText('这一组同问已归档，不能再一起发').waitFor()
+    await side(page).getByRole('region', { name: '同问' }).waitFor({ state: 'detached' })
+    await side(page).getByRole('button', { name: new RegExp(QUESTION) }).first().waitFor()
+    const archivedGroupSend = await api(page, workspace, 'POST', `${groupsApi}/${groupId}/messages`, { text: 'x', request_id: requestId() })
+    check(archivedGroupSend.status === 409, `归档后的一组接口也应拒绝：${archivedGroupSend.status}`)
+    step('多模型同问：默认选中已登录的平台；同一个问题两个模型并排回答；继续问、回到单会话；别的管理员要确认；归档后会话还在')
+
     // ---------------------------------------------------------------- 审计：记了动作，没有消息内容
     const audit = await api(page, workspace, 'GET', '/api/v1/audit-logs?limit=100&action_prefix=llm_bridge.chat_')
     check(audit.status === 200, `读不到审计：${JSON.stringify(audit)}`)
     const actions = new Set(audit.body.items.map((item) => item.action))
-    for (const action of ['chat_session_created', 'chat_message_sent', 'chat_takeover_sent', 'chat_turn_cancelled', 'chat_session_renamed', 'chat_session_archived']) {
+    for (const action of ['chat_session_created', 'chat_message_sent', 'chat_takeover_sent', 'chat_turn_cancelled', 'chat_session_renamed', 'chat_session_archived', 'chat_group_created', 'chat_group_sent', 'chat_group_archived']) {
       check(actions.has(`llm_bridge.${action}`), `审计里应有 llm_bridge.${action}：${[...actions].join('、')}`)
     }
     const auditText = JSON.stringify(audit.body.items)
-    check(!auditText.includes(FIRST) && !auditText.includes('我来补充一句') && !auditText.includes(FAKE_KEY), '审计里不应有消息内容和密钥')
-    step('审计记下了新建、发送、接着别人的会话发、停止、改标题、归档，不含消息内容')
+    check(!auditText.includes(FIRST) && !auditText.includes('我来补充一句') && !auditText.includes(QUESTION) && !auditText.includes(FAKE_KEY), '审计里不应有消息内容和密钥')
+    step('审计记下了新建、发送、接着别人的会话发、停止、改标题、归档和同问的新建、继续、归档，不含消息内容')
 
     // ---------------------------------------------------------------- 手机宽度：列表和对话分成两屏
     const phone = await login(browser, ownerEmail, problems, 'owner（手机）', { width: 390, height: 844 })
@@ -309,8 +500,17 @@ async function main() {
     await side(phone.page).getByRole('button', { name: '新建会话' }).click()
     await phone.page.getByRole('form', { name: '新建会话' }).getByLabel('第一条消息').waitFor()
     check(await noHorizontalScroll(phone.page), '手机宽度下新建会话不应横向滚动')
+    // 同问在手机上一次看一栏，用标签切换
+    await phone.page.goto(`${base}/llm_bridge?m=${bridgeId}&g=${groupId}`)
+    const tabs = phone.page.getByRole('tablist', { name: '这一组里的模型' })
+    await tabs.waitFor()
+    await phone.page.getByRole('region', { name: `Claude（${MANAGER}）` }).getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
+    check(!(await phone.page.getByRole('region', { name: `WorkBuddy（${MANAGER}）` }).isVisible()), '手机上一次只看一栏')
+    await tabs.getByRole('tab', { name: new RegExp('WorkBuddy') }).click()
+    await phone.page.getByRole('region', { name: `WorkBuddy（${MANAGER}）` }).getByText(`:: ${QUESTION}`).waitFor({ timeout: 60000 })
+    check(await noHorizontalScroll(phone.page), '手机宽度下同问不应横向滚动')
     await phone.context.close()
-    step('手机宽度（390）：列表和对话分成两屏，能返回，会话信息从右上角打开，都不横向滚动')
+    step('手机宽度（390）：列表和对话分成两屏，能返回，会话信息从右上角打开；同问一次看一栏；都不横向滚动')
 
     check(problems.length === 0, `检查过程中出现错误：\n  ${problems.join('\n  ')}`)
     console.log('大模型聚合聊天浏览器验收全部通过')
@@ -321,6 +521,7 @@ async function main() {
         const left = await api(ownerPage, workspace, 'GET', '/api/v1/llm_bridge/bridges')
         for (const bridge of left.body?.bridges ?? []) {
           await api(ownerPage, workspace, 'POST', `/api/v1/llm_bridge/bridges/${bridge.id}/accounts/claude/logout`)
+          await api(ownerPage, workspace, 'POST', `/api/v1/llm_bridge/bridges/${bridge.id}/accounts/workbuddy/logout`)
           await api(ownerPage, workspace, 'DELETE', `/api/v1/llm_bridge/bridges/${bridge.id}`)
         }
         await api(ownerPage, workspace, 'PATCH', '/api/v1/modules/llm_bridge', { enabled: false })

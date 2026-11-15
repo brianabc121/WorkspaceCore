@@ -449,18 +449,6 @@ class AgentSshTargetOut(BaseModel):
     updated_at: datetime
 
 
-class AgentSshInstall(_Strict):
-    """开始自动安装。登录密码只用于这一次（登录、装专用公钥、需要时用 sudo 装 Docker），不保存。"""
-
-    version: Version = Field(description="目标服务器的当前版本号")
-    password: SecretStr | None = Field(
-        default=None,
-        min_length=1,
-        max_length=1024,
-        description="SSH 登录密码；已经装了专用公钥、且 Docker 可以直接使用时可以不填",
-    )
-
-
 class AgentSshUninstall(_Strict):
     """卸载：只用专用密钥。停止容器、删掉工作台写入的定时任务；可选删除接入包目录。"""
 

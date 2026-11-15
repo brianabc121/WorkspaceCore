@@ -171,7 +171,7 @@ jobs:
         run: |
           infra/llm-bridge/smoke.sh my-workspace-llm-bridge-mcp-manager-1 http://127.0.0.1:8787 "$(make -s llm-bridge-token)"
           infra/llm-bridge/smoke.sh my-workspace-llm-bridge-2-mcp-manager-1 http://127.0.0.1:8788 "$(make -s llm-bridge-token N=2)"
-      - name: 启动验收用的 MCP 管理器（同一个镜像；里面的 Claude 程序换成仓库里不访问外网的仿真命令行，只在 CI 里这样用）
+      - name: 启动验收用的 MCP 管理器（同一个镜像；里面的 Claude 和 WorkBuddy 程序换成仓库里不访问外网的仿真命令行，只在 CI 里这样用）
         run: |
           token="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
           echo "::add-mask::$token"
@@ -182,8 +182,8 @@ jobs:
             up -d --wait --wait-timeout 300
           # 确认换上去了：容器里用的是仿真命令行，镜像里的普通用户能运行它
           docker exec -e CLAUDE_CONFIG_DIR=/tmp/fake-check my-workspace-llm-bridge-fake-mcp-manager-1 \
-            sh -c 'test "$BRIDGE_CLAUDE_BIN" = /fakes/fake_cli.py && "$BRIDGE_CLAUDE_BIN" auth status'
-      - name: 大模型聚合聊天浏览器验收（没有管理器时的说明；新建会话并提问、回答与过程；Enter 发送；停止；改标题、搜索、刷新；别的管理员建的会话要确认一次；member 不可用；归档；管理器停用后只能看；审计不含消息内容；手机宽度两屏）
+            sh -c 'test "$BRIDGE_CLAUDE_BIN" = /fakes/fake_cli.py && test "$BRIDGE_CODEBUDDY_BIN" = /fakes/fake_cli.py && "$BRIDGE_CLAUDE_BIN" auth status'
+      - name: 大模型聚合聊天浏览器验收（没有管理器时的说明；新建会话并提问、回答与过程；Enter 发送；停止；改标题、搜索、刷新；别的管理员建的会话要确认一次；member 不可用；归档；管理器停用后只能看；多模型同问：两个模型并排回答、继续问、回到单会话、归档；审计不含消息内容；手机宽度两屏）
         # 不要求空库：每次新建工作台用户。验收用的管理器在内部网络里叫 llm-bridge-fake
         run: node tests/e2e/llm_chat_browser.cjs
       - name: 失败时输出服务状态与日志

@@ -1,11 +1,12 @@
+import type { Component } from 'vue'
 import type { RouteRecordRaw } from 'vue-router'
-import type { EventTopic, ModuleNavEntry } from './types'
+import type { EventTopic, ModuleNavEntry, ServerPanelPlace } from './types'
 import news from './news'
 import llmBridge from './llm_bridge'
 
 // 模块注册表（T-0159；docs/modules/README.md）：工作台有哪些插拔式模块。
 // 新增模块：上面 import 一行、下面列表里加一行（make module-new 会自动加，所以每个 import 都写在一行里）。
-// 宿主（侧栏、路由、首页小组件、实时事件）只从这里读，不再手写模块的条目。
+// 宿主（侧栏、路由、首页小组件、实时事件、服务器页面上的区块）只从这里读，不再手写模块的条目。
 export const modules = [
   news,
   llmBridge,
@@ -34,6 +35,14 @@ export const moduleEvents: Partial<Record<EventTopic, string[]>> = {}
 for (const module of modules) {
   for (const [topic, prefixes] of Object.entries(module.events ?? {}) as [EventTopic, readonly string[]][]) {
     moduleEvents[topic] = [...new Set([...(moduleEvents[topic] ?? []), ...prefixes])]
+  }
+}
+
+/** 服务器页面上由模块提供的区块（ModuleServerPanels 按位置渲染），附上所属模块 */
+export const moduleServerPanels: Record<ServerPanelPlace, { module: string; component: Component }[]> = { agentServer: [], runnerHost: [] }
+for (const module of modules) {
+  for (const [place, component] of Object.entries(module.serverPanels ?? {}) as [ServerPanelPlace, Component][]) {
+    moduleServerPanels[place].push({ module: module.key, component })
   }
 }
 

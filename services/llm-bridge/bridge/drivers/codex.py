@@ -18,7 +18,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from bridge import __version__
+from bridge import __version__, quota
 from bridge.drivers.base import (
     AccountStatus,
     Driver,
@@ -69,6 +69,7 @@ def _error_kind(info: Any) -> ErrorKind:
 
 
 class CodexDriver(Driver):
+    can_query_quota = True  # account/rateLimits/read
     slot = "openai"
     login_methods = ("device_code", "api_key")
 
@@ -81,6 +82,7 @@ class CodexDriver(Driver):
         self._start_lock = asyncio.Lock()
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[Any]] = {}
+        self.latest_quota: list[dict[str, Any]] = []
         self._subs: dict[str, asyncio.Queue[dict[str, Any]]] = {}
         self._loaded: set[str] = set()
         self._active: dict[str, str] = {}
@@ -230,6 +232,10 @@ class CodexDriver(Driver):
             else:
                 self._early_logins[key] = finished
             return
+        if method == "account/rateLimits/updated":
+            # 账号级的通知，不属于哪个会话：记下最新的，回合结束或有人查的时候取
+            self.latest_quota = quota.from_codex(params) or self.latest_quota
+            return
         thread = params.get("thread")
         thread_id = params.get("threadId") or (
             thread.get("id") if isinstance(thread, dict) else None
@@ -345,7 +351,11 @@ class CodexDriver(Driver):
         try:
             params: dict[str, Any] = {
                 "threadId": thread_id,
-                "input": [{"type": "text", "text": text}],
+                # 图片按本机路径给（UserInput 的 localImage，app-server v2 schema）
+                "input": [
+                    {"type": "text", "text": text},
+                    *({"type": "localImage", "path": path} for path, _ in spec.images),
+                ],
                 "approvalPolicy": "never",
                 "sandboxPolicy": self._sandbox_policy(spec),
             }
@@ -390,6 +400,30 @@ class CodexDriver(Driver):
                     paths = [str(c.get("path")) for c in item.get("changes") or [] if c.get("path")]
                     outcome.files.extend(paths)
                     await sink("files", {"paths": paths})
+                elif kind == "mcpToolCall":
+                    name = f"{item.get('server') or ''}.{item.get('tool') or ''}".strip(".")
+                    await sink(
+                        "tool",
+                        {
+                            "name": name,
+                            "input": json.dumps(item.get("arguments"), ensure_ascii=False),
+                        },
+                    )
+                    if item.get("result") is not None or item.get("error") is not None:
+                        body = item.get("error") or item.get("result")
+                        await sink(
+                            "tool_result",
+                            {
+                                "name": name,
+                                "text": json.dumps(body, ensure_ascii=False),
+                                "error": item.get("error") is not None,
+                            },
+                        )
+                elif kind == "webSearch" and item.get("query"):
+                    await sink("tool", {"name": "web_search", "input": str(item["query"])})
+                elif kind == "imageGeneration" and isinstance(item.get("savedPath"), str):
+                    # 模型画的图：官方程序已经存成文件，交给 engine 收进附件
+                    await sink("image", {"path": item["savedPath"]})
             elif method == "thread/tokenUsage/updated":
                 last = (params.get("tokenUsage") or {}).get("last") or {}
                 outcome.usage = {
@@ -409,12 +443,62 @@ class CodexDriver(Driver):
                 status = turn.get("status")
                 if status == "completed":
                     outcome.text = messages[-1] if messages else ""
+                    if self.latest_quota:
+                        await sink("quota", {"windows": self.latest_quota})
                     return outcome
                 error = turn.get("error") or {}
                 text = str(error.get("message") or last_error or "Codex 回合失败")[:500]
                 if status == "interrupted":
                     raise DriverError("platform_error", "回合被中断")
-                raise DriverError(_error_kind(error.get("codexErrorInfo")), text)
+                info = error.get("codexErrorInfo")
+                name = info if isinstance(info, str) else next(iter(info), "") if info else ""
+                if name == "usageLimitExceeded":
+                    # 额度用完：带上重置时间（先实查，查不到用最近一次通知里的）
+                    windows = await self._quota_quietly()
+                    if windows:
+                        await sink("quota", {"windows": windows})
+                    resets = [
+                        w["resets_at"]
+                        for w in windows
+                        if w["status"] == "exceeded" and w["resets_at"]
+                    ]
+                    raise DriverError(
+                        "rate_limited",
+                        text,
+                        quota=True,
+                        resets_at=min(resets) if resets else quota.parse_reset(text),
+                    )
+                raise DriverError(_error_kind(info), text)
+
+    async def quota(self) -> list[dict[str, Any]] | None:
+        result = await self._call("account/rateLimits/read", {})
+        self.latest_quota = quota.from_codex(result)
+        return self.latest_quota
+
+    async def _quota_quietly(self) -> list[dict[str, Any]]:
+        try:
+            return await self.quota() or []
+        except DriverError:
+            return self.latest_quota
+
+    async def steer(self, spec: SessionSpec, text: str) -> bool:
+        """`turn/steer`（app-server v2）：要给出正在跑的回合号，应答里的回合号对得上才算收下。"""
+        thread_id = spec.native_id
+        turn_id = self._active.get(thread_id) if thread_id else None
+        if not thread_id or not turn_id:
+            return False
+        try:
+            answer = await self._call(
+                "turn/steer",
+                {
+                    "threadId": thread_id,
+                    "expectedTurnId": turn_id,
+                    "input": [{"type": "text", "text": text}],
+                },
+            )
+        except DriverError:
+            return False
+        return isinstance(answer, dict) and str(answer.get("turnId")) == turn_id
 
     async def cancel(self, spec: SessionSpec) -> None:
         thread_id = spec.native_id

@@ -26,6 +26,7 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeLoginOut,
     LlmBridgeOut,
     LlmBridgePatch,
+    LlmBridgeQuotaList,
     LlmBridgeResetOut,
     LlmBridgeSessionList,
     LlmBridgeSettings,
@@ -47,7 +48,8 @@ _write_errors = error_responses(401, 403, 404, 409, 422, 503)
 @router.get("/llm_bridge/bridges", summary="登记的会话桥（admin）", responses=_read_errors)
 async def llm_bridge_list_bridges(access: Admin, service: Service) -> LlmBridgeList:
     rows = await service.bridges(access.workspace.id)
-    return LlmBridgeList(bridges=[service.bridge_out(r) for r in rows])
+    installs = await service.installs(access.workspace.id)
+    return LlmBridgeList(bridges=[service.bridge_out(r, installs.get(r.id)) for r in rows])
 
 
 @router.post(
@@ -100,6 +102,25 @@ async def llm_bridge_bridge_status(
     access: Admin, service: Service, bridge_id: UUID
 ) -> LlmBridgeStatusOut:
     return await service.status(await service.bridge(access.workspace.id, bridge_id))
+
+
+@router.get(
+    "/llm_bridge/bridges/{bridge_id}/quota",
+    summary="各平台的额度：每个窗口已用多少、什么时候重置；是否因为额度暂停着（admin）",
+    description="平台给的是已用百分比和重置时间，不是剩余 token 数。"
+    "refresh=true 时让管理器向能随时查的平台（Codex）实查一次；"
+    "Claude / WorkBuddy 只在跑回合时顺带报出来，显示的是最近一次看到的。",
+    responses=_read_errors,
+)
+async def llm_bridge_bridge_quota(
+    access: Admin,
+    service: Service,
+    bridge_id: UUID,
+    refresh: Annotated[bool, Query(description="向平台实查一次")] = False,
+) -> LlmBridgeQuotaList:
+    return await service.quota(
+        await service.bridge(access.workspace.id, bridge_id), refresh=refresh
+    )
 
 
 @router.put(
@@ -341,5 +362,7 @@ async def llm_bridge_set_grant(
 
 # ---- 聊天页面（docs/v2/LLM_CHAT_PLAN.md）：接口写在 chat_api.py，登记在同一个 router 上 ----
 from app.modules.llm_bridge import chat_api as _chat_api  # noqa: E402, F401
+from app.modules.llm_bridge import chat_group_api as _chat_group_api  # noqa: E402, F401
+from app.modules.llm_bridge import deploy_api as _deploy_api  # noqa: E402, F401
 
 __all__ = ["router"]

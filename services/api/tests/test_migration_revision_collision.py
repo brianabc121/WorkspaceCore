@@ -18,7 +18,7 @@ from tests.helpers import alembic_config, asyncpg_dsn
 def test_migration_graph_has_one_unambiguous_upgrade_target() -> None:
     script = ScriptDirectory.from_config(alembic_config("unused"))
     assert len(script.get_heads()) == 1
-    assert script.get_current_head() == "0069"
+    assert script.get_current_head() == "rv2_20261115"
 
 
 async def _legacy_bridge(
@@ -314,7 +314,7 @@ def test_downgrade_refuses_to_delete_preexisting_bridge_data(temp_database_url: 
     async def preserved() -> None:
         conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
         try:
-            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0069"
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "rv2_20261115"
             assert (
                 await conn.fetchval(
                     "SELECT token_ref FROM workspace.llm_bridge_bridges WHERE id=$1::uuid",
@@ -423,7 +423,7 @@ def test_both_published_0068_states_upgrade_without_replacing_data_or_objects(
     command.upgrade(config, "0067")
     bridge = asyncio.run(_legacy_bridge(temp_database_url, revision="0068", create_tables=False))
 
-    async def snapshot(*, prepare: bool) -> tuple[object, ...]:
+    async def snapshot(*, prepare: bool) -> tuple[Any, Any]:
         conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
         try:
             if prepare:
@@ -452,12 +452,15 @@ def test_both_published_0068_states_upgrade_without_replacing_data_or_objects(
 
     before = asyncio.run(snapshot(prepare=True))
     command.upgrade(config, "head")
-    assert asyncio.run(snapshot(prepare=False)) == before
+    after = asyncio.run(snapshot(prepare=False))
+    for original, current in zip(before, after, strict=True):
+        # New canonical tables may add objects; existing OIDs/constraints must survive.
+        assert set(original) <= set(current)
 
     async def preserved() -> None:
         conn = await asyncpg.connect(asyncpg_dsn(temp_database_url))
         try:
-            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0069"
+            assert await conn.fetchval("SELECT version_num FROM alembic_version") == "rv2_20261115"
             grant = await conn.fetchrow(
                 "SELECT enabled,can_write,can_account,can_takeover,"
                 "platforms::text,bridge_ids::text "
@@ -548,7 +551,9 @@ def test_downgrade_refuses_to_remove_bridge_access_scopes(
                     "UPDATE workspace.llm_bridge_grants SET bridge_ids=$1::jsonb", scope
                 )
             else:
-                assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0069"
+                assert (
+                    await conn.fetchval("SELECT version_num FROM alembic_version") == "rv2_20261115"
+                )
                 assert (
                     await conn.fetchval(
                         "SELECT bridge_ids::text FROM workspace.llm_bridge_grants "

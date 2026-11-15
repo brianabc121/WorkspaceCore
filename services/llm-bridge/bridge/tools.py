@@ -36,6 +36,17 @@ class SessionCreateInput(ChannelInput):
 class SendInput(_Input):
     session_id: str = Field(description="会话号（llm_session_create 返回的 session_id）")
     text: str = Field(min_length=1, description="要发送的消息")
+    mode: Literal["queue", "insert"] = Field(
+        default="queue",
+        description="会话正在处理别的消息时怎么办：queue 排队等前面的做完（不打断）；"
+        "insert 直接送进正在处理的那一回合，平台做不到时改成中断它、把这条消息和“接着刚才的做”"
+        "合成一个新回合。返回里的 delivered 写明实际用了哪种",
+    )
+    attachments: list[str] = Field(
+        default=[],
+        max_length=8,
+        description="随这条消息带上的附件编号（由工作台上传得到；智能体一般不用填）",
+    )
     request_id: str = Field(
         min_length=1,
         max_length=100,
@@ -75,6 +86,10 @@ class SessionGetInput(_Input):
 
 
 class SessionArchiveInput(_Input):
+    session_id: str
+
+
+class QueueInput(_Input):
     session_id: str
 
 
@@ -126,6 +141,12 @@ TOOLS: tuple[ToolDef, ...] = (
         True,
     ),
     ToolDef("llm_session_get", "查看一个会话的信息和消息记录。" + _NOTE, SessionGetInput, True),
+    ToolDef(
+        "llm_queue",
+        "查看一个会话的消息队列：正在处理的那一条和排队中的各条（按将要处理的顺序）。",
+        QueueInput,
+        True,
+    ),
     ToolDef(
         "llm_session_archive",
         "归档一个会话（之后不能再发送；开发会话的工作目录会被删除）。",

@@ -901,8 +901,17 @@ class Agent:
             for i in df.get("Images") or []
             if (i.get("Labels") or {}).get(c.LABEL_TEMPLATE)
         ]
-        everything = self.docker.all_containers()
-        unlabeled = sum(1 for i in everything if not (i.get("Labels") or {}).get(c.LABEL_RUNNER))
+        # 不是 runner-agent 建的容器只数一数，不做任何操作。其中带 MCP 管理器标签的
+        # （工作台另行部署、另行管理的）单独计数，不算进“不是工作台建的容器”
+        unlabeled = managers = 0
+        for item in self.docker.all_containers():
+            labels = item.get("Labels") or {}
+            if labels.get(c.LABEL_RUNNER):
+                continue
+            if c.LABEL_MCP_MANAGER in labels:
+                managers += 1
+            else:
+                unlabeled += 1
         stat = os.statvfs(self.config.disk_path)
         if stat.f_blocks and 1 - stat.f_bavail / stat.f_blocks > DISK_EMERGENCY:
             self._disk_emergency(labeled)
@@ -914,6 +923,7 @@ class Agent:
             "volumes": volumes,
             "images": images,
             "unlabeled_containers": unlabeled,
+            "mcp_manager_containers": managers,
             "egress": self.proxy.stats.drain(),
             "mem_bytes": mem_total,
             "mem_free_bytes": min(memory_before, mem_free),

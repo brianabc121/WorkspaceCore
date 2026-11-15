@@ -762,7 +762,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 页面在中转站管理的“兼容凭据”页签）：连接自己的 Key 不出现在密钥库里（列表、详情、修改、授权都当作不存在），
 新建 `kind=model_api_key` 返回 `422 VALIDATION_FAILED`（`details.field = kind`）。旧版兼容（导入、迁移记录、旧配置状态）已删除（T-0209）。
 
-## 大模型客户端（会话桥）模块 `llm_bridge`（T-0228、T-0230；docs/v2/LLM_BRIDGE_PLAN.md）
+## 大模型客户端（会话桥）模块 `llm_bridge`（T-0228、T-0230 ~ T-0234；docs/v2/LLM_BRIDGE_PLAN.md）
 
 页面叫“大模型客户端管理”；页面上的一个 MCP 管理器就是这里的一座会话桥（`bridge`）。
 
@@ -802,6 +802,88 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST .../chat/sessions/{session_id}/archive` | 归档（之后不能再发送） |
 
 写操作在这座桥停用时 `409 BRIDGE_DISABLED`；桥没有及时回应、结果未知时 `504 EXTERNAL_TIMEOUT`；会话桥自己的拒绝（未登录、限额、密钥拦截等）按原样带着说明返回。
+
+**多模型同问**（T-0232；都在 `/api/v1/llm_bridge/chat/groups` 下，owner / admin 可用，写操作带 CSRF）。一组同问可以跨 MCP 管理器，分组登记在工作台；
+每个成员是某座桥上的一个普通会话，内容和进度用上面的单会话接口读。
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../chat/groups?status` | 各组同问（按最后活动排序）：`title`、`status`（`active` / `archived`）、`owner`、`owner_kind`（`me` / `user`）、`members`；`status` 默认 `active` |
+| `POST .../chat/groups` | 把同一个问题同时发给几个模型：`text`、`request_id`（同一个人用同一个再建一次，得到的是同一组）、可选 `title`、`targets`（2 ~ 6 个：`bridge_id`、`platform`、`mode`、可选 `model`、`effort`、`environment`）。`201` 返回 `group` 和每个目标的 `results`（`turn` 或 `error`）。某个目标失败只记在它自己的成员里；一个会话都没建成时 `409`；管理器停用时 `409 BRIDGE_DISABLED` |
+| `GET .../chat/groups/{group_id}` | 一组和它的成员：`position`、`bridge_id`（登记被删除后为空）、`bridge_name`、`bridge_enabled`、`platform`、`mode`、`model`、`session_id`（没建成时为空）、`error` |
+| `POST .../chat/groups/{group_id}/messages` | 向每个成员继续发：`text`、`request_id`、`takeover`；返回每个成员的 `turn` 或 `error`（管理器停用、登记被删除、会话没建成的这次不发）。别人建的一组要 `takeover=true`，否则 `409 TAKEOVER_REQUIRED`；已归档的一组 `409` |
+| `POST .../chat/groups/{group_id}/archive` | 归档这一组：只是不再并排显示，每个模型的会话不受影响 |
+
+**限流与消息队列**（T-0236，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 2、4 节）。
+
+- 设置（`PUT .../bridges/{id}/settings`）：`concurrency` 的含义改成“每个**平台**同时进行的会话数”（默认 3，ChatGPT / Codex / Claude / WorkBuddy 各算各的；超过的排队等名额，不拒绝）；新增 `min_start_interval_seconds`（同一个平台两次开始之间至少隔几秒，默认 2，0–60）。
+- 状态（`GET .../bridges/{id}/status`）多一个 `load`：每个平台的 `running`（进行中的会话数）、`waiting`（在等的会话数）、`limit`。
+- 会话在处理时再发的消息进这个会话的队列（`status=queued`），不打断正在处理的；队列持久化，管理器重启后继续。
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../chat/sessions/{session_id}/queue` | 这个会话正在处理的那一条（`running`）和排队中的各条（`queued`，按将要处理的顺序）：`turn_id`、`text`、`by`、`mine`、`queued_at` |
+| `PATCH .../chat/turns/{turn_id}` | 改排队中消息的内容：`text`。已经开始处理的 `409 CONFLICT` |
+| `POST .../chat/turns/{turn_id}/move` | `to`：`first` / `last`，调到队首或队尾。已经开始处理的 `409` |
+| `POST .../chat/turns/{turn_id}/cancel` | （已有）取消排队中或进行中的一条 |
+
+智能体多一个只读工具 `llm_bridge_queue`（`session_id`）：看自己能访问的会话的队列。改内容、调顺序只在聊天页（owner / admin）。
+
+**会话内容落库与附件**（T-0236 第二步，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 3 节）。
+
+- 每条提问、每段回答、每个过程事件（命令、改动的文件、读文件和搜索等工具调用、工具结果）都存在管理器的数据库里；工具结果超过 64 KB 截断并标记。会话内容（`GET .../chat/sessions/{session_id}`）从这些记录里拼出来。
+- 消息多两项：`attachments`（`id`、`name`、`media_type`、`size`、`direction`：`input` 人带上的 / `output` 模型产出的）、`imported`（官方程序里原有的内容）。过程的每一步多 `name`（工具名）、`truncated`、`error`、`exit_code`；`kind` 多了 `tool` / `tool_result` / `image` / `file`。
+- 官方程序里已有的会话（`origin=external`）第一次打开时向官方程序读一次全部内容存下来，之后读库；经工作台发的回合按回合存，不重复导入。
+- 发送（`POST .../chat/sessions/{session_id}/messages`）多一项 `attachments`：先上传得到的附件编号，最多 8 个；一个附件只能随一条消息发出去。图片直接交给模型；别的文件放进会话工作目录的 `attachments/` 下，并在给模型的提问末尾注明路径（存下来的提问仍是原话）。
+- 开发会话里模型改动、新建的文件（工作目录之内、单个不超过 20 MB、每回合最多 50 个）和模型画的图收成 `output` 附件。
+
+| 接口 | 说明 |
+|---|---|
+| `POST .../chat/sessions/{session_id}/attachments?name=` | 上传一个附件（admin）。请求体就是文件内容，单个最多 20 MB（超过 `413`）。图片（PNG / JPEG / GIF / WebP，核对文件头）在哪种会话里都能带；文本、代码、PDF、ZIP 只能在开发会话里带；别的类型、内容和扩展名对不上 `422` |
+| `DELETE .../chat/sessions/{session_id}/attachments/{attachment_id}` | 去掉一个上传了还没发出去的附件；已经发出去的 `409`。没发出去的附件过一天自动清掉 |
+| `GET .../chat/sessions/{session_id}/attachments/{attachment_id}` | 下载（admin）。只有四种图片内联显示，别的一律 `Content-Disposition: attachment`；带 `X-Content-Type-Options: nosniff` 和沙箱 CSP |
+| `POST .../chat/sessions/{session_id}/reimport` | 官方程序里已有的会话重新导入一次内容；不是这类会话 `409` |
+
+智能体的工具没有变化：`llm_bridge_send` 不带附件（智能体没有上传的途径）。
+
+**插入消息**（T-0236 第三步，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 5 节）。
+
+- 发送（`POST .../chat/sessions/{session_id}/messages`）多一项 `mode`：`queue`（默认，排队、不打断）/ `insert`。智能体的 `llm_bridge_send` 同样多 `mode`。
+- 会话正在处理别的消息、`mode=insert` 时：先试着把消息送进正在处理的回合（Codex 的 `turn/steer`）；平台在 10 秒内没有确认收下、或带了附件，就**中断正在处理的回合，把这条消息和“接着刚才没做完的事继续”合成一个新回合**，排在这个会话队列的最前面。Claude / WorkBuddy 目前一律走后一种。
+- 返回多一项 `delivered`：`inserted`（进了正在处理的回合，`turn_id` 是那个回合，没有新回合）/ `merged`（中断后合并重发）/ `queued` / `started`。
+- 被插入打断的回合 `status=interrupted`、`failure.kind=superseded`：不是失败，不参与额度的自动续跑。
+- 会话内容里，提问多一项 `delivery`：`turn` / `inserted` / `merged`。插进去的消息排在它进入的那一回合的提问之后、回答之前。存下来的提问是人发的原话；“接着刚才的做”那一句只给模型看。
+- 插进去的消息同样计入每小时的发送次数；同一个 `request_id` 重试不会插两次。
+
+**额度与额度用完后的自动继续**（T-0237，`docs/v2/LLM_BRIDGE_QUOTA_PLAN.md`）。
+
+- 平台给的是**已用百分比和重置时间**，不是剩余 token 数。Codex 可以随时查；Claude / WorkBuddy 只在跑回合时顺带报出来，接口给的是最近一次看到的。
+- 状态（`GET .../bridges/{id}/status`）多一个 `quota`：每个平台的 `windows`（`kind`：`five_hour` / `weekly` / 平台给的别的名字；`used_percent`、`resets_at`、`reset_passed`、`status`：`ok` / `warning` / `exceeded`、`plan`、`observed_at`）、`can_refresh`、`paused_until`、`pause_estimated`、`waiting_resume`、`tokens_5h`（最近 5 小时经这个管理器用掉的 token，管理器自己记的）。
+- 设置多三项：`auto_resume`（默认开）、`auto_resume_max`（同一次中断最多自动续几次，默认 3，1–10）、`resume_text`（自动继续时发的那句话，默认“继续意外中断的任务”，1–200 字）。
+- 回合多一个状态 `interrupted`（`failure.kind = quota_exceeded`）：额度用完被打断，不算失败。这样的回合带 `resume`：`state`（`pending` 到点自动继续 / `forced` 有人点了现在就试 / `done` 已经续跑 / `cancelled` 不要自动继续 / `skipped` / `exhausted` 次数用完）、`at`、`attempt`、`resumed_by`。平台暂停期间新发的消息排队，不去撞限额。
+- 到重置时间后，管理器替人往每个被打断的会话里发 `resume_text`，排在这个会话队列的最前面；这一条的 `by` 是“系统（自动续跑）”。
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../bridges/{bridge_id}/quota?refresh=` | 各平台的额度（admin）。`refresh=true` 时向能随时查的平台实查一次 |
+| `POST .../chat/turns/{turn_id}/resume` | 被额度打断的回合，现在就试着继续（admin）。不是被额度打断的、已经续跑过的 `409` |
+| `DELETE .../chat/turns/{turn_id}/resume` | 不要自动继续（admin） |
+
+**一键部署**（T-0234，`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md`；都在 `/api/v1/llm_bridge` 下，写操作带 CSRF、只有 owner 能做，读 owner / admin）。
+MCP 管理器部署到“智能体服务器”或“容器服务器”登记的服务器上；任务在后台进行，进度用任务接口读。
+部署 MCP 管理器不看这两类服务器自己的准入（资源、配额、正在进行的任务）；管理器的容器不受那两个页面的管理程序影响。
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../deployments/targets` | 可以部署到哪些服务器：`kind`（`agent_server` / `runner_host`）、`id`、`name`、`host`、`deployable`、`block_reason` / `block_message`、`may_need_password`（登录账号不是 root、也不在 docker 组）、`managers`（已有几个管理器）；`available=false` 表示这个工作台没带构建文件。只读登记，不连服务器 |
+| `GET .../deployments`，`GET .../deployments/{job_id}` | 最近的任务；单个任务带脱敏后的 `log`。`kind`：`deploy` / `redeploy` / `restart` / `uninstall`；`status`：`running` / `succeeded` / `failed` / `interrupted`；`mode`：`same_host`（加入工作台的内部网络）/ `tunnel`（只监听服务器本机，工作台经 SSH 通道访问）；`steps` 是每一步的 `key`、`status`、`detail` |
+| `POST .../deployments` | `target_kind`、`target_id`、`name`、`platforms`、`request_id`（幂等）、可选 `sudo_password`。202 返回任务。登录账号用 Docker 要 sudo 密码却没带时，任务在“检查”一步失败（`error_code=sudo_password_required`，密码不对是 `sudo_denied`）。`409 DEPLOY_BLOCKED`：工作台现在登录不上这台服务器；`409 DEPLOY_BUSY`：这台服务器上有 MCP 管理器的任务在进行；`409 NAME_TAKEN`；`503 DEPLOY_UNAVAILABLE` |
+| `POST .../bridges/{id}/redeploy`、`.../restart`、`.../uninstall` | `request_id`、可选 `sudo_password`；卸载另有 `remove_data`（连数据卷一起删）、`force`（不连服务器，只删除登记；返回的任务写明服务器上还留着什么）。`409 NOT_DEPLOYED_HERE`：不是工作台部署的；`409 SERVER_REMOVED`：那台服务器已从工作台移除（只能 `force`）；`409 SUDO_PASSWORD_REQUIRED`：要带登录密码 |
+| `GET .../installs?target_kind&target_id` | 某台服务器上的 MCP 管理器（两个服务器页面的入口用）：`bridge_id`、`name`、`enabled`、`reachable`（停用的不探测，为空）、`version`、`platforms`、`logged_in`、`deployment` |
+
+`GET .../bridges` 的每一项多一个 `deployment`（手动添加的为空）：`target_kind`、`target_id`（服务器已移除时为空）、`server_name`、`mode`、`port`、
+`needs_sudo`、`outdated`（工作台带的构建文件比部署的新）、`deployed_at`。工作台部署的管理器不能 `PATCH` 地址和令牌、不能直接 `DELETE`：`409 BRIDGE_MANAGED`。
+`sudo_password` 只在那一个任务的内存里，不保存、不进日志和审计。
 
 **智能体工具**（只列给打开了权限的实例；每个工具都有可选参数 `bridge`，实例能用多个 MCP 管理器时必填，`llm_bridge_status` 除外：不填时返回 `data.bridges`，列出它能用的每一个和各自控制的平台、登录情况；连不上的标 `reachable=false`）：
 

@@ -11,17 +11,33 @@ import { bridgeError, type BridgeStatus, type Platform } from '../api'
 export type ChatSession = Schema['LlmChatSessionOut']
 export type ChatMessage = Schema['LlmChatMessageOut']
 export type ChatStep = Schema['LlmChatStepOut']
+export type ChatAttachment = Schema['LlmChatAttachmentOut']
+/** 附件的上限（和后端一致）：一条消息最多几个、单个多大 */
+export const ATTACHMENTS = { max: 8, bytes: 20 * 1024 * 1024 }
+export const IMAGE_ACCEPT = 'image/png,image/jpeg,image/gif,image/webp'
+export const isImage = (a: { media_type: string }) => IMAGE_ACCEPT.split(',').includes(a.media_type)
+export const fileSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`)
 export type ChatConversation = Schema['LlmChatConversationOut']
 export type ChatEvent = Schema['LlmChatEventOut']
 export type ChatOptions = Schema['LlmChatOptionsOut']
 export type ChatCreateBody = Schema['LlmChatCreateIn']
 export type ChatTurn = Schema['LlmChatTurnOut']
+export type ChatQueue = Schema['LlmChatQueueOut']
+export type ChatQueueItem = Schema['LlmChatQueueItem']
 export type SessionFilter = { q: string; platform: Platform | null; status: 'active' | 'archived' }
+export type ChatGroup = Schema['LlmChatGroupOut']
+export type ChatGroupMember = Schema['LlmChatGroupMemberOut']
+export type ChatTarget = Schema['LlmChatTargetIn']
+export type ChatGroupResult = Schema['LlmChatGroupResult']
+/** 整组刚发出的那一条在某一栏的结果：回合，或者没发出去的原因 */
+export interface ColumnSend { id: number; text: string; turn: ChatTurn | null; error: string }
+/** 一组同问最少、最多几个目标（后端同样校验） */
+export const GROUP_TARGETS = { min: 2, max: 6 }
 
 export const EVENT_WAIT_SECONDS = 20
 /** 回合已经结束的事件：收到后重新读会话内容 */
-export const TERMINAL_EVENTS = ['completed', 'failed', 'cancelled', 'unknown']
-export const TURN_STATUS: Record<string, string> = { queued: '排队中', running: '正在回答', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '结果未知' }
+export const TERMINAL_EVENTS = ['completed', 'failed', 'cancelled', 'unknown', 'interrupted']
+export const TURN_STATUS: Record<string, string> = { queued: '排队中', running: '正在回答', completed: '已完成', failed: '失败', cancelled: '已停止', unknown: '结果未知', interrupted: '额度用完，已中断' }
 /** 发送用的幂等号。页面不是 HTTPS 时浏览器不给 randomUUID，退回到随机字节 */
 export function newRequestId() {
   if (typeof crypto.randomUUID === 'function') return `web-${crypto.randomUUID()}`
@@ -53,6 +69,33 @@ export function useLlmChat(scope: string) {
       queryKey: computed(() => key(bridge.value, 'options', platform.value, mode.value)), enabled: computed(() => active() && !!bridge.value && !!platform.value),
       queryFn: async ({ signal }) => dataOf(await auth.slowApi.GET('/api/v1/llm_bridge/bridges/{bridge_id}/chat/options', { params: { ...at(bridge.value!), query: { platform: platform.value!, mode: mode.value } }, signal })),
     }),
+    // 多模型同问（docs/v2/LLM_CHAT_PLAN.md 第 4.3 节）：分组登记在工作台，可以跨管理器
+    useGroups: (status: Ref<'active' | 'archived'>, wanted: Ref<boolean>) => useQuery({
+      queryKey: computed(() => key('groups', 'list', status.value)), enabled: computed(() => active() && wanted.value), refetchInterval: 30000,
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/chat/groups', { params: { header, query: { status: status.value } }, signal })).groups,
+    }),
+    useGroup: (id: Ref<string | null>) => useQuery({
+      queryKey: computed(() => key('groups', 'one', id.value)), enabled: computed(() => active() && !!id.value),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/chat/groups/{group_id}', { params: { header, path: { group_id: id.value! } }, signal })),
+    }),
+    async createGroup(body: Schema['LlmChatGroupCreateIn']) {
+      const out = dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/chat/groups', { params: { header }, body }))
+      cache.setQueryData(key('groups', 'one', out.group.id), out.group)
+      await cache.invalidateQueries({ queryKey: key('groups', 'list') })
+      return out
+    },
+    async sendGroup(id: string, body: Schema['LlmChatGroupSendIn']) {
+      const out = dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/chat/groups/{group_id}/messages', { params: { header, path: { group_id: id } }, body }))
+      cache.setQueryData(key('groups', 'one', id), out.group)
+      void cache.invalidateQueries({ queryKey: key('groups', 'list') })
+      return out
+    },
+    async archiveGroup(id: string) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/chat/groups/{group_id}/archive', { params: { header, path: { group_id: id } } }))
+      cache.setQueryData(key('groups', 'one', id), out)
+      await cache.invalidateQueries({ queryKey: key('groups', 'list') })
+      return out
+    },
     invalidateSessions: (bridge: string) => cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }),
     invalidateConversation: (bridge: string, session: string) => cache.invalidateQueries({ queryKey: key(bridge, 'session', session) }),
 
@@ -71,8 +114,60 @@ export function useLlmChat(scope: string) {
       await cache.invalidateQueries({ queryKey: key(bridge, 'sessions') })
       return out
     },
-    async send(bridge: string, session: string, body: Schema['LlmChatSendIn']) {
-      return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/messages', { params: sessionAt(bridge, session), body }))
+    // attachments、mode 没有就不传（生成的类型把有默认值的字段也标成必填）
+    async send(bridge: string, session: string, body: Omit<Schema['LlmChatSendIn'], 'attachments' | 'mode'> & { attachments?: string[]; mode?: Schema['LlmChatSendIn']['mode'] }) {
+      return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/messages', { params: sessionAt(bridge, session), body: body as Schema['LlmChatSendIn'] }))
+    },
+    // ---- 附件与旧会话的导入（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 3 节）----
+    // 上传一个要随下一条消息发出去的图片 / 文件：请求体就是文件内容
+    async upload(bridge: string, session: string, file: File) {
+      return dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/attachments', {
+        params: { ...sessionAt(bridge, session), query: { name: file.name } }, body: file as unknown as string, bodySerializer: (raw: unknown) => raw as File, headers: { 'Content-Type': 'application/octet-stream' },
+      }))
+    },
+    async discardUpload(bridge: string, session: string, attachment: string) {
+      await auth.api.DELETE('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/attachments/{attachment_id}', { params: { header, path: { bridge_id: bridge, session_id: session, attachment_id: attachment } } })
+    },
+    // 附件的内容：要带工作空间请求头，所以不能直接当图片地址或链接用
+    async attachmentBlob(bridge: string, session: string, attachment: string, signal?: AbortSignal): Promise<Blob> {
+      const path = `/api/v1/llm_bridge/bridges/${encodeURIComponent(bridge)}/chat/sessions/${encodeURIComponent(session)}/attachments/${encodeURIComponent(attachment)}`
+      let response: Response
+      try { response = await fetch(new Request(`${window.location.origin}${path}`, { credentials: 'same-origin', headers: header, signal })) }
+      catch { throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败') }
+      if (!response.ok) {
+        let detail: Partial<Schema['ErrorBody']> = {}
+        try { detail = ((await response.json()) as Schema['ErrorResponse']).error ?? {} } catch { /* 网关返回的不是 JSON */ }
+        throw new ApiError(response.status, detail.code ?? 'HTTP_ERROR', detail.message ?? '请求失败', detail.request_id ?? null)
+      }
+      return response.blob()
+    },
+    async reimport(bridge: string, session: string) {
+      const out = dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/reimport', { params: sessionAt(bridge, session) }))
+      cache.setQueryData(key(bridge, 'session', session), out)
+      return out
+    },
+    // 会话的消息队列（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 4 节）：有回合在跑时才读，跑着的时候每 5 秒看一次
+    useQueue: (bridge: Ref<string | null>, session: Ref<string | null>, busy: Ref<boolean>) => useQuery({
+      queryKey: computed(() => key(bridge.value, 'queue', session.value)), enabled: computed(() => active() && !!bridge.value && !!session.value && busy.value),
+      refetchInterval: 5000,
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/queue', { params: sessionAt(bridge.value!, session.value!), signal })),
+    }),
+    async editQueued(bridge: string, turn: string, text: string) {
+      const out = dataOf(await auth.api.PATCH('/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}', { params: { header, path: { bridge_id: bridge, turn_id: turn } }, body: { text } }))
+      cache.setQueryData(key(bridge, 'queue', out.session_id), out)
+      return out
+    },
+    async moveQueued(bridge: string, turn: string, to: 'first' | 'last') {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/move', { params: { header, path: { bridge_id: bridge, turn_id: turn } }, body: { to } }))
+      cache.setQueryData(key(bridge, 'queue', out.session_id), out)
+      return out
+    },
+    invalidateQueue: (bridge: string, session: string) => cache.invalidateQueries({ queryKey: key(bridge, 'queue', session) }),
+    // 被额度打断的回合：现在就试着继续（now），或者不要自动继续
+    async resume(bridge: string, turn: string, now: boolean) {
+      const params = { header, path: { bridge_id: bridge, turn_id: turn } }
+      const path = '/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/resume'
+      return dataOf(now ? await auth.api.POST(path, { params }) : await auth.api.DELETE(path, { params }))
     },
     async cancel(bridge: string, turn: string) {
       return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/cancel', { params: { header, path: { bridge_id: bridge, turn_id: turn } } }))
@@ -120,6 +215,9 @@ export function ownerText(session: Pick<ChatSession, 'owner_kind' | 'owner'>): s
   if (session.owner_kind === 'external') return '官方程序里已有'
   return session.owner || (session.owner_kind === 'agent' ? '智能体' : '别的管理员')
 }
+
+/** 列表和各处用的平台标记（两个字母以内） */
+export const PLATFORM_MARK: Record<string, string> = { chatgpt: 'G', codex: 'Cx', claude: 'Cl', workbuddy: 'W' }
 
 /** 把回答按三个反引号拆成普通文字和代码块：只做这一种格式，其余按纯文字显示（不渲染 HTML） */
 export function splitText(text: string): { code: boolean; text: string }[] {

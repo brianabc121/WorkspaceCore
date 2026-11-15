@@ -274,9 +274,52 @@ describe('通过 SSH 部署容器服务器', () => {
     await fireEvent.click(within(deploy).getByRole('button', { name: '开始部署' }))
     expect(await within(panel).findByRole('region', { name: '部署进度' })).toHaveTextContent('运行安装脚本（Docker、gVisor、runner-agent）')
     const install = requests.find(r => path(r) === '/api/v1/runner/hosts/host-1/ssh/install')!
-    expect(await install.clone().json()).toEqual({ version: 2, password: 'server pw' })
+    expect(await install.clone().json()).toEqual({ version: 2, password: 'server pw', allow_docker_restart: false })
     const put = requests.find(r => path(r) === '/api/v1/runner/hosts/host-1/ssh' && r.method === 'PUT')!
     expect(await put.clone().json()).toEqual({ host: '203.0.113.20', port: 22, username: 'deploy' })
+  })
+
+  // T-0234：启用 gVisor 要重启 Docker、而服务器上有 MCP 管理器在运行时，任务停下；确认后才带上允许
+  const restartNeeded = '启用 gVisor 需要重启 Docker，这台服务器上有 2 个 MCP 管理器在运行（重启会让它们短暂中断，之后自己恢复）：确认后重新部署并勾选“允许重启 Docker”'
+  const deployed = (failed: Partial<Schema['AgentSshJobOut']>) => {
+    let state: Schema['AgentSshState'] = { target: target({ host_key_confirmed: true, client_key_installed: true, version: 3 }), job: job({ status: 'failed', finished_at: at, ...failed }), warning: null }
+    return setup(r => {
+      const p = path(r)
+      if (p === '/api/v1/runner/hosts/host-1/ssh' && r.method === 'GET') return Response.json(state)
+      if (p === '/api/v1/runner/hosts/host-1/ssh/install') { state = { ...state, job: job({ id: 'job-2' }) }; return Response.json(state, { status: 202 }) }
+      return undefined
+    }, { role: 'owner' })
+  }
+
+  it('explains why the deploy stopped at gVisor and sends the permission to restart Docker only when ticked', async () => {
+    const requests = deployed({ error_code: 'gvisor_needs_docker_restart', error_message: restartNeeded })
+    await openApp('/runner?tab=settings')
+    const panel = await screen.findByRole('region', { name: '通过 SSH 部署' })
+    expect(await within(panel).findByRole('alert')).toHaveTextContent(`${restartNeeded}（gvisor_needs_docker_restart）`)
+    const deploy = within(panel).getByRole('form', { name: '部署容器服务器' })
+    const allow = within(deploy).getByLabelText('允许重启 Docker')
+    expect(allow).not.toBeChecked()
+    expect(within(deploy).getByText(/勾选后重新部署会重启 Docker.*MCP 管理器和其他容器短暂中断，之后自己恢复/)).toBeVisible()
+    await fireEvent.update(within(deploy).getByLabelText(/^登录密码/), 'server pw')
+    await fireEvent.click(allow)
+    await fireEvent.click(within(deploy).getByRole('button', { name: '开始部署' }))
+    await within(panel).findByText('已开始部署：下面显示每一步的进度')
+    const install = requests.find(r => path(r) === '/api/v1/runner/hosts/host-1/ssh/install')!
+    expect(await install.clone().json()).toEqual({ version: 3, password: 'server pw', allow_docker_restart: true })
+    // 新任务在跑：这一次的允许已经用掉，勾选项不再显示
+    await vi.waitFor(() => expect(within(panel).queryByLabelText('允许重启 Docker')).not.toBeInTheDocument())
+  })
+
+  it('does not offer to restart Docker after any other failure', async () => {
+    const requests = deployed({ error_code: 'install_failed', error_message: '安装脚本没有成功，详见日志' })
+    await openApp('/runner?tab=settings')
+    const panel = await screen.findByRole('region', { name: '通过 SSH 部署' })
+    const deploy = await within(panel).findByRole('form', { name: '部署容器服务器' })
+    expect(within(panel).queryByLabelText('允许重启 Docker')).not.toBeInTheDocument()
+    await fireEvent.click(within(deploy).getByRole('button', { name: '开始部署' }))
+    await within(panel).findByText('已开始部署：下面显示每一步的进度')
+    const install = requests.find(r => path(r) === '/api/v1/runner/hosts/host-1/ssh/install')!
+    expect(await install.clone().json()).toEqual({ version: 3, allow_docker_restart: false })
   })
 
   it('is owner only', async () => {
