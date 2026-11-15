@@ -495,6 +495,14 @@ class Store:
             (after, limit),
         )
 
+    def oldest_turn_since(self, caller_id: str, since: float) -> float | None:
+        """这个调用方在 since 之后最早的一次发送是什么时候（算限额什么时候松开）。"""
+        row = self._one(
+            "SELECT MIN(queued_at) AS at FROM turns WHERE caller_id = ? AND queued_at >= ?",
+            (caller_id, since),
+        )
+        return float(row["at"]) if row and row["at"] else None
+
     def session_tokens(self, session_id: str) -> int:
         """这个会话累计用掉的 token（各回合摘要里的用量相加）。"""
         total = 0

@@ -705,6 +705,150 @@ async def test_provenance_and_session_index(rig: Rig) -> None:
 
 
 @pytest.mark.integration
+async def test_agent_gets_woken_sized_results_and_clear_errors(rig: Rig) -> None:
+    """智能体这条链路（T-0250）：一步新建并发送、结束后叫醒、结果默认精简、错误说明能不能重试、
+    按编号读产出的文件、状态里不带账号是谁。"""
+    from sqlalchemy import select
+
+    from app.models.im import AgentWakeup
+    from app.modules.llm_bridge import watches
+
+    env = rig.env
+    agent = await rig.agent("openclaw-1", can_write=True)
+
+    async def wakeups() -> list[str]:
+        async with env.sync.sessions() as db:
+            rows = await db.scalars(select(AgentWakeup).where(AgentWakeup.source == "llm_bridge"))
+            return [w.prompt for w in rows]
+
+    # 一步完成：没给会话就先新建一个；带 notify、又没等到结果 → 回合结束后被叫醒
+    sent = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {
+                "platform": "claude",
+                "text": "sleep:0.4",
+                "request_id": "n1",
+                "wait_seconds": 0,
+                "notify": True,
+            },
+        )
+    )
+    assert sent["created_session"] is True and sent["will_notify"] is True
+    assert sent["status"] in ("queued", "running")
+    session, turn = sent["session_id"], sent["turn_id"]
+    assert await watches.watch_tick({"sync": env.sync}) == 0 and await wakeups() == []
+    done = ok(await call(env, agent, "llm_bridge_turn_get", {"turn_id": turn, "wait_seconds": 10}))
+    assert done["status"] == "completed"
+    assert await watches.watch_tick({"sync": env.sync}) == 1
+    (prompt,) = await wakeups()
+    # 提示词里只有回合编号和状态，没有模型写的内容
+    assert f"{turn}（completed）" in prompt and "sleep:0.4" not in prompt
+    assert await watches.watch_tick({"sync": env.sync}) == 0  # 不重复叫
+    # 同一个幂等号重发：还是那个会话那个回合，不会再建一个
+    again = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {"platform": "claude", "text": "sleep:0.4", "request_id": "n1", "wait_seconds": 0},
+        )
+    )
+    assert (again["session_id"], again["turn_id"]) == (session, turn)
+    # 等到了结果的不用叫
+    quick = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {"session_id": session, "text": "很快", "request_id": "n2", "notify": True},
+        )
+    )
+    assert quick["status"] == "completed" and quick["will_notify"] is False
+    # 既填会话又填新建用的参数：说清楚
+    mixed = tool_error(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {"session_id": session, "platform": "claude", "text": "x", "request_id": "n3"},
+        )
+    )
+    assert mixed["code"] == "VALIDATION_FAILED" and "platform" in mixed["message"]
+
+    # 结果默认精简：回答太长时截断，并说明怎么接着取
+    long = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {"session_id": session, "text": "长" * 600, "request_id": "n4", "max_chars": 200},
+        )
+    )
+    assert len(long["result"]) == 200 and long["result_next_offset"] == 200
+    assert long["result_chars"] > 600 and "result_offset=200" in long["hint"]
+    rest = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_turn_get",
+            {"turn_id": long["turn_id"], "result_offset": 200, "max_chars": 200_000},
+        )
+    )
+    assert long["result"] + rest["result"] == f"[fake-1] {'长' * 600}"
+    assert rest["result_next_offset"] is None
+    # 过程要了才给
+    assert "steps" not in rest
+    detailed = ok(
+        await call(
+            env, agent, "llm_bridge_turn_get", {"turn_id": long["turn_id"], "detail": "steps"}
+        )
+    )
+    assert isinstance(detailed["steps"], list)
+    # 读会话：默认最新的一页，带总数；每条太长会截断
+    page = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_session_get",
+            {"session_id": session, "limit": 2, "max_chars": 200},
+        )
+    )
+    assert page["total"] == 6 and page["next_offset"] == 2
+    assert [m["role"] for m in page["messages"]] == ["user", "assistant"]
+    assert (
+        page["messages"][0]["text_truncated"] is True and page["messages"][0]["text_chars"] == 600
+    )
+
+    # 错误说明能不能重试、多久以后
+    limit = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"send_per_hour": 1})
+    assert limit.status_code == 200, limit.text
+    limited = tool_error(
+        await call(
+            env, agent, "llm_bridge_send", {"session_id": session, "text": "x", "request_id": "n5"}
+        )
+    )
+    assert limited["code"] == "RATE_LIMITED" and limited["retryable"] is True
+    assert 0 < limited["retry_after_seconds"] <= 3600
+    rig.down[0] = True
+    offline = tool_error(await call(env, agent, "llm_bridge_session_list", {}))
+    assert offline["code"] == "EXTERNAL_UNAVAILABLE" and offline["retryable"] is True
+    rig.down[0] = False
+    missing = tool_error(
+        await call(env, agent, "llm_bridge_turn_get", {"turn_id": "bt_" + "0" * 20})
+    )
+    assert missing["code"] == "NOT_FOUND" and missing["retryable"] is False
+
+    # 状态里只有用得上的：不带账号是谁、怎么登录的
+    overview = ok(await call(env, agent, "llm_bridge_status", {}))
+    account = overview["accounts"]["claude"]
+    assert account["state"] == "logged_in"
+    assert not {"identity", "method", "first_login_at", "detail"} & set(account)
+
+
+@pytest.mark.integration
 async def test_tool_failures_are_explicit(rig: Rig) -> None:
     env = rig.env
     token = await rig.agent("alpha", can_write=True)

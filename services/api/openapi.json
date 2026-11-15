@@ -4382,7 +4382,8 @@
               "admin",
               "issue",
               "runner",
-              "news"
+              "news",
+              "llm_bridge"
             ],
             "title": "Source",
             "type": "string"
@@ -33576,7 +33577,8 @@
               "admin",
               "issue",
               "runner",
-              "news"
+              "news",
+              "llm_bridge"
             ],
             "title": "Source",
             "type": "string"

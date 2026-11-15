@@ -370,6 +370,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise BridgeError("NOT_FOUND", "没有这个调用方")
         return {"ok": True}
 
+    @app.post("/admin/turns/status")
+    async def admin_turns_status(request: Request, _: Admin) -> dict[str, Any]:
+        """这些回合现在怎样了（不含内容）：工作台在回合结束时据此叫醒发起的智能体。"""
+        body = await request.json()
+        ids = body.get("ids") if isinstance(body, dict) else None
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise BridgeError("VALIDATION_FAILED", "ids 要是回合编号的列表")
+        return engine_of(request).turns_status(ids)
+
     @app.get("/admin/index")
     async def admin_index(
         request: Request, _: Admin, after: int = 0, limit: int = 200

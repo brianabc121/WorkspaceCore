@@ -72,6 +72,7 @@ MAX_WAIT_SECONDS = 50
 DELTA_FLUSH_CHARS = 240
 DELTA_FLUSH_SECONDS = 0.12
 MAX_EVENT_WAIT_SECONDS = 25
+MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024  # 智能体按编号读产出文件：只读这么大以内的文字文件
 EVENT_POLL_SECONDS = 0.1  # 等新事件时多久看一次
 ACCOUNT_CACHE_SECONDS = 60
 _MODEL_RE = re.compile(r"^[\w.\-:\[\]/]{1,100}$")
@@ -99,10 +100,13 @@ EXTERNAL_PLATFORM = {
 
 
 class BridgeError(Exception):
-    def __init__(self, code: str, message: str) -> None:
+    """details：给调用方的补充（例如 retry_after_seconds），和 code、message 一起放在错误里。"""
+
+    def __init__(self, code: str, message: str, details: Row | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.details = details or {}
 
 
 def from_driver(error: DriverError) -> BridgeError:
@@ -729,13 +733,20 @@ class Engine:
         }
 
     async def get_session(
-        self, caller: Caller, session_id: str, *, limit: int = 50, offset: int = 0
+        self,
+        caller: Caller,
+        session_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        order: str = "oldest",
     ) -> Row:
         session = self._session(caller, session_id, metadata_only=True)
         view: Row = {
             "session": session_view(session, full=True),
             "messages": [],
             "next_offset": None,
+            "total": 0,
         }
         if session["caller_id"] != caller.id and not caller.can("takeover"):
             view["note"] = "不是你的会话：只能看到基本信息，没有读取内容的权限"
@@ -769,16 +780,27 @@ class Engine:
                         }
                     )
                 elif turn["status"] != "cancelled":
-                    messages.append(
-                        {
-                            "role": "status",
-                            "text": turn["status"],
-                            "at": turn["finished_at"],
-                            "turn_id": turn["id"],
-                        }
-                    )
-        view["messages"] = messages[offset : offset + limit]
-        view["next_offset"] = offset + limit if len(messages) > offset + limit else None
+                    note: Row = {
+                        "role": "status",
+                        "text": turn["status"],
+                        "at": turn["finished_at"],
+                        "turn_id": turn["id"],
+                    }
+                    if turn["status"] in ("failed", "unknown", "interrupted"):
+                        # 没做完的回合：说明原因和接着做的是哪一回合，不只给一个状态
+                        note["failure"] = self._failure(turn, session)
+                        nxt = turn.get("superseded_by") or turn.get("resumed_by")
+                        if nxt:
+                            note["next_turn_id"] = nxt
+                    messages.append(note)
+        total = len(messages)
+        view["total"] = total
+        if order == "newest":  # 从最新的开始翻页；页内仍按时间先后
+            end = max(0, total - offset)
+            view["messages"] = messages[max(0, end - limit) : end]
+        else:
+            view["messages"] = messages[offset : offset + limit]
+        view["next_offset"] = offset + limit if total > offset + limit else None
         return view
 
     async def _archive(self, session: Row, *, remote: bool) -> None:
@@ -847,7 +869,14 @@ class Engine:
         if sent + self.store.count_inserted_since(caller.id, hour_ago) >= self.setting(
             "send_per_hour"
         ):
-            raise BridgeError("RATE_LIMITED", "这个调用方本小时的发送次数已到上限")
+            # 最早的那一次满一小时后就又能发了
+            oldest = self.store.oldest_turn_since(caller.id, hour_ago)
+            retry = max(1, round((oldest or time.time()) + 3600 - time.time()))
+            raise BridgeError(
+                "RATE_LIMITED",
+                f"这个调用方本小时的发送次数已到上限，大约 {retry // 60 + 1} 分钟后可以再发",
+                {"retryable": True, "retry_after_seconds": retry},
+            )
         self._require_platform(session["platform"])
         await self.require_ready(session["slot"])
         attached = self._pending_attachments(session, attachments or [])
@@ -1123,12 +1152,72 @@ class Engine:
             assert turn is not None  # noqa: S101
         return self.turn_view(turn)
 
-    async def get_turn(self, caller: Caller, turn_id: str, wait_seconds: float = 0) -> Row:
+    async def get_turn(
+        self, caller: Caller, turn_id: str, wait_seconds: float = 0, detail: str = "summary"
+    ) -> Row:
         turn = self.store.get_turn(turn_id)
         if turn is None:
             raise BridgeError("NOT_FOUND", "没有这个回合")
         self._session(caller, turn["session_id"])
-        return await self.wait_turn(turn_id, wait_seconds)
+        view = await self.wait_turn(turn_id, wait_seconds)
+        if detail == "steps":  # 过程：中间说的话、命令、改动的文件、工具调用和结果
+            mine = [
+                m
+                for m in self.store.list_messages(turn["session_id"], imported=False)
+                if m["turn_id"] == turn_id
+            ]
+            view["steps"] = [step for step in (_step(m) for m in mine) if step]
+        return view
+
+    def turns_status(self, turn_ids: list[str]) -> Row:
+        """给工作台用：这些回合现在怎样了（不含内容）。回合结束时工作台据此叫醒发起的智能体。"""
+        out: Row = {}
+        for turn_id in turn_ids[:200]:
+            turn = self.store.get_turn(turn_id)
+            if turn is None:
+                out[turn_id] = {"status": "missing"}
+                continue
+            session = self.store.get_session(turn["session_id"]) or {}
+            item: Row = {
+                "status": turn["status"],
+                "session_id": turn["session_id"],
+                "platform": session.get("platform"),
+                "next_turn_id": turn.get("superseded_by") or turn.get("resumed_by"),
+            }
+            if turn["status"] == "interrupted":
+                item["kind"] = turn["error_kind"]
+                item["resume_state"] = turn["resume_state"]
+            elif turn["status"] in ("failed", "unknown"):
+                item["kind"] = turn["error_kind"]
+            out[turn_id] = item
+        return {"turns": out}
+
+    def file_text(
+        self, caller: Caller, session_id: str, file_id: str, offset: int, size: int
+    ) -> Row:
+        """按编号读一个回合产出的文字文件的一段。"""
+        self._session(caller, session_id)
+        row, path = self.attachment_file(session_id, file_id)
+        if row["direction"] != "output":
+            raise BridgeError("NOT_FOUND", "没有这个文件")
+        if row["size"] > MAX_TEXT_FILE_BYTES:
+            raise BridgeError("NOT_SUPPORTED", "文件太大，不能这样读")
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            raise BridgeError("NOT_SUPPORTED", "不是文字文件，读不了内容") from None
+        text = redact(text)
+        piece = text[offset : offset + size]
+        more = offset + len(piece) < len(text)
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "media_type": row["media_type"],
+            "size": row["size"],
+            "chars": len(text),
+            "text": piece,
+            "next_offset": offset + len(piece) if more else None,
+        }
 
     async def _cancel_turn(self, turn: Row, session: Row) -> None:
         if turn["status"] == "queued":
@@ -1970,6 +2059,21 @@ class Engine:
             for key in ("quota", "load"):
                 if isinstance(view.get(key), dict):
                     out[key] = {p: v for p, v in view[key].items() if caller.may_use(p)}
+        # 只留调用方用得上的：账号是谁、怎么登录的、什么套餐，智能体不需要知道
+        out["accounts"] = {
+            slot: {k: a[k] for k in ("slot", "label", "enabled", "state", "running") if k in a}
+            for slot, a in out["accounts"].items()
+        }
+        if isinstance(out.get("quota"), dict):
+            out["quota"] = {
+                platform: {
+                    **quota,
+                    "windows": [
+                        {k: v for k, v in w.items() if k != "plan"} for w in quota["windows"]
+                    ],
+                }
+                for platform, quota in out["quota"].items()
+            }
         return out
 
 

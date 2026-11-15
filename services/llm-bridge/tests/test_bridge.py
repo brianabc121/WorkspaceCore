@@ -484,6 +484,54 @@ async def test_deltas_stream_while_running_and_are_dropped_afterwards(bridge: Br
     assert "partial" not in reply and reply["timing"]["ran_seconds"] >= 0.5
 
 
+async def test_agent_reads_output_files_and_pages_from_the_newest(bridge: Bridge) -> None:
+    """按编号读回合产出的文字文件；读会话可以从最新的开始；没做完的回合说明原因（T-0250）。"""
+    made = await bridge.admin(
+        "POST",
+        "/admin/environments",
+        json={"platform": "fake", "mode": "dev", "name": "空", "sandbox": "exec"},
+    )
+    assert made.status_code in (200, 201), made.text
+    session = await bridge.tool(
+        "c1",
+        "llm_session_create",
+        {"platform": "fake", "mode": "dev", "environment": made.json()["id"]},
+    )
+    a = session["session_id"]
+    turn = await _send(bridge, "c1", a, "write:out/report.md", "r1")
+    (output,) = turn["outputs"]
+    assert output["name"].endswith("report.md")
+    got = await bridge.tool(
+        "c1", "llm_file_get", {"session_id": a, "file_id": output["id"], "max_chars": 4}
+    )
+    assert got["text"] == "gene" and got["next_offset"] == 4 and got["chars"] == len("generated\n")
+    rest = await bridge.tool(
+        "c1", "llm_file_get", {"session_id": a, "file_id": output["id"], "offset": 4}
+    )
+    assert rest["text"] == "rated\n" and rest["next_offset"] is None
+    # 别人读不了；不是这个会话的文件读不了
+    other = await bridge.tool("c2", "llm_file_get", {"session_id": a, "file_id": output["id"]})
+    assert other["error"]["code"] == "NOT_FOUND"
+    # 读会话：默认从最早的开始；newest 从最新的开始，页内仍按时间先后
+    await _send(bridge, "c1", a, "fail:invalid", "r2")
+    newest = await bridge.tool(
+        "c1", "llm_session_get", {"session_id": a, "limit": 2, "order": "newest"}
+    )
+    assert newest["total"] == 4 and newest["next_offset"] == 2
+    assert [m["role"] for m in newest["messages"]] == ["user", "status"]
+    assert newest["messages"][1]["failure"]["retryable"] is False
+    oldest = await bridge.tool("c1", "llm_session_get", {"session_id": a, "limit": 2})
+    assert [m["role"] for m in oldest["messages"]] == ["user", "assistant"]
+    # 给工作台的回合状态：不含内容
+    status = (
+        await bridge.admin("POST", "/admin/turns/status", json={"ids": [turn["turn_id"], "bt_x"]})
+    ).json()["turns"]
+    assert (
+        status[turn["turn_id"]]["status"] == "completed" and status["bt_x"]["status"] == "missing"
+    )
+    assert "generated" not in json.dumps(status)
+
+
 async def test_external_sessions(bridge: Bridge) -> None:
     from bridge.drivers.base import Message, NativeSession
 

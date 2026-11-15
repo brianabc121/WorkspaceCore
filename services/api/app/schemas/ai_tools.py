@@ -1127,7 +1127,7 @@ class ImRejectedReply(BaseModel):
 
 class WakeupItem(BaseModel):
     wakeup_id: UUID
-    source: Literal["agent", "admin", "issue", "runner", "news"] = Field(
+    source: Literal["agent", "admin", "issue", "runner", "news", "llm_bridge"] = Field(
         description="agent 是你自己安排的，admin 是管理员建的，"
         "issue 是 Issue 有新动态时工作台安排的，runner 是运行环境的命令有结果时工作台安排的，"
         "news 是到了写每日早报的时间（新闻早报方案 B）"

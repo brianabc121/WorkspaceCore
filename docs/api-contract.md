@@ -932,6 +932,15 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 - 执行记录（`GET /api/v1/ai/tool-executions`）里，`llm_bridge_*` 写工具成功时 `arguments.result` 带 `bridge_id`、`session_id`、`turn_id`：能从这条记录找到会话的那一回合。
 - **会话索引**：`GET /api/v1/llm_bridge/sessions`（admin）——所有 MCP 管理器上的会话，按最后活动倒序；`bridge_id`、`owner_kind`（`agent` / `user` / `external`）筛选，`limit` / `offset` 翻页，`sync=true` 先同步再读（连不上的管理器列在 `sync_failed`）。每条有 `bridge_id` / `bridge_name`、`session_id`、平台、用法、模型、`title`、`status`、`owner_kind` / `owner_id` / `owner`、`source`、`busy`、`turns_total` / `turns_failed` / `turns_interrupted`、`tokens`、三个时间。**不含提问和回答**。数据在工作台的 `llm_bridge_sessions` 表里，后台每分钟向每个启用的管理器取一次“变更序号之后变了的会话”（管理器的 `GET /admin/index?after=`）。
 
+**智能体这条链路的改进**（T-0250，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.1）：
+
+- **结束后叫我**：`llm_bridge_send` 多 `notify`。带上它、回合又没在 `wait_seconds` 内做完时，结果里 `will_notify: true`；回合结束（完成、失败、结果未知、取消，或被打断后没有回合接着做）后工作台给这个实例排一次唤醒（`agent_wakeups.source = llm_bridge`）。提示词里只有回合编号和状态，没有模型写的内容，结果要用 `llm_bridge_turn_get` 取。被打断后有回合接着做的（插入的消息、额度恢复后的续跑）等接着做的那一回合结束才叫。至少叫一次；后台每 15 秒看一次，管理器连不上时下次再看。轮询照旧能用。
+- **一步发送**：`llm_bridge_send` 不填 `session_id` 时先新建会话再发——填 `platform`，可选 `session_mode`（`chat` 默认 / `dev`）、`model`、`environment`、`title`；结果里 `created_session: true`。同一个 `request_id` 重试得到同一个会话、同一个回合。会话建好但消息没发出去时，错误里带 `session_id`。
+- **结果默认精简**：`llm_bridge_send` / `llm_bridge_turn_get` 的 `max_chars`（默认 2 万）；回答超过时截断，带 `result_chars`、`result_next_offset` 和 `hint`，用 `llm_bridge_turn_get` 的 `result_offset` 接着取。`llm_bridge_turn_get` 的 `detail=steps` 才带过程。`llm_bridge_session_get` 默认给最新的一页（`order=newest`，默认 20 条），带 `total`；每条消息超过 `max_chars`（默认 4000）截断并标 `text_truncated`；没做完的回合带 `failure` 和 `next_turn_id`。
+- **错误说明该不该再调**：错误里多 `retryable`（`true` / `false` / `null` 结果未知）和 `retry_after_seconds`。没登录是 `NOT_LOGGED_IN`、账号不对是 `ACCOUNT_MISMATCH`（都要管理员处理，重试没用），没等到回答是 `OUTCOME_UNKNOWN`，发送限额 `RATE_LIMITED` 带多久以后能再发，管理器连不上是 `EXTERNAL_UNAVAILABLE` 且可重试。
+- **按编号读产出的文件**：新的只读工具 `llm_bridge_file_get`（`session_id`、`file_id`、`offset`、`max_chars`）——读回合结果 `outputs` 里的文字文件，没读完时给 `next_offset`；不是文字的、超过 2 MB 的读不了。
+- `llm_bridge_status` 只给用得上的：账号只有状态，不带是谁、怎么登录的；额度窗口不带套餐。
+
 **逐字输出与推送通道**（T-0249，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 3.2）：
 
 - 事件多一种 `delta`：逐字的增量，接在这一回合正在写的那一段后面；随后到的 `message` 是这一段的全文，替换掉攒起来的增量。增量只在回合进行中存在，回合结束后删掉（完整的每一段都存着）。来源是官方程序自己的增量输出，在锁定版本上核对过：Claude Code 2.1.323 和 CodeBuddy Code 2.184.0 的 `--include-partial-messages`（`stream_event` 里的 `text_delta`），Codex 0.169.0 的 `item/agentMessage/delta` 通知。管理器把增量攒成约 0.1 秒一条事件。
