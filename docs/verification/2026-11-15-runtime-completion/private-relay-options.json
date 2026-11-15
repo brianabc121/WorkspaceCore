@@ -1,0 +1,14 @@
+{
+  "service_ip": "10.245.14.85",
+  "upstream_ip": "100.72.60.100",
+  "upstream_port": 8443,
+  "node_name": "t0224-node-a",
+  "node_cidrs": [
+    "100.72.60.100/32",
+    "100.121.210.36/32",
+    "10.244.0.50/32",
+    "10.244.1.119/32"
+  ],
+  "image": "caddy:2.11.7-alpine@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5",
+  "tls_secret": "control-api-private-tls"
+}
