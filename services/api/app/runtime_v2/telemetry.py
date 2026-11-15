@@ -1,12 +1,17 @@
 """Fail-closed node samples from the verified API and kubelet stats summary.
 
-The supported storage profile is node-local PVs on the node filesystem. Missing
+The legacy storage profile is node-local PVs on the node filesystem.
+With a StorageClient, each volume requires fresh root proof: volumes[].bytes
+counts fully allocated physical backing, while running container size_rw includes
+inner measured data plus writable layer. Root free remains unchanged; admission
+retains its conservative commitment subtraction without double credit. Missing
 measurements (including detached PVCs) refuse the whole sample, never imply zero.
 A stopped environment (zero replicas, retained PVC) has no Pod stats, so its
 volume counts at the bound PV's declared capacity.
 Kubernetes lifecycle reconciliation remains fenced by the controller's UID receipts.
 """
 
+import copy
 import hashlib
 import json
 import re
@@ -17,8 +22,15 @@ from uuid import UUID
 
 from app.runner_agent import VERSION
 from app.runner_agent.client import Workspace
-from app.runtime_v2.kubernetes import RuntimeIdentity
-from app.runtime_v2.runner import Kubectl, KubernetesCommandError, OutcomeUnknown, verify_identity
+from app.runtime_v2.kubernetes import _IMAGE, RuntimeIdentity
+from app.runtime_v2.runner import (
+    Kubectl,
+    KubernetesCommandError,
+    OutcomeUnknown,
+    verify_identity,
+    workload,
+)
+from app.runtime_v2.storage_client import StorageClient, StorageUnavailable
 from app.schemas.runner import RunnerReport
 
 _PREFIX = "workspace.myworkspace.io/"
@@ -32,6 +44,7 @@ _ERRORS = (
     OSError,
     KubernetesCommandError,
     OutcomeUnknown,
+    StorageUnavailable,
 )
 
 
@@ -65,7 +78,7 @@ def _quantity(value: str) -> Decimal:
     return result
 
 
-def _identity(obj: dict[str, Any], node_name: str) -> RuntimeIdentity:
+def _identity(obj: dict[str, Any], node_name: str, *, namespaced: bool = True) -> RuntimeIdentity:
     meta = obj["metadata"]
     labels = meta["labels"]
     identity = RuntimeIdentity(
@@ -77,7 +90,7 @@ def _identity(obj: dict[str, Any], node_name: str) -> RuntimeIdentity:
         node_name=node_name,
     )
     verify_identity(obj, identity)
-    if meta["namespace"] != identity.namespace or not meta.get("uid"):
+    if (namespaced and meta.get("namespace") != identity.namespace) or not meta.get("uid"):
         raise TelemetryUnavailable("managed object namespace or UID unavailable")
     return identity
 
@@ -98,10 +111,20 @@ def _pinned(affinity: dict[str, Any], node_name: str) -> bool:
 
 
 class NodeTelemetry:
-    def __init__(self, api: Kubectl, node_name: str) -> None:
+    def __init__(
+        self,
+        api: Kubectl,
+        node_name: str,
+        *,
+        storage: StorageClient | None = None,
+        helper_image: str | None = None,
+    ) -> None:
         if re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?", node_name) is None:
             raise ValueError("invalid configured node")
-        self.api, self.node_name = api, node_name
+        if helper_image is not None and (storage is None or not _IMAGE.fullmatch(helper_image)):
+            raise ValueError("managed storage and digest-pinned helper image required")
+        self.api, self.node_name, self.storage = api, node_name, storage
+        self.helper_image = helper_image
 
     def _node(self) -> dict[str, Any]:
         node = self.api.get_optional("node", self.node_name)
@@ -122,6 +145,15 @@ class NodeTelemetry:
 
     def physical_host_id(self) -> str:
         return self._physical(self._node())
+
+    def _fence_node(self, node: dict[str, Any]) -> None:
+        current = self._node()
+        if (
+            current["metadata"]["uid"] != node["metadata"]["uid"]
+            or self._physical(current) != self._physical(node)
+            or current["metadata"].get("labels", {}).get(_NODE_LABEL) != self.node_name
+        ):
+            raise TelemetryUnavailable("Node changed during sampling")
 
     def _node_sample(self) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         node = self._node()
@@ -172,7 +204,10 @@ class NodeTelemetry:
             "wait_seconds": 25,
         }
         try:
-            _, _, capacity = self._node_sample()
+            node, summary, capacity = self._node_sample()
+            if self.storage is not None:
+                self._workloads(summary)
+                self._fence_node(node)
         except (*_ERRORS, TelemetryUnavailable):
             return base
         return {
@@ -194,7 +229,117 @@ class NodeTelemetry:
             raise TelemetryUnavailable("node inventory unavailable or unbounded")
         return items
 
+    @staticmethod
+    def _volume_defaults(volumes: Any) -> Any:
+        """Only Kubernetes defaults of the fixed downward API shape are omitted."""
+        result = copy.deepcopy(volumes)
+        for volume in result:
+            downward = volume.get("downwardAPI")
+            if downward is not None:
+                if downward.get("defaultMode") == 0o644:
+                    downward.pop("defaultMode")
+                for item in downward.get("items", []):
+                    ref = item.get("fieldRef", {})
+                    if ref.get("apiVersion") == "v1":
+                        ref.pop("apiVersion")
+        return result
+
+    def _helper_storage(
+        self, pod: dict[str, Any], identity: RuntimeIdentity, deployment: dict[str, Any]
+    ) -> bool:
+        """Explicit fixed helper profile, chained to the current Deployment UID."""
+        volumes = pod["spec"].get("volumes")
+        simple = [
+            {
+                "name": "workspace",
+                "persistentVolumeClaim": {"claimName": "data-" + identity.environment_id.hex},
+            }
+        ]
+        if self.helper_image is None:
+            if volumes != simple:
+                raise TelemetryUnavailable("unconfigured helper storage profile")
+            return False
+        template = deployment["spec"]["template"]
+        expected_image = template["spec"]["containers"][0]["image"]
+        _, expected = workload(
+            identity,
+            {"image": expected_image, "cpus": 1, "memory_mb": 128, "disk_gb": 1},
+            helper_image=self.helper_image,
+        )
+        expected_spec = expected["spec"]["template"]["spec"]
+        for spec in (pod["spec"], template["spec"]):
+            if self._volume_defaults(spec.get("volumes")) != expected_spec["volumes"]:
+                raise TelemetryUnavailable("helper volume identity unavailable")
+            containers = spec.get("containers", [])
+            init = spec.get("initContainers", [])
+            if (
+                len(containers) != 1
+                or containers[0].get("name") != "environment"
+                or containers[0].get("image") != expected_image
+                or containers[0].get("volumeMounts")
+                != expected_spec["containers"][0]["volumeMounts"]
+                or len(init) != 1
+            ):
+                raise TelemetryUnavailable("helper mount identity unavailable")
+            allowed_init = set(expected_spec["initContainers"][0]) | {
+                "imagePullPolicy",
+                "terminationMessagePath",
+                "terminationMessagePolicy",
+            }
+            if set(init[0]) - allowed_init:
+                raise TelemetryUnavailable("unreviewed helper installation protocol")
+            for key in ("name", "image", "command", "volumeMounts", "resources", "securityContext"):
+                if init[0].get(key) != expected_spec["initContainers"][0][key]:
+                    raise TelemetryUnavailable("helper image or protocol unavailable")
+        owners = pod["metadata"].get("ownerReferences", [])
+        if (
+            len(owners) != 1
+            or owners[0].get("kind") != "ReplicaSet"
+            or owners[0].get("controller") is not True
+        ):
+            raise TelemetryUnavailable("helper Pod controller unavailable")
+        owner = owners[0]
+        rs = self.api.get_optional("replicaset", owner["name"], identity.namespace)
+        if (
+            owner.get("apiVersion") != "apps/v1"
+            or rs is None
+            or rs["metadata"]["uid"] != owner.get("uid")
+            or _identity(rs, self.node_name) != identity
+        ):
+            raise TelemetryUnavailable("helper ReplicaSet identity unavailable")
+        expected_owner = {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "name": identity.pod_name,
+            "uid": deployment["metadata"]["uid"],
+            "controller": True,
+        }
+        rs_owners = rs["metadata"].get("ownerReferences", [])
+        if len(rs_owners) != 1 or any(rs_owners[0].get(k) != v for k, v in expected_owner.items()):
+            raise TelemetryUnavailable("helper Deployment UID unavailable")
+        verify_identity(rs["spec"]["template"], identity)
+        if (
+            self._volume_defaults(rs["spec"]["template"]["spec"].get("volumes"))
+            != expected_spec["volumes"]
+        ):
+            raise TelemetryUnavailable("helper ReplicaSet storage unavailable")
+        return True
+
     def _workloads(self, summary: dict[str, Any]) -> tuple[list[Any], list[Any], int]:
+        if self.storage is not None:
+            # Operation scratch is separately reserved by the command allocator.
+            # Until explicit helper CPU/RAM/attachment accounting is supported,
+            # publish no fresh capacity while any scratch reservation is visible.
+            # This deliberately pauses the pool rather than crediting declared
+            # PVC capacity or mistaking scratch for a second tenant environment.
+            for kind in ("pvc", "pv"):
+                scratch = self._list(kind, "-l", _PREFIX + "component=restore-scratch")
+                if any(
+                    obj.get("metadata", {}).get("labels", {}).get(_PREFIX + "component")
+                    == "restore-scratch"
+                    for obj in scratch
+                ):
+                    raise TelemetryUnavailable("restore scratch reservation requires capacity hold")
         pods = self._list("pods", "--field-selector", f"spec.nodeName={self.node_name}")
         deployments = self._list("deployments", "-l", _PREFIX + "environment")
         own: dict[str, tuple[RuntimeIdentity, dict[str, Any]]] = {}
@@ -230,6 +375,8 @@ class NodeTelemetry:
         for listed_claim in self._list("pvc", "-l", _PREFIX + "environment"):
             volume_name = listed_claim.get("spec", {}).get("volumeName")
             if not volume_name:
+                if self.storage is not None:
+                    raise TelemetryUnavailable("managed PVC root binding unknown")
                 # The deployment loop below rejects an unbound own-node claim.
                 continue
             pv = self.api.get_optional("pv", volume_name)
@@ -243,6 +390,25 @@ class NodeTelemetry:
             if key not in own or own[key][0] != identity or key in own_claims:
                 raise TelemetryUnavailable("retained PVC ownership or usage unknown")
             own_claims[key] = listed_claim
+        own_pvs: dict[str, dict[str, Any]] = {}
+        if self.storage is not None:
+            for listed_pv in self._list("pv", "-l", _PREFIX + "environment"):
+                affinity = listed_pv.get("spec", {}).get("nodeAffinity", {}).get("required", {})
+                if not _pinned(affinity, self.node_name):
+                    continue
+                identity = _identity(listed_pv, self.node_name, namespaced=False)
+                key = str(identity.environment_id)
+                claim = own_claims.get(key)
+                if (
+                    claim is None
+                    or key in own_pvs
+                    or own[key][0] != identity
+                    or listed_pv["metadata"].get("name") != claim["spec"]["volumeName"]
+                    or listed_pv.get("spec", {}).get("claimRef", {}).get("uid")
+                    != claim["metadata"]["uid"]
+                ):
+                    raise TelemetryUnavailable("retained PV ownership or root usage unknown")
+                own_pvs[key] = listed_pv
         containers, volumes = [], []
         unknown = 0
         seen = set()
@@ -292,9 +458,12 @@ class NodeTelemetry:
             expected_volumes = [
                 {"name": "workspace", "persistentVolumeClaim": {"claimName": claim_name}}
             ]
-            if pod["spec"].get("volumes") != expected_volumes:
+            helper_profile = False
+            if self.storage is not None:
+                helper_profile = self._helper_storage(pod, identity, own[key][1])
+            elif pod["spec"].get("volumes") != expected_volumes:
                 raise TelemetryUnavailable("Pod storage identity unavailable")
-            self._retained_volume(identity, own_claims.get(key))
+            pv = self._retained_volume(identity, own_claims.get(key), own_pvs.get(key))
             volume_stats = [
                 volume
                 for volume in stats.get("volume", [])
@@ -305,6 +474,28 @@ class NodeTelemetry:
                 raise TelemetryUnavailable("persistent volume usage unknown")
             _fresh(volume_stats[0])
             used = _uint(volume_stats[0]["usedBytes"])
+            if self.storage is not None:
+                proof = pv["_root_proof"]
+                if used > _uint(proof["live"]["usable_bytes"]):
+                    raise TelemetryUnavailable("volume measurement exceeds proven hard cap")
+                # Root free already includes the fully allocated backing file.
+                # volumes[].bytes is physical backing; container size_rw includes
+                # separately measured inner data. No disk-free credit is invented.
+                writable += _uint(proof["live"]["used_bytes"])
+                used = _uint(proof["backing"]["allocated_bytes"])
+                if helper_profile:
+                    scratch = [
+                        row
+                        for row in stats.get("volume", [])
+                        if row.get("name") == "runtime-helper"
+                    ]
+                    if len(scratch) != 1:
+                        raise TelemetryUnavailable("helper scratch usage unavailable")
+                    _fresh(scratch[0])
+                    scratch_bytes = _uint(scratch[0]["usedBytes"])
+                    if scratch_bytes > 64 << 20:
+                        raise TelemetryUnavailable("helper scratch capacity exceeded")
+                    writable += scratch_bytes
             current = self.api.get_optional("pod", meta["name"], identity.namespace)
             if (
                 current is None
@@ -313,6 +504,8 @@ class NodeTelemetry:
                 or current["spec"].get("nodeName") != self.node_name
             ):
                 raise TelemetryUnavailable("Pod changed during sampling")
+            if helper_profile:
+                self._helper_storage(current, identity, own[key][1])
             containers.append(
                 {
                     "env_id": key,
@@ -332,8 +525,12 @@ class NodeTelemetry:
             identity, deployment = own[key]
             if deployment["spec"].get("replicas") != 0:
                 raise TelemetryUnavailable("managed deployment has unknown or detached storage")
-            pv = self._retained_volume(identity, own_claims.get(key))
-            capacity = _quantity(str(pv["spec"]["capacity"]["storage"]))
+            pv = self._retained_volume(identity, own_claims.get(key), own_pvs.get(key))
+            capacity = (
+                _quantity(str(pv["spec"]["capacity"]["storage"]))
+                if self.storage is None
+                else _uint(pv["_root_proof"]["backing"]["allocated_bytes"])
+            )
             if capacity != int(capacity):
                 raise TelemetryUnavailable("invalid persistent volume capacity")
             volumes.append(
@@ -346,7 +543,10 @@ class NodeTelemetry:
         return containers, volumes, unknown
 
     def _retained_volume(
-        self, identity: RuntimeIdentity, inventoried: dict[str, Any] | None
+        self,
+        identity: RuntimeIdentity,
+        inventoried: dict[str, Any] | None,
+        inventoried_pv: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """The current claim and its node-local PV, re-read and matched to the inventory."""
         claim_name = "data-" + identity.environment_id.hex
@@ -377,6 +577,14 @@ class NodeTelemetry:
             )
         ):
             raise TelemetryUnavailable("persistent volume Node or PVC binding unavailable")
+        if self.storage is not None:
+            if inventoried_pv is None or inventoried_pv["metadata"]["uid"] != pv["metadata"]["uid"]:
+                raise TelemetryUnavailable("PV changed or missing from trusted inventory")
+            try:
+                proof = self.storage.inspect(identity, claim)
+            except StorageUnavailable as error:
+                raise TelemetryUnavailable("current root storage proof unavailable") from error
+            pv = {**pv, "_root_proof": proof}
         return pv
 
     def report(self, workspace: Workspace) -> None:
@@ -386,13 +594,7 @@ class NodeTelemetry:
             sample_id = UUID(ticket["sample_id"])
             node, summary, capacity = self._node_sample()
             containers, volumes, unknown = self._workloads(summary)
-            current = self._node()
-            if (
-                current["metadata"]["uid"] != node["metadata"]["uid"]
-                or self._physical(current) != self._physical(node)
-                or current["metadata"].get("labels", {}).get(_NODE_LABEL) != self.node_name
-            ):
-                raise TelemetryUnavailable("Node changed during sampling")
+            self._fence_node(node)
             images = node["status"]["images"]
             images_bytes = sum(_uint(image["sizeBytes"]) for image in images)
             body = RunnerReport(
