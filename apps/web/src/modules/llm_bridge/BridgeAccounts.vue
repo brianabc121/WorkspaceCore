@@ -15,6 +15,8 @@ const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeSt
 const emit = defineEmits<{ reload: [] }>()
 
 const POLL_MS = 3000
+// 网页登录：和设备码一样，拿到网址后等人在自己的浏览器里完成
+const WEB_METHODS: LoginMethod[] = ['web_cn', 'web_intl']
 // 平台连通性（T-0240）：这个管理器所在的服务器到各平台能不能用、延迟多少；管理器连得上才测
 const bridgeId = toRef(() => (props.status?.reachable ? props.bridge.id : null))
 const net = props.api.useConnectivity(bridgeId)
@@ -62,7 +64,9 @@ onUnmounted(stopPolling)
 
 function openLogin(account: Account) {
   const methods = methodsOf(account)
-  Object.assign(login, { slot: account.slot as Slot, method: methods.includes('api_key') ? 'api_key' : methods[0] ?? 'api_key', secret: '' })
+  // 有网页登录的平台（WorkBuddy）默认用它；别的平台照旧默认 API 密钥
+  const first = methods.find(m => WEB_METHODS.includes(m)) ?? (methods.includes('api_key') ? 'api_key' : methods[0] ?? 'api_key')
+  Object.assign(login, { slot: account.slot as Slot, method: first, secret: '' })
   error.value = notice.value = ''
 }
 function closeLogin() { Object.assign(login, { slot: null, secret: '' }) }
@@ -94,7 +98,7 @@ function submitLogin(account: Account) {
     }
     login.secret = ''
     if (out.state === 'failed') throw new ApiError(409, 'CONFLICT', out.detail || '登录没有成功，请重试。')
-    if (method === 'device_code' && out.state === 'pending') {
+    if (out.state === 'pending' && (method === 'device_code' || WEB_METHODS.includes(method))) {
       device.value = { slot, label: account.label, url: out.verification_url ?? '', code: out.user_code ?? '' }
       closeLogin(); startPolling(slot, account.label)
       return ''
@@ -172,10 +176,10 @@ function reset(account: Account) {
 
       <BridgeQuota :api="api" :bridge="bridge" :status="status" />
 
-      <div v-if="device" class="lb-code" role="region" aria-label="设备码登录">
-        <p>正在登录「{{ device.label }}」：在你自己的浏览器里打开下面的网址，输入验证码。完成后这里会自动更新。</p>
-        <p>网址：<span class="asv-code">{{ device.url || '没有给出网址' }}</span></p>
-        <p>验证码：<strong>{{ device.code || '—' }}</strong></p>
+      <div v-if="device" class="lb-code" role="region" :aria-label="device.code ? '设备码登录' : '网页登录'">
+        <p>正在登录「{{ device.label }}」：在你自己的浏览器里打开下面的网址{{ device.code ? '，输入验证码' : '并登录' }}。完成后这里会自动更新。</p>
+        <p>网址：<a v-if="device.url.startsWith('https://')" class="asv-link lb-login-url" :href="device.url" target="_blank" rel="noopener noreferrer">{{ device.url }}</a><span v-else class="asv-code">{{ device.url || '没有给出网址' }}</span></p>
+        <p v-if="device.code">验证码：<strong>{{ device.code }}</strong></p>
         <p role="status" class="form-help">正在等待你完成登录…</p>
         <div><button type="button" class="secondary-button" @click="cancelDevice">不等了</button></div>
       </div>
@@ -222,7 +226,7 @@ function reset(account: Account) {
             </div>
             <div class="lb-actions">
               <button type="button" class="secondary-button" :disabled="!!busy" @click="closeLogin">取消</button>
-              <button type="submit" class="primary-button" :disabled="!!busy || needsAck(a.slot as Slot, login.method)">{{ busy === `${a.slot}:login` ? '正在登录…' : login.method === 'device_code' ? '获取验证码' : login.method === 'existing' ? '使用已有的登录' : '登录' }}</button>
+              <button type="submit" class="primary-button" :disabled="!!busy || needsAck(a.slot as Slot, login.method)">{{ busy === `${a.slot}:login` ? '正在登录…' : login.method === 'device_code' ? '获取验证码' : WEB_METHODS.includes(login.method) ? '获取登录网址' : login.method === 'existing' ? '使用已有的登录' : '登录' }}</button>
             </div>
           </form>
         </article>

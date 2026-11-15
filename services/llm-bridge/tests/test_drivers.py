@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -327,7 +328,11 @@ async def test_cli_failures(tmp_path: Path) -> None:
 
 async def test_codebuddy_profile(tmp_path: Path) -> None:
     driver = _cli(tmp_path, codebuddy_profile)
-    assert driver.slot == "workbuddy" and driver.login_methods == ("api_key", "existing")
+    # 网页登录（国内站 / 国际站）和 API 密钥；不再提供“容器里已有的登录”
+    assert driver.slot == "workbuddy"
+    assert driver.login_methods == ("web_cn", "web_intl", "api_key")
+    with pytest.raises(DriverError, match="不支持登录方式"):
+        await driver.login("existing", {})
     assert [m.id for m in await driver.models("chat")] == ["auto", "fast-model", "deep-model"]
     assert not (await driver.status()).logged_in
     await driver.login("api_key", {"api_key": "cb-key"})
@@ -337,6 +342,71 @@ async def test_codebuddy_profile(tmp_path: Path) -> None:
         mode="chat", model="auto", workdir=tmp_path / "w", native_id=await driver.create(None)
     )  # type: ignore[arg-type]
     assert (await driver.run_turn(spec, "你好", Sink())).text.endswith(":: 你好")
+
+
+def _exists(path: Path) -> bool:
+    return path.exists()
+
+
+def _mark(tmp_path: Path, name: str, on: bool = True) -> None:
+    """仿真的官方程序看这些记号文件决定网页登录的结果。"""
+    marker = tmp_path / "home" / "cfg" / name
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    if on:
+        marker.touch()
+    else:
+        marker.unlink(missing_ok=True)
+
+
+async def _login_done(driver: Any, seconds: float = 15) -> Any:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        challenge = await driver.login_state()
+        if challenge is not None and challenge.state != "pending":
+            return challenge
+        await asyncio.sleep(0.1)
+    raise AssertionError("登录一直没有结果")
+
+
+async def test_codebuddy_web_login(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """WorkBuddy 的网页登录：页面拿到网址，人在自己的浏览器里登录完，这里就变成已登录。"""
+    from bridge.drivers import web_login
+
+    monkeypatch.setattr(web_login, "POLL_SECONDS", 0.1)
+    driver = _cli(tmp_path, codebuddy_profile)
+    try:
+        # 申请登录网址失败（例如这台服务器访问不了这个站点）：写明原因，不算已登录
+        _mark(tmp_path, "web-login-fails")
+        with pytest.raises(DriverError) as caught:
+            await driver.login("web_cn", {})
+        assert "申请登录网址没有成功：account.login.failed" in caught.value.message
+        assert "平台连通性" in caught.value.message
+        assert not (await driver.status()).logged_in and driver._web._server is None
+        _mark(tmp_path, "web-login-fails", on=False)
+
+        challenge = await driver.login("web_intl", {})
+        assert challenge.state == "pending" and challenge.user_code is None
+        assert challenge.verification_url == "https://example.test/login?site=external"
+        # 人还没登录完：不算已登录
+        assert (await driver.login_state()).state == "pending"
+        assert not (await driver.status()).logged_in
+        _mark(tmp_path, "web-login-done")  # 人在网页上登录完了
+        assert (await _login_done(driver)).state == "done"
+        status = await driver.status()
+        assert (status.logged_in, status.identity, status.method) == (True, "测试账号", "web_intl")
+        # 登录完成后本机服务已经关掉；之后的回合照常能跑
+        assert driver._web._server is None
+        spec = SessionSpec(
+            mode="chat", model="auto", workdir=tmp_path / "w", native_id=await driver.create(None)
+        )  # type: ignore[arg-type]
+        assert (await driver.run_turn(spec, "你好", Sink())).text.endswith(":: 你好")
+
+        # 退出登录：官方程序自己保存的登录也退掉
+        await driver.logout()
+        assert not (await driver.status()).logged_in
+        assert not _exists(tmp_path / "home" / "cfg" / "logged-in")
+    finally:
+        await driver.stop()
 
 
 def test_transcript_formats() -> None:

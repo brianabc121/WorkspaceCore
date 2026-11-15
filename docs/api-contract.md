@@ -869,6 +869,8 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST .../chat/turns/{turn_id}/resume` | 被额度打断的回合，现在就试着继续（admin）。不是被额度打断的、已经续跑过的 `409` |
 | `DELETE .../chat/turns/{turn_id}/resume` | 不要自动继续（admin） |
 
+**WorkBuddy 网页登录**（T-0241）。`POST .../bridges/{id}/accounts/workbuddy/login` 的 `method` 多两种：`web_cn`（国内站）、`web_intl`（国际站）。返回 `state=pending` 和 `verification_url`（没有 `user_code`）：人在自己的浏览器里打开并登录；页面照设备码登录那样轮询 `GET .../login` 直到 `done` / `failed`。WorkBuddy 不再提供 `existing`。
+
 **平台连通性**（T-0240）。`GET /api/v1/llm_bridge/bridges/{bridge_id}/connectivity?refresh=`（admin）：由管理器在它那台服务器上访问各平台的地址（不带凭据）。
 返回 `supported`（旧版本的管理器为 false）和 `slots`（键是账号槽位 `openai` / `claude` / `workbuddy`）：每个槽位 `ok`、`need`（`all` 都要可用 / `any` 有一个就行）、`checked_at`、
 `targets[]`（`host`、`label`、`ok`、`state`：`ok` 可用 / `blocked` 连得上但被平台拒绝 / `unreachable` 连不上；`latency_ms`、`http_status`、`error`）。结果一分钟内复用，`refresh=true` 重新测。

@@ -11965,9 +11965,10 @@ export interface components {
             api_key?: string | null;
             /**
              * Method
+             * @description web_cn / web_intl：WorkBuddy（CodeBuddy）的网页登录，国内站 / 国际站——返回 pending 和一个网址，人在自己的浏览器里打开并登录
              * @enum {string}
              */
-            method: "device_code" | "api_key" | "oauth_token" | "existing";
+            method: "device_code" | "api_key" | "oauth_token" | "existing" | "web_cn" | "web_intl";
             /** Oauth Token */
             oauth_token?: string | null;
         };

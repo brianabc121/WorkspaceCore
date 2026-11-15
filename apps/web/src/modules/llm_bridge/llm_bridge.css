@@ -101,3 +101,4 @@
 .lb-net-result { display: inline-flex; align-items: center; gap: 8px; }
 .lb-net-ms { font-variant-numeric: tabular-nums; color: var(--muted); }
 .lb-net-error { grid-column: 1 / -1; color: var(--danger); font-size: .8rem; }
+.lb-login-url { overflow-wrap: anywhere; }
