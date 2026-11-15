@@ -96,6 +96,26 @@ class LlmChatMessageOut(BaseModel):
     )
     failure: dict[str, Any] | None = None
     ahead_in_session: int | None = Field(default=None, description="排队时前面还有几条")
+    waiting: dict[str, Any] | None = Field(
+        default=None,
+        description="排队时在等什么：{reason: session, position} 会话里前面还有消息；"
+        "{reason: quota, until, estimated} 平台因额度暂停；{reason: platform_slot} 等平台的名额",
+    )
+    partial: str | None = Field(
+        default=None, description="进行中：最后一段完整的话之后、已经写出来的增量文字"
+    )
+    timing: dict[str, Any] | None = Field(
+        default=None,
+        description="回答所在回合的 queued_at / started_at / finished_at、"
+        "waited_seconds（排了多久）、ran_seconds（做了多久）",
+    )
+    usage: dict[str, Any] | None = Field(
+        default=None, description="这一回合的 token 数（官方程序报的，不是账单）"
+    )
+    next_turn_id: str | None = Field(default=None, description="被打断或续跑时，接着做的是哪一回合")
+    source: dict[str, Any] | None = Field(
+        default=None, description="这一回合的出处：哪个实例或人，智能体当时在执行哪些任务"
+    )
     resume: LlmChatResumeOut | None = Field(
         default=None, description="被额度打断的回合（status=interrupted）：什么时候自动继续"
     )
@@ -120,8 +140,9 @@ class LlmChatEventOut(BaseModel):
     id: int
     turn_id: str | None
     kind: str = Field(
-        description="queued / started / message / command / files / notice / "
-        "completed / failed / cancelled / unknown"
+        description="queued / started / delta / message / command / files / notice / "
+        "completed / failed / cancelled / unknown。delta 是逐字的增量：接在这一回合"
+        "正在写的那一段后面；随后到的 message 是这一段的全文，替换掉攒起来的增量"
     )
     at: float
     text: str | None = None

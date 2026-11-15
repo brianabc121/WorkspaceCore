@@ -104,6 +104,40 @@ export function useLlmChat(scope: string) {
         params: { ...sessionAt(bridge, session), query: { after, wait_seconds: EVENT_WAIT_SECONDS } }, signal,
       }))
     },
+    /** 推送通道：事件一条条到（onEvent），直到会话里没有回合在跑或到了时限；返回结束时的状态。
+     *  用带请求头的 fetch 读流（EventSource 带不了 X-Workspace-Id）。读不了就抛错，调用方退回 events() 的长轮询 */
+    async stream(bridge: string, session: string, after: number, onEvent: (event: ChatEvent) => void | Promise<void>, signal?: AbortSignal): Promise<{ busy: boolean; last_id: number }> {
+      const url = `${window.location.origin}/api/v1/llm_bridge/bridges/${bridge}/chat/sessions/${session}/stream?after=${after}`
+      const response = await fetch(new Request(url, { headers: { ...header, Accept: 'text/event-stream' }, credentials: 'same-origin', signal }))
+      if (!response.ok || !response.body || !(response.headers.get('content-type') ?? '').startsWith('text/event-stream')) throw new Error('stream unavailable')
+      const reader = response.body.getReader(), decoder = new TextDecoder()
+      let buffer = '', end: { busy: boolean; last_id: number } | null = null
+      for (;;) {
+        const { value, done } = await reader.read()
+        buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+        // 一帧以空行结束：event: 名字，data: JSON
+        let cut = buffer.search(/\r?\n\r?\n/)
+        while (cut >= 0) {
+          const frame = buffer.slice(0, cut)
+          buffer = buffer.slice(cut).replace(/^\r?\n\r?\n/, '')
+          let name = 'message'; const data: string[] = []
+          for (const line of frame.split(/\r?\n/)) {
+            if (line.startsWith('event:')) name = line.slice(6).trim()
+            else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''))
+          }
+          if (data.length) {
+            let parsed: unknown = null
+            try { parsed = JSON.parse(data.join('\n')) } catch { /* 读不懂的一帧跳过 */ }
+            if (parsed && name === 'chat') await onEvent(parsed as ChatEvent)
+            else if (parsed && name === 'end') end = parsed as { busy: boolean; last_id: number }
+          }
+          cut = buffer.search(/\r?\n\r?\n/)
+        }
+        if (done) break
+      }
+      if (!end) throw new Error('stream ended early')
+      return end
+    },
     async syncSessions(bridge: string) {
       const out = dataOf(await auth.slowApi.GET('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions', { params: { ...at(bridge), query: { sync: true, limit: 1 } } }))
       await cache.invalidateQueries({ queryKey: key(bridge, 'sessions') })

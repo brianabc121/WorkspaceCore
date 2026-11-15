@@ -15083,7 +15083,7 @@
             "type": "integer"
           },
           "kind": {
-            "description": "queued / started / message / command / files / notice / completed / failed / cancelled / unknown",
+            "description": "queued / started / delta / message / command / files / notice / completed / failed / cancelled / unknown。delta 是逐字的增量：接在这一回合正在写的那一段后面；随后到的 message 是这一段的全文，替换掉攒起来的增量",
             "title": "Kind",
             "type": "string"
           },
@@ -15565,6 +15565,30 @@
             "description": "是不是当前用户发的（只有 user 消息有）",
             "title": "Mine"
           },
+          "next_turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "被打断或续跑时，接着做的是哪一回合",
+            "title": "Next Turn Id"
+          },
+          "partial": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "进行中：最后一段完整的话之后、已经写出来的增量文字",
+            "title": "Partial"
+          },
           "resume": {
             "anyOf": [
               {
@@ -15580,6 +15604,19 @@
             "description": "user / assistant",
             "title": "Role",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这一回合的出处：哪个实例或人，智能体当时在执行哪些任务",
+            "title": "Source"
           },
           "status": {
             "anyOf": [
@@ -15606,6 +15643,19 @@
             "title": "Text",
             "type": "string"
           },
+          "timing": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "回答所在回合的 queued_at / started_at / finished_at、waited_seconds（排了多久）、ran_seconds（做了多久）",
+            "title": "Timing"
+          },
           "turn_id": {
             "anyOf": [
               {
@@ -15616,6 +15666,32 @@
               }
             ],
             "title": "Turn Id"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这一回合的 token 数（官方程序报的，不是账单）",
+            "title": "Usage"
+          },
+          "waiting": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "排队时在等什么：{reason: session, position} 会话里前面还有消息；{reason: quota, until, estimated} 平台因额度暂停；{reason: platform_slot} 等平台的名额",
+            "title": "Waiting"
           }
         },
         "required": [
@@ -59100,6 +59176,150 @@
           }
         ],
         "summary": "聊天：官方程序里已有的会话，重新导入一次内容（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/stream": {
+      "get": {
+        "description": "和 .../events 是同一份数据，只是不用反复请求：每条事件 `event: chat`，data 是 LlmChatEventOut，id 是事件编号。会话里没有回合在跑、或者推送满 5 分钟时发一条 `event: end`（data 里有 busy 和 last_id）并结束；busy 为 true 时带着 last_id 再连。页面用带请求头的 fetch 读这个流（EventSource 带不了 X-Workspace-Id）。推送用不了时（代理不支持、旧版本）页面退回 .../events 的长轮询。",
+        "operationId": "llm_chat_session_stream",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "properties": {
+                    "data": {
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "$ref": "#/components/schemas/LlmChatEventOut"
+                      },
+                      "type": "string"
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "聊天：会话的新事件，逐条推送（admin，SSE）",
         "tags": [
           "llm_bridge"
         ]

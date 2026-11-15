@@ -905,6 +905,23 @@ class Store:
             (session_id, turn_id, kind, json.dumps(payload, ensure_ascii=False), time.time()),
         )
 
+    def pending_delta(self, turn_id: str) -> str:
+        """这个回合里最后一段完整的话之后、还没成段的增量文字（刷新页面时接着显示）。"""
+        last = self._one(
+            "SELECT COALESCE(MAX(id), 0) AS id FROM events WHERE turn_id = ? AND kind = 'message'",
+            (turn_id,),
+        )
+        rows = self._all(
+            "SELECT payload FROM events WHERE turn_id = ? AND kind = 'delta' AND id > ? "
+            "ORDER BY id",
+            (turn_id, last["id"] if last else 0),
+        )
+        return "".join(str((row["payload"] or {}).get("text") or "") for row in rows)
+
+    def drop_deltas(self, turn_id: str) -> None:
+        """回合结束后增量就没用了（完整的每一段都已经存了）：删掉，不让事件表越来越大。"""
+        self._exec("DELETE FROM events WHERE turn_id = ? AND kind = 'delta'", (turn_id,))
+
     def last_progress(self, turn_id: str) -> Row | None:
         """这个回合最新的一条“说了什么 / 在跑什么”：按回合取，会话再长也只读一行。"""
         return self._one(

@@ -108,6 +108,11 @@ def run_turn(state, thread_id, params):
                 "item": {"type": "fileChange", "changes": [{"path": "a.txt"}]},
             },
         )
+        for piece in (reply[: len(reply) // 2], reply[len(reply) // 2 :]):
+            note(
+                "item/agentMessage/delta",
+                {"threadId": thread_id, "turnId": turn_id, "itemId": "item_1", "delta": piece},
+            )
         note(
             "item/completed",
             {

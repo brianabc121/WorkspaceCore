@@ -448,6 +448,42 @@ async def test_source_is_kept_and_index_feed_follows_changes(bridge: Bridge) -> 
     assert json.loads(bad.json()["result"]["content"][0]["text"])["source"] is None
 
 
+async def test_deltas_stream_while_running_and_are_dropped_afterwards(bridge: Bridge) -> None:
+    """逐字的增量（改进方案 3.2）：回合进行中按编号读得到，刷新页面能接着显示；结束后不留。"""
+    a = await _session(bridge, "c1")
+    turn = await _send(bridge, "c1", a, "stream:0.3", "r1", wait=0)
+    seen: list[str] = []
+    partial = ""
+    after = 0
+    for _ in range(40):
+        batch = (
+            await bridge.admin(
+                "GET", f"/admin/sessions/{a}/events", params={"after": after, "wait_seconds": 1}
+            )
+        ).json()
+        after = batch["last_id"]
+        seen += [e["text"] for e in batch["events"] if e["kind"] == "delta"]
+        if seen and not partial:
+            view = (await bridge.admin("GET", f"/admin/sessions/{a}")).json()
+            partial = next(m for m in view["messages"] if m["role"] == "assistant").get(
+                "partial", ""
+            )
+        if not batch["busy"]:
+            break
+    # 增量按顺序到，拼起来是那一段话的开头；进行中刷新页面拿得到已经写出来的部分
+    assert "".join(seen) and "第一二三段".startswith("".join(seen)[:2])
+    assert partial and "第一二三段".startswith(partial)
+    done = await bridge.tool("c1", "llm_turn_get", {"turn_id": turn["turn_id"], "wait_seconds": 5})
+    assert done["status"] == "completed" and done["result"].endswith("stream:0.3")
+    # 结束后增量不留在事件里，完整的那一段在
+    events = (await bridge.admin("GET", f"/admin/sessions/{a}/events")).json()["events"]
+    kinds = [e["kind"] for e in events]
+    assert "delta" not in kinds and "message" in kinds
+    view = (await bridge.admin("GET", f"/admin/sessions/{a}")).json()
+    reply = next(m for m in view["messages"] if m["role"] == "assistant")
+    assert "partial" not in reply and reply["timing"]["ran_seconds"] >= 0.5
+
+
 async def test_external_sessions(bridge: Bridge) -> None:
     from bridge.drivers.base import Message, NativeSession
 

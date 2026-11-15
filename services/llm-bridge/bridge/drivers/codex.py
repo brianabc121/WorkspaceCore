@@ -401,6 +401,11 @@ class CodexDriver(Driver):
                 raise DriverError("unavailable", "codex app-server 在回合进行中退出了")
             if params.get("turnId") not in (None, turn_id) and method != "turn/completed":
                 continue
+            if method == "item/agentMessage/delta":
+                # 逐字的增量（0.169.0 生成的接口定义里有：threadId / turnId / itemId / delta）
+                if isinstance(params.get("delta"), str) and params["delta"]:
+                    await sink("delta", {"text": params["delta"]})
+                continue
             if method == "item/completed":
                 item = params.get("item") or {}
                 kind = item.get("type")

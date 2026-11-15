@@ -68,7 +68,11 @@ SETTING_LIMITS = {
     "auto_resume_max": (1, 10),
 }
 MAX_WAIT_SECONDS = 50
+# 逐字的增量：攒到这么多字、或者过了这么久，就写成一条事件
+DELTA_FLUSH_CHARS = 240
+DELTA_FLUSH_SECONDS = 0.12
 MAX_EVENT_WAIT_SECONDS = 25
+EVENT_POLL_SECONDS = 0.1  # 等新事件时多久看一次
 ACCOUNT_CACHE_SECONDS = 60
 _MODEL_RE = re.compile(r"^[\w.\-:\[\]/]{1,100}$")
 _REQUEST_ID_RE = re.compile(r"^[\w.\-:]{1,100}$")
@@ -946,6 +950,7 @@ class Engine:
 
     def _finish(self, turn_id: str, **fields: Any) -> None:
         self.store.update_turn(turn_id, finished_at=time.time(), **fields)
+        self.store.drop_deltas(turn_id)
         self._cancel_requested.discard(turn_id)
         self._superseded.pop(turn_id, None)
         event = self._done.pop(turn_id, None)
@@ -997,7 +1002,28 @@ class Engine:
             if placed:
                 text += f"\n\n（随这条消息带来的文件已放在工作目录里：{'、'.join(placed)}）"
 
+        # 逐字的增量攒一小会儿再写成一条事件：不然一个字一行，事件表和轮询都吃不消
+        pending: list[str] = []
+        flushed = [time.monotonic()]
+
+        def flush() -> None:
+            if pending:
+                text_ = redact("".join(pending))
+                pending.clear()
+                self.store.add_event(session_id, turn_id, "delta", {"text": text_})
+            flushed[0] = time.monotonic()
+
         async def sink(kind: str, payload: Row) -> None:
+            if kind == "delta":
+                pending.append(str(payload.get("text") or ""))
+                size = sum(len(p) for p in pending)
+                if (
+                    size >= DELTA_FLUSH_CHARS
+                    or time.monotonic() - flushed[0] >= DELTA_FLUSH_SECONDS
+                ):
+                    flush()
+                return
+            flush()  # 别的事件之前先把攒着的增量写出去，顺序才对
             if kind == "quota":  # 官方程序报出的额度：记下来，不算会话里的事件
                 self._save_quota(session["slot"], payload.get("windows") or [])
                 return
@@ -1528,6 +1554,20 @@ class Engine:
                         reply["resume"] = self._resume_view(turn)
                 elif status == "queued":
                     reply["ahead_in_session"] = self.store.queue_position(turn)
+                    reply["waiting"] = self._waiting(turn, session, reply["ahead_in_session"])
+                elif status == "running":
+                    # 最后一段完整的话之后、还没成段的增量：刷新页面时接着显示
+                    reply["partial"] = self.store.pending_delta(turn["id"])
+            # 回溯和日常都要看：用时、用量、接着做的是哪一回合
+            reply["timing"] = _timing(turn)
+            usage = (turn["summary"] or {}).get("usage") or {}
+            if usage:
+                reply["usage"] = usage
+            nxt = turn.get("superseded_by") or turn.get("resumed_by")
+            if nxt:
+                reply["next_turn_id"] = nxt
+            if turn.get("source"):
+                reply["source"] = turn["source"]
             messages.append(reply)
         return {"session": view, "messages": messages, "last_event_id": last_event_id}
 
@@ -1540,7 +1580,7 @@ class Engine:
             busy = session_id in self.store.busy_sessions()
             if events or not busy or time.monotonic() >= deadline:
                 break
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(EVENT_POLL_SECONDS)
         return {
             "events": [_event_view(e) for e in events],
             "busy": busy,

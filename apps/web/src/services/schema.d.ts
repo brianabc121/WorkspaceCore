@@ -3282,6 +3282,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 聊天：会话的新事件，逐条推送（admin，SSE）
+         * @description 和 .../events 是同一份数据，只是不用反复请求：每条事件 `event: chat`，data 是 LlmChatEventOut，id 是事件编号。会话里没有回合在跑、或者推送满 5 分钟时发一条 `event: end`（data 里有 busy 和 last_id）并结束；busy 为 true 时带着 last_id 再连。页面用带请求头的 fetch 读这个流（EventSource 带不了 X-Workspace-Id）。推送用不了时（代理不支持、旧版本）页面退回 .../events 的长轮询。
+         */
+        get: operations["llm_chat_session_stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}": {
         parameters: {
             query?: never;
@@ -12638,7 +12658,7 @@ export interface components {
             id: number;
             /**
              * Kind
-             * @description queued / started / message / command / files / notice / completed / failed / cancelled / unknown
+             * @description queued / started / delta / message / command / files / notice / completed / failed / cancelled / unknown。delta 是逐字的增量：接在这一回合正在写的那一段后面；随后到的 message 是这一段的全文，替换掉攒起来的增量
              */
             kind: string;
             /** Paths */
@@ -12850,6 +12870,16 @@ export interface components {
              * @description 是不是当前用户发的（只有 user 消息有）
              */
             mine?: boolean | null;
+            /**
+             * Next Turn Id
+             * @description 被打断或续跑时，接着做的是哪一回合
+             */
+            next_turn_id?: string | null;
+            /**
+             * Partial
+             * @description 进行中：最后一段完整的话之后、已经写出来的增量文字
+             */
+            partial?: string | null;
             /** @description 被额度打断的回合（status=interrupted）：什么时候自动继续 */
             resume?: components["schemas"]["LlmChatResumeOut"] | null;
             /**
@@ -12857,6 +12887,13 @@ export interface components {
              * @description user / assistant
              */
             role: string;
+            /**
+             * Source
+             * @description 这一回合的出处：哪个实例或人，智能体当时在执行哪些任务
+             */
+            source?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Status
              * @description 回答所在回合的状态：queued / running / completed / failed / cancelled / unknown / interrupted
@@ -12870,8 +12907,29 @@ export interface components {
             steps: components["schemas"]["LlmChatStepOut"][];
             /** Text */
             text: string;
+            /**
+             * Timing
+             * @description 回答所在回合的 queued_at / started_at / finished_at、waited_seconds（排了多久）、ran_seconds（做了多久）
+             */
+            timing?: {
+                [key: string]: unknown;
+            } | null;
             /** Turn Id */
             turn_id?: string | null;
+            /**
+             * Usage
+             * @description 这一回合的 token 数（官方程序报的，不是账单）
+             */
+            usage?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Waiting
+             * @description 排队时在等什么：{reason: session, position} 会话里前面还有消息；{reason: quota, until, estimated} 平台因额度暂停；{reason: platform_slot} 等平台的名额
+             */
+            waiting?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** LlmChatModelOut */
         LlmChatModelOut: {
@@ -35253,6 +35311,79 @@ export interface operations {
             };
             /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_session_stream: {
+        parameters: {
+            query?: {
+                after?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

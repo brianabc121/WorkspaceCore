@@ -4,7 +4,8 @@ import { TERMINAL_EVENTS, chatError, type ChatAttachment, type ChatConversation,
 const STEP_DEFAULTS = { truncated: false, error: false }
 
 // 一个会话的内容和进度（单会话的对话、多模型同问的每一栏都用它）。要在组件的 setup 里调用。
-// 有回合没做完时用长轮询读事件（一段回答、一条命令、改动的文件），在本地接到对应的回答上；
+// 有回合没做完时读事件（逐字的增量、一段回答、一条命令、改动的文件），在本地接到对应的回答上：
+// 先用推送通道，一条条收；推送用不了（代理不支持、旧版本）就退回长轮询。断线后带着最后的编号接着读。
 // 回合结束、或出现这里不认识的回合（别人或智能体发的）时重新读整段会话，以服务器给的为准。
 // hooks.activity：内容有变化（调用方据此滚动到底部）；hooks.changed：有回合结束（调用方据此刷新列表）。
 export function useLiveConversation(
@@ -16,6 +17,8 @@ export function useLiveConversation(
   const messages = ref<ChatMessage[]>([])
   const lost = ref('')
   let cursor = 0, alive = true, polling = false
+  // 推送通道能不能用：试一次不行，这个会话之后就一直用长轮询
+  let pushing = true
   const abort = new AbortController()
 
   function load(data: ChatConversation) {
@@ -38,8 +41,10 @@ export function useLiveConversation(
       const reply = messages.value.find(m => m.role === 'assistant' && m.turn_id === e.turn_id)
       if (!reply || TERMINAL_EVENTS.includes(e.kind)) { stale = true; continue }
       const steps = (reply.steps ??= [])
-      if (e.kind === 'started') { reply.status = 'running'; reply.ahead_in_session = null }
-      else if (e.kind === 'message' && e.text) reply.text = reply.text ? `${reply.text}\n\n${e.text}` : e.text
+      if (e.kind === 'started') { reply.status = 'running'; reply.ahead_in_session = null; reply.waiting = null; reply.timing = { ...(reply.timing ?? {}), started_at: e.at } }
+      // 逐字的增量先攒在 partial 里边写边显示；这一段写完时 message 带来全文，替换掉攒的
+      else if (e.kind === 'delta' && e.text) { reply.status = 'running'; reply.partial = (reply.partial ?? '') + e.text }
+      else if (e.kind === 'message' && e.text) { reply.text = reply.text ? `${reply.text}\n\n${e.text}` : e.text; reply.partial = null }
       else if (e.kind === 'notice' && e.text) steps.push({ ...STEP_DEFAULTS, kind: 'notice', text: e.text, at: e.at })
       else if (e.kind === 'command' && e.command) steps.push({ ...STEP_DEFAULTS, kind: 'command', text: e.command, at: e.at })
       else if (e.kind === 'files' && e.paths?.length) steps.push({ ...STEP_DEFAULTS, kind: 'files', text: e.paths.join('、'), at: e.at })
@@ -59,6 +64,23 @@ export function useLiveConversation(
       while (alive) {
         let out
         const asked = Date.now()
+        if (pushing) {
+          try {
+            const end = await chat.stream(bridge, id, cursor, async e => {
+              if (!alive || e.id <= cursor) return
+              cursor = e.id
+              if (apply([e])) { await reload(); hooks.changed?.() }
+            }, abort.signal)
+            if (!alive) return
+            failures = 0; lost.value = ''
+            cursor = Math.max(cursor, end.last_id)
+            if (!end.busy) return
+            continue
+          } catch {
+            if (!alive) return
+            pushing = false
+          }
+        }
         try {
           out = await chat.events(bridge, id, cursor, abort.signal)
           failures = 0; lost.value = ''

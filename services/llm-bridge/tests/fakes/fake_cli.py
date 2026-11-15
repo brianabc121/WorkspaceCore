@@ -221,6 +221,23 @@ with transcript.open("a") as handle:
         )
         + "\n"
     )
+if "--include-partial-messages" in args:
+    # 逐字的增量：回答分两段给；思考的增量和子代理的增量不算回答
+    half = len(reply) // 2
+
+    def partial(delta, parent=None):
+        emit(
+            {
+                "type": "stream_event",
+                "parent_tool_use_id": parent,
+                "event": {"type": "content_block_delta", "index": 0, "delta": delta},
+            }
+        )
+
+    partial({"type": "thinking_delta", "thinking": "想一想"})
+    partial({"type": "text_delta", "text": "子代理说的"}, parent="toolu_1")
+    partial({"type": "text_delta", "text": reply[:half]})
+    partial({"type": "text_delta", "text": reply[half:]})
 emit(
     {
         "type": "assistant",
