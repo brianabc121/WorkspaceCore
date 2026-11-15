@@ -9,11 +9,14 @@
 
 from __future__ import annotations
 
+import time
 import uuid
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from urllib.parse import unquote, urlencode
 
 import httpx
+from fastapi.sse import ServerSentEvent
 
 from app.core.errors import ApiError
 from app.domain import secret_scan
@@ -128,6 +131,10 @@ def _queue_out(data: Any, me: str) -> LlmChatQueueOut:
     )
 
 
+# 推送时每次向管理器等多久；没有新事件就再等一轮（顺便检查浏览器还在不在）
+STREAM_WAIT_SECONDS = 10
+
+
 def no_secrets(*texts: str | None) -> None:
     """要发给第三方平台的内容先过密钥扫描：像密钥的不发、不存（和智能体的调用一样）。"""
     if secret_scan.scan(*(t for t in texts if t)):
@@ -149,7 +156,9 @@ class LlmChatService:
         user = await self.db.get(User, access.user_id) if access.user_id else None
         if user is None:
             raise ApiError(403, "FORBIDDEN_ROLE", "只有登录的管理员能使用聊天")
-        return BridgeCaller(caller_id(user.id), (user.display_name or user.email)[:80], scopes)
+        name = (user.display_name or user.email)[:80]
+        source = {"kind": "user", "user_id": str(user.id), "name": name}
+        return BridgeCaller(caller_id(user.id), name, scopes, None, source)
 
     def _writable(self, row: LlmBridge) -> None:
         if not row.enabled:
@@ -232,6 +241,12 @@ class LlmChatService:
                     steps=item.get("steps") or [],
                     failure=item.get("failure"),
                     ahead_in_session=item.get("ahead_in_session"),
+                    waiting=item.get("waiting"),
+                    partial=item.get("partial") or None,
+                    timing=item.get("timing"),
+                    usage=item.get("usage"),
+                    next_turn_id=item.get("next_turn_id"),
+                    source=item.get("source"),
                     resume=item.get("resume"),
                     attachments=item.get("attachments") or [],
                     imported=bool(item.get("imported")),
@@ -252,6 +267,37 @@ class LlmChatService:
         query = urlencode({"after": after, "wait_seconds": wait_seconds})
         data = await self._admin(client, "GET", f"/sessions/{session_id}/events?{query}")
         return LlmChatEventsOut(**data)
+
+    async def stream(
+        self,
+        row: LlmBridge,
+        session_id: str,
+        after: int,
+        *,
+        max_seconds: float,
+        disconnected: Callable[[], Awaitable[bool]],
+    ) -> AsyncIterator[ServerSentEvent]:
+        """会话在 after 之后的事件，一条一条推给浏览器，直到会话里没有回合在跑。
+
+        数据还是管理器那张带编号的事件表：断线后带着最后收到的编号重连就能接上。
+        每条事件 `event: chat`，id 是事件编号；结束时发一条 `event: end`（busy、last_id）。"""
+        client = await self.bridges.client(row)
+        await self.db.commit()  # 推送期间不占着数据库连接
+        cursor, started = after, time.monotonic()
+        while True:
+            query = urlencode({"after": cursor, "wait_seconds": STREAM_WAIT_SECONDS})
+            data = await self._admin(client, "GET", f"/sessions/{session_id}/events?{query}")
+            batch = LlmChatEventsOut(**data)
+            for event in batch.events:
+                yield ServerSentEvent(event="chat", id=str(event.id), data=event)
+            cursor = batch.last_id
+            out_of_time = time.monotonic() - started >= max_seconds
+            if not batch.busy or out_of_time or await disconnected():
+                # 还在跑但到时间了：浏览器收到 busy=true 会带着编号再连
+                yield ServerSentEvent(
+                    event="end", id=str(cursor), data={"busy": batch.busy, "last_id": cursor}
+                )
+                return
 
     async def options(
         self, access: WorkspaceAccess, row: LlmBridge, platform: str, mode: str

@@ -6,6 +6,7 @@
 """
 
 import asyncio
+import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -769,3 +770,56 @@ async def test_connectivity_is_measured_by_the_manager(rig: Rig) -> None:  # noq
         scope = {"X-Workspace-Id": rig.env.workspace_id}
         denied = await member.get(f"/api/v1/llm_bridge{path}", headers=scope)
         assert denied.status_code == 403
+
+
+async def test_chat_stream_pushes_deltas_and_resumes_from_a_cursor(rig: Rig) -> None:  # noqa: F811
+    """推送通道（改进方案 3.2）：事件逐条推，逐字的增量在里面；带着编号重连能接上；跑完就结束。"""
+    session_id = (await new_chat(rig, None))["session"]["session_id"]
+    base = chat(rig, f"/sessions/{session_id}")
+    sent = await rig.api(
+        "POST", f"{base}/messages", json={"text": "stream:0.2", "request_id": "s1"}
+    )
+    assert sent.status_code == 200, sent.text
+
+    async def read(after: int) -> list[tuple[str, dict[str, Any]]]:
+        frames: list[tuple[str, dict[str, Any]]] = []
+        async with rig.env.client.stream(
+            "GET",
+            f"/api/v1/llm_bridge{base}/stream",
+            params={"after": after},
+            headers=rig.env.headers(),
+        ) as response:
+            assert response.status_code == 200, await response.aread()
+            assert response.headers["content-type"].startswith("text/event-stream")
+            name = ""
+            async for line in response.aiter_lines():
+                if line.startswith("event:"):
+                    name = line[6:].strip()
+                elif line.startswith("data:"):
+                    frames.append((name, json.loads(line[5:])))
+        return frames
+
+    frames = await read(0)
+    kinds = [data["kind"] for name, data in frames if name == "chat"]
+    assert "queued" in kinds and "delta" in kinds and kinds[-1] == "completed"
+    assert kinds.index("delta") < kinds.index("message")
+    # 增量在那一段完整的话之前到，拼起来是它的开头
+    typed = "".join(d["text"] for n, d in frames if n == "chat" and d["kind"] == "delta")
+    whole = next(d["text"] for n, d in frames if n == "chat" and d["kind"] == "message")
+    assert typed and whole.startswith(typed[:2])
+    end = frames[-1]
+    assert end[0] == "end" and end[1]["busy"] is False
+    # 带着最后的编号再连：没有新的，直接结束
+    again = await read(end[1]["last_id"])
+    assert again == [("end", {"busy": False, "last_id": end[1]["last_id"]})]
+    # 刷新页面：回答上有用时；进行中的增量结束后不再留着
+    view = (await rig.api("GET", base)).json()
+    reply = view["messages"][-1]
+    assert reply["status"] == "completed" and reply["timing"]["ran_seconds"] >= 0.3
+    assert reply["partial"] is None and reply["source"]["kind"] == "user"
+    # member 读不了
+    assert (await rig.env.client.get(f"/api/v1/llm_bridge{base}/stream")).status_code in (
+        400,
+        404,
+        422,
+    )

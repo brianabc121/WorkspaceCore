@@ -5,11 +5,13 @@
 owner 和 admin 都能用；写操作带 CSRF。浏览器不直连 MCP 管理器，也拿不到管理令牌。
 """
 
-from typing import Annotated, Literal
+from collections.abc import AsyncIterator
+from typing import Annotated, Any, Literal
 from urllib.parse import quote
 from uuid import UUID
 
 from fastapi import Depends, Path, Query, Request, Response, status
+from fastapi.sse import EventSourceResponse
 
 from app.api.deps import csrf_protected
 from app.core.errors import ApiError
@@ -19,6 +21,7 @@ from app.modules.llm_bridge.chat_schemas import (
     LlmChatConversationOut,
     LlmChatCreatedOut,
     LlmChatCreateIn,
+    LlmChatEventOut,
     LlmChatEventsOut,
     LlmChatOptionsOut,
     LlmChatQueueEditIn,
@@ -51,6 +54,20 @@ _FILE_RESPONSE = {
 }
 write = [Depends(csrf_protected)]
 read_errors = error_responses(401, 403, 404, 503)
+
+
+def _json_errors(*status_codes: int) -> dict[int | str, dict[str, Any]]:
+    """推送接口的错误在开始推送之前返回，是普通的 JSON；不写明的话会被当成 text/event-stream。"""
+    errors = error_responses(*status_codes)
+    for response in errors.values():
+        response.pop("model")
+        response["content"] = {
+            "application/json": {"schema": {"$ref": "#/components/schemas/ErrorResponse"}}
+        }
+    return errors
+
+
+STREAM_MAX_SECONDS = 300  # 一次推送最长这么久；到时间浏览器带着编号再连
 write_errors = error_responses(401, 403, 404, 409, 422, 503)
 prefix = "/llm_bridge/bridges/{bridge_id}/chat"
 
@@ -109,6 +126,34 @@ async def llm_chat_session_events(
 ) -> LlmChatEventsOut:
     row = await bridges.bridge(access.workspace.id, bridge_id)
     return await LlmChatService(bridges).events(row, session_id, after, wait_seconds)
+
+
+@router.get(
+    f"{prefix}/sessions/{{session_id}}/stream",
+    summary="聊天：会话的新事件，逐条推送（admin，SSE）",
+    description="和 .../events 是同一份数据，只是不用反复请求：每条事件 `event: chat`，"
+    "data 是 LlmChatEventOut，id 是事件编号。会话里没有回合在跑、或者推送满 5 分钟时发一条 "
+    "`event: end`（data 里有 busy 和 last_id）并结束；busy 为 true 时带着 last_id 再连。"
+    "页面用带请求头的 fetch 读这个流（EventSource 带不了 X-Workspace-Id）。"
+    "推送用不了时（代理不支持、旧版本）页面退回 .../events 的长轮询。",
+    response_class=EventSourceResponse,
+    responses=_json_errors(401, 403, 404, 422, 503),
+)
+async def llm_chat_session_stream(
+    request: Request,
+    access: Admin,
+    bridges: Bridges,
+    bridge_id: UUID,
+    session_id: SessionId,
+    after: Annotated[int, Query(ge=0)] = 0,
+) -> AsyncIterator[LlmChatEventOut]:
+    # 实际产出的是 ServerSentEvent；注解写 LlmChatEventOut，接口说明里才有 data 的结构
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    events = LlmChatService(bridges).stream(
+        row, session_id, after, max_seconds=STREAM_MAX_SECONDS, disconnected=request.is_disconnected
+    )
+    async for item in events:
+        yield item  # type: ignore[misc]
 
 
 @router.get(

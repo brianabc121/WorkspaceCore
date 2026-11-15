@@ -112,6 +112,13 @@ export function quotaUsage(w: QuotaWindow) {
 }
 /** 平台的官方程序不给额度时（CodeBuddy）页面上的说明：不显示猜的数字 */
 export const NO_QUOTA = '这个平台的官方程序不提供剩余额度和重置时间（CodeBuddy 按积分计费），这里显示不了；剩余积分请到平台官网的账号页面查看。'
+/** 一段时间有多长：秒数 → “45 秒”“3 分 20 秒”“1 小时 5 分” */
+export function duration(total: number) {
+  const s = Math.round(total)
+  if (s < 60) return `${s} 秒`
+  if (s < 3600) return `${Math.floor(s / 60)} 分${s % 60 ? ` ${s % 60} 秒` : ''}`
+  return `${Math.floor(s / 3600)} 小时${Math.floor((s % 3600) / 60) ? ` ${Math.floor((s % 3600) / 60)} 分` : ''}`
+}
 export const seconds = (value: number | null | undefined) => (value ? formatTime(new Date(value * 1000).toISOString()) : '—')
 
 // 工作台自己写的说明；会话桥返回的错误（CONFLICT 等）带的是会话桥写的中文说明，按纯文字显示

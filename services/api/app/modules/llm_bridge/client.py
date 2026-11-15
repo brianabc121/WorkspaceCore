@@ -80,6 +80,8 @@ class BridgeCaller:
     scopes: tuple[str, ...]
     # 只能用哪些平台；None 是不限（人在聊天页）。管理器按会话所属的平台检查
     platforms: tuple[str, ...] | None = None
+    # 出处：谁、因为什么发起的（实例或人，当时在做的任务）。管理器只记录，不用它做判断
+    source: dict[str, Any] | None = None
 
 
 @dataclass
@@ -119,6 +121,8 @@ class BridgeClient:
         }
         if caller.platforms is not None:
             headers["X-Bridge-Platforms"] = ",".join(caller.platforms)
+        if caller.source:
+            headers["X-Bridge-Source"] = quote(json.dumps(caller.source, ensure_ascii=False))
         body = {
             "jsonrpc": "2.0",
             "id": 1,

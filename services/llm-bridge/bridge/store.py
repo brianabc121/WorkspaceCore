@@ -100,7 +100,7 @@ CREATE INDEX IF NOT EXISTS events_session ON events (session_id, id);
 """
 
 Row = dict[str, Any]
-_JSON_COLUMNS = {"config", "options", "summary", "scopes", "payload", "data"}
+_JSON_COLUMNS = {"config", "options", "summary", "scopes", "payload", "data", "source"}
 
 
 # 工具结果等大段内容在 messages 里最多存这么多字符，超过的截断并注明
@@ -148,6 +148,14 @@ def _row(row: sqlite3.Row | None) -> Row | None:
     if "enabled" in out:
         out["enabled"] = bool(out["enabled"])
     return out
+
+
+def usage_tokens(usage: Row) -> int:
+    """官方程序报的用量里一共多少 token：有总数用总数，没有就输入加输出。"""
+    used = usage.get("total_tokens") or (
+        int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
+    )
+    return int(used or 0)
 
 
 class Store:
@@ -248,6 +256,22 @@ class Store:
         columns = {row["name"] for row in self._db.execute("PRAGMA table_info(sessions)")}
         if "imported_at" not in columns:
             self._db.execute("ALTER TABLE sessions ADD COLUMN imported_at REAL")
+        # 改进方案第 2 期（T-0248）：出处（谁、因为什么发起的）和变更序号（工作台按它增量同步索引）
+        turn_columns = {row["name"] for row in self._db.execute("PRAGMA table_info(turns)")}
+        for name in ("source", "superseded_by"):
+            if name not in turn_columns:
+                self._db.execute(f"ALTER TABLE turns ADD COLUMN {name} TEXT")
+        if "source" not in columns:
+            self._db.execute("ALTER TABLE sessions ADD COLUMN source TEXT")
+        if "rev" not in columns:
+            self._db.execute("ALTER TABLE sessions ADD COLUMN rev INTEGER NOT NULL DEFAULT 0")
+            # 已有的会话按最后活动的先后编号，工作台第一次同步时能全部取到
+            self._db.execute(
+                "UPDATE sessions SET rev = (SELECT COUNT(*) FROM sessions o WHERE "
+                "o.updated_at < sessions.updated_at OR "
+                "(o.updated_at = sessions.updated_at AND o.id <= sessions.id))"
+            )
+        self._db.execute("CREATE INDEX IF NOT EXISTS sessions_rev ON sessions (rev)")
         if "request_id" not in columns:  # 新建会话的幂等号（T-0247）：同一个调用方重试不会建出两个
             self._db.execute("ALTER TABLE sessions ADD COLUMN request_id TEXT")
         self._db.execute(
@@ -438,12 +462,47 @@ class Store:
             json.dumps(v, ensure_ascii=False) if k in _JSON_COLUMNS else v for k, v in data.items()
         )
         self._exec(f"INSERT INTO sessions ({columns}) VALUES ({marks})", values)  # noqa: S608
+        self.touch_session(session_id)
         session = self.get_session(session_id)
         assert session is not None  # noqa: S101
         return session
 
     def get_session(self, session_id: str) -> Row | None:
         return self._one("SELECT * FROM sessions WHERE id = ?", (session_id,))
+
+    def touch_session(self, session_id: str) -> None:
+        """这个会话有变化（新回合、回合换了状态、改了标题…）：给它一个新的变更序号。"""
+        self._exec(
+            "UPDATE sessions SET rev = (SELECT COALESCE(MAX(rev), 0) + 1 FROM sessions) "
+            "WHERE id = ?",
+            (session_id,),
+        )
+
+    def changed_sessions(self, after: int, limit: int) -> list[Row]:
+        """变更序号在 after 之后的会话，按序号从小到大。
+
+        带上回合数、失败和中断的数量、最后一回合的时间。"""
+        return self._all(
+            "SELECT s.*, "
+            "(SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id) AS turns_total, "
+            "(SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id "
+            " AND t.status IN ('failed', 'unknown')) AS turns_failed, "
+            "(SELECT COUNT(*) FROM turns t WHERE t.session_id = s.id "
+            " AND t.status = 'interrupted') AS turns_interrupted, "
+            "(SELECT MAX(COALESCE(t.finished_at, t.started_at, t.queued_at)) FROM turns t "
+            " WHERE t.session_id = s.id) AS last_turn_at "
+            "FROM sessions s WHERE s.rev > ? ORDER BY s.rev LIMIT ?",
+            (after, limit),
+        )
+
+    def session_tokens(self, session_id: str) -> int:
+        """这个会话累计用掉的 token（各回合摘要里的用量相加）。"""
+        total = 0
+        for row in self._all(
+            "SELECT summary FROM turns WHERE session_id = ? AND summary IS NOT NULL", (session_id,)
+        ):
+            total += usage_tokens((row["summary"] or {}).get("usage") or {})
+        return total
 
     def session_by_request(self, caller_id: str, request_id: str) -> Row | None:
         return self._one(
@@ -457,6 +516,7 @@ class Store:
 
     def update_session(self, session_id: str, **fields: Any) -> None:
         self._update("sessions", "id", session_id, {"updated_at": time.time(), **fields})
+        self.touch_session(session_id)
 
     def list_sessions(
         self,
@@ -514,6 +574,7 @@ class Store:
         *,
         by: str | None = None,
         delivery: str = "turn",
+        source: Row | None = None,
     ) -> Row:
         """新回合；同时把这一问写进 messages（by：谁发的）。"""
         turn_id = new_id("bt")
@@ -523,6 +584,9 @@ class Store:
             (turn_id, session_id, caller_id, request_id, text, time.time()),
         )
         self._exec("UPDATE turns SET position = queued_at WHERE id = ?", (turn_id,))
+        if source:
+            self._update("turns", "id", turn_id, {"source": source})
+        self.touch_session(session_id)
         self.add_message(session_id, turn_id, "user", "text", text, by=by, delivery=delivery)
         turn = self.get_turn(turn_id)
         assert turn is not None  # noqa: S101
@@ -538,6 +602,10 @@ class Store:
 
     def update_turn(self, turn_id: str, **fields: Any) -> None:
         self._update("turns", "id", turn_id, fields)
+        if "status" in fields or "resume_state" in fields:  # 工作台的索引要跟着变
+            turn = self.get_turn(turn_id)
+            if turn is not None:
+                self.touch_session(turn["session_id"])
 
     def list_turns(
         self,
@@ -657,11 +725,8 @@ class Store:
             (since,),
         )
         for row in rows:
-            usage = (row["summary"] or {}).get("usage") or {}
-            used = usage.get("total_tokens") or (
-                int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
-            )
-            totals[row["platform"]] = totals.get(row["platform"], 0) + int(used or 0)
+            used = usage_tokens((row["summary"] or {}).get("usage") or {})
+            totals[row["platform"]] = totals.get(row["platform"], 0) + used
         return totals
 
     def next_queued(self, session_id: str) -> Row | None:
@@ -839,6 +904,23 @@ class Store:
             "INSERT INTO events (session_id, turn_id, kind, payload, at) VALUES (?,?,?,?,?)",
             (session_id, turn_id, kind, json.dumps(payload, ensure_ascii=False), time.time()),
         )
+
+    def pending_delta(self, turn_id: str) -> str:
+        """这个回合里最后一段完整的话之后、还没成段的增量文字（刷新页面时接着显示）。"""
+        last = self._one(
+            "SELECT COALESCE(MAX(id), 0) AS id FROM events WHERE turn_id = ? AND kind = 'message'",
+            (turn_id,),
+        )
+        rows = self._all(
+            "SELECT payload FROM events WHERE turn_id = ? AND kind = 'delta' AND id > ? "
+            "ORDER BY id",
+            (turn_id, last["id"] if last else 0),
+        )
+        return "".join(str((row["payload"] or {}).get("text") or "") for row in rows)
+
+    def drop_deltas(self, turn_id: str) -> None:
+        """回合结束后增量就没用了（完整的每一段都已经存了）：删掉，不让事件表越来越大。"""
+        self._exec("DELETE FROM events WHERE turn_id = ? AND kind = 'delta'", (turn_id,))
 
     def last_progress(self, turn_id: str) -> Row | None:
         """这个回合最新的一条“说了什么 / 在跑什么”：按回合取，会话再长也只读一行。"""

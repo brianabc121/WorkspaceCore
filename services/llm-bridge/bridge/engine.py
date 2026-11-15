@@ -68,7 +68,11 @@ SETTING_LIMITS = {
     "auto_resume_max": (1, 10),
 }
 MAX_WAIT_SECONDS = 50
+# 逐字的增量：攒到这么多字、或者过了这么久，就写成一条事件
+DELTA_FLUSH_CHARS = 240
+DELTA_FLUSH_SECONDS = 0.12
 MAX_EVENT_WAIT_SECONDS = 25
+EVENT_POLL_SECONDS = 0.1  # 等新事件时多久看一次
 ACCOUNT_CACHE_SECONDS = 60
 _MODEL_RE = re.compile(r"^[\w.\-:\[\]/]{1,100}$")
 _REQUEST_ID_RE = re.compile(r"^[\w.\-:]{1,100}$")
@@ -113,6 +117,8 @@ class Caller:
     # 这个调用方只能用哪些平台；None 是不限（人在聊天页、桥自己的调用方）。
     # 由工作台按管理员给实例选的平台带过来，在这里按会话所属的平台检查（T-0247）。
     platforms: frozenset[str] | None = None
+    # 出处：谁、因为什么发起的（工作台带过来：实例或人，当时在做的任务）。只记录，不参与权限
+    source: Row | None = None
 
     def may_use(self, platform: str) -> bool:
         return self.platforms is None or platform in self.platforms
@@ -627,6 +633,7 @@ class Engine:
             workdir=str(workdir),
             options=options,
             request_id=request_id,
+            source=caller.source,
         )
         self.store.add_event(session_id, None, "created", {"by": caller.label, "model": picked})
         return session_view(session, full=True)
@@ -872,6 +879,7 @@ class Engine:
             text,
             by=caller.label,
             delivery="merged" if merged else "turn",
+            source=caller.source,
         )
         if edge is not None:  # 插入的消息排在这个会话队列的最前面
             self.store.update_turn(turn["id"], position=edge - 1)
@@ -882,6 +890,7 @@ class Engine:
         if merged and running is not None:
             # 降级：中断正在跑的回合（记成被打断，不是失败），新回合里带上“接着刚才的做”
             self._superseded[running["id"]] = turn["id"]
+            self.store.update_turn(running["id"], superseded_by=turn["id"])
             await self._driver(session["slot"]).cancel(self._spec(session))
         self._enqueue(self.store.get_turn(turn["id"]) or turn)
         view = await self.wait_turn(turn["id"], wait_seconds)
@@ -941,6 +950,7 @@ class Engine:
 
     def _finish(self, turn_id: str, **fields: Any) -> None:
         self.store.update_turn(turn_id, finished_at=time.time(), **fields)
+        self.store.drop_deltas(turn_id)
         self._cancel_requested.discard(turn_id)
         self._superseded.pop(turn_id, None)
         event = self._done.pop(turn_id, None)
@@ -992,7 +1002,28 @@ class Engine:
             if placed:
                 text += f"\n\n（随这条消息带来的文件已放在工作目录里：{'、'.join(placed)}）"
 
+        # 逐字的增量攒一小会儿再写成一条事件：不然一个字一行，事件表和轮询都吃不消
+        pending: list[str] = []
+        flushed = [time.monotonic()]
+
+        def flush() -> None:
+            if pending:
+                text_ = redact("".join(pending))
+                pending.clear()
+                self.store.add_event(session_id, turn_id, "delta", {"text": text_})
+            flushed[0] = time.monotonic()
+
         async def sink(kind: str, payload: Row) -> None:
+            if kind == "delta":
+                pending.append(str(payload.get("text") or ""))
+                size = sum(len(p) for p in pending)
+                if (
+                    size >= DELTA_FLUSH_CHARS
+                    or time.monotonic() - flushed[0] >= DELTA_FLUSH_SECONDS
+                ):
+                    flush()
+                return
+            flush()  # 别的事件之前先把攒着的增量写出去，顺序才对
             if kind == "quota":  # 官方程序报出的额度：记下来，不算会话里的事件
                 self._save_quota(session["slot"], payload.get("windows") or [])
                 return
@@ -1129,8 +1160,25 @@ class Engine:
             "started_at": turn["started_at"],
             "finished_at": turn["finished_at"],
         }
+        # 统一的回合状态（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.1）：三条链路都读这几项
+        view["timing"] = _timing(turn)
+        if turn.get("source"):
+            view["source"] = turn["source"]
+        nxt = turn.get("superseded_by") or turn.get("resumed_by")
+        if nxt:  # 被打断或续跑：接着做的是哪一回合，一路跟到底就是最终结果
+            view["next_turn_id"] = nxt
+        if turn["status"] not in ("queued", "running"):
+            usage = (turn["summary"] or {}).get("usage") or {}
+            if usage:
+                view["usage"] = usage
+            outputs = self.store.turn_attachments(turn["id"], "output")
+            if outputs:
+                view["outputs"] = [
+                    {k: a[k] for k in ("id", "name", "media_type", "size")} for a in outputs
+                ]
         if turn["status"] == "queued":
             view["ahead_in_session"] = self.store.queue_position(turn)
+            view["waiting"] = self._waiting(turn, session, view["ahead_in_session"])
         elif turn["status"] == "running":
             latest = self.store.last_progress(turn["id"])
             if latest is not None:
@@ -1140,12 +1188,64 @@ class Engine:
             view["result"] = turn["result_text"] or ""
             view["summary"] = turn["summary"] or {}
         elif turn["status"] == "interrupted":
-            view["failure"] = {"kind": turn["error_kind"], "message": turn["error_message"]}
+            view["failure"] = self._failure(turn, session)
             view["resume"] = self._resume_view(turn)
         elif turn["status"] != "cancelled":
             # 不叫 error：工具出错时的返回才用 error
-            view["failure"] = {"kind": turn["error_kind"], "message": turn["error_message"]}
+            view["failure"] = self._failure(turn, session)
         return view
+
+    def _waiting(self, turn: Row, session: Row, ahead: int) -> Row:
+        """排队的回合在等什么：会话里前面的消息、平台因额度暂停、还是平台的名额。"""
+        if ahead:
+            return {"reason": "session", "position": ahead}
+        platform = str(session.get("platform") or "")
+        pause = self.store.pauses().get(platform)
+        if pause is not None:
+            return {
+                "reason": "quota",
+                "until": pause["until"],
+                "estimated": bool(pause["estimated"]),
+            }
+        return {"reason": "platform_slot", "running": self._limiter(platform).running}
+
+    def _failure(self, turn: Row, session: Row) -> Row:
+        """失败、未知、中断的原因，以及调用方该不该再发一次、多久以后。
+
+        retryable：True 重新发同样的内容有意义；False 不用或不该重发（要先解决原因，
+        或者已经有回合接着做了）；None 是结果未知——可能已经做了，先看会话再决定。"""
+        kind = turn["error_kind"]
+        failure: Row = {"kind": kind, "message": turn["error_message"]}
+        if turn["status"] == "unknown" or kind == "unknown":
+            failure["retryable"] = None
+        else:
+            failure["retryable"] = kind in _RETRYABLE
+        if kind in ("quota_exceeded", "rate_limited"):
+            pause = self.store.pauses().get(str(session.get("platform") or ""))
+            until = turn.get("resume_at") or (pause["until"] if pause else None)
+            if until:
+                failure["retry_after_seconds"] = max(0, round(until - time.time()))
+        return failure
+
+    def index_page(self, after: int, limit: int) -> Row:
+        """给工作台同步会话索引用：变更序号在 after 之后的会话（不含对话内容）。"""
+        rows = self.store.changed_sessions(max(after, 0), min(max(limit, 1), 500))
+        busy = self.store.busy_sessions()
+        items = [
+            {
+                **session_view(row, full=True),
+                "rev": row["rev"],
+                "owner_id": row["caller_id"],
+                "busy": row["id"] in busy,
+                "turns_total": row["turns_total"],
+                "turns_failed": row["turns_failed"],
+                "turns_interrupted": row["turns_interrupted"],
+                "last_turn_at": row["last_turn_at"],
+                "tokens": self.store.session_tokens(row["id"]),
+            }
+            for row in rows
+        ]
+        return {"sessions": items, "last_rev": rows[-1]["rev"] if rows else after}
 
     # ---- 聊天页用（管理接口；docs/v2/LLM_CHAT_PLAN.md 第 4.1 节） ----
     def admin_session_view(self, session: Row, busy: set[str] | None = None) -> Row:
@@ -1454,6 +1554,20 @@ class Engine:
                         reply["resume"] = self._resume_view(turn)
                 elif status == "queued":
                     reply["ahead_in_session"] = self.store.queue_position(turn)
+                    reply["waiting"] = self._waiting(turn, session, reply["ahead_in_session"])
+                elif status == "running":
+                    # 最后一段完整的话之后、还没成段的增量：刷新页面时接着显示
+                    reply["partial"] = self.store.pending_delta(turn["id"])
+            # 回溯和日常都要看：用时、用量、接着做的是哪一回合
+            reply["timing"] = _timing(turn)
+            usage = (turn["summary"] or {}).get("usage") or {}
+            if usage:
+                reply["usage"] = usage
+            nxt = turn.get("superseded_by") or turn.get("resumed_by")
+            if nxt:
+                reply["next_turn_id"] = nxt
+            if turn.get("source"):
+                reply["source"] = turn["source"]
             messages.append(reply)
         return {"session": view, "messages": messages, "last_event_id": last_event_id}
 
@@ -1466,7 +1580,7 @@ class Engine:
             busy = session_id in self.store.busy_sessions()
             if events or not busy or time.monotonic() >= deadline:
                 break
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(EVENT_POLL_SECONDS)
         return {
             "events": [_event_view(e) for e in events],
             "busy": busy,
@@ -1916,6 +2030,21 @@ def env_view(env: Row) -> Row:
     }
 
 
+# 重新发同样的内容有意义的失败：超时、平台临时出错、被限流
+_RETRYABLE = frozenset({"timeout", "unavailable", "rate_limited", "platform_error"})
+
+
+def _timing(turn: Row) -> Row:
+    """排队、开始、结束的时间，以及等了多久、做了多久（秒）。"""
+    queued, started, finished = turn["queued_at"], turn["started_at"], turn["finished_at"]
+    timing: Row = {"queued_at": queued, "started_at": started, "finished_at": finished}
+    if queued and started:
+        timing["waited_seconds"] = round(started - queued, 1)
+    if started and finished:
+        timing["ran_seconds"] = round(finished - started, 1)
+    return timing
+
+
 def session_view(session: Row, *, full: bool = False) -> Row:
     view: Row = {
         "session_id": session["id"],
@@ -1925,6 +2054,7 @@ def session_view(session: Row, *, full: bool = False) -> Row:
         "title": session["title"],
         "status": session["status"],
         "origin": session["origin"],
+        "source": session.get("source"),
         "owner": session["caller_label"],
         "created_at": session["created_at"],
         "updated_at": session["updated_at"],

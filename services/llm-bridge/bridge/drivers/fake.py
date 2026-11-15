@@ -126,6 +126,12 @@ class FakeDriver(Driver):
                 waiter.cancel()
                 if done:
                     raise DriverError("platform_error", "回合被中断")
+            if text.startswith("stream:"):
+                # 模拟逐字输出：分三小段给增量，中间停一下（stream:<每段停几秒>），最后给整段
+                for piece in ("第一", "二", "三段"):
+                    await sink("delta", {"text": piece})
+                    await asyncio.sleep(float(text[7:] or 0))
+                await sink("message", {"text": "第一二三段"})
             if text.startswith("read:"):
                 # 模拟读文件这类工具调用和它的结果
                 await sink("tool", {"name": "Read", "input": '{"file_path": "' + text[5:] + '"}'})

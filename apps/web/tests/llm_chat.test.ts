@@ -199,7 +199,8 @@ describe('大模型聊天', () => {
     expect(box).toHaveValue('')
     expect(messages()).toHaveLength(4)
     expect(within(messages()[2]!).getByText('再短一点')).toBeVisible()
-    expect(within(messages()[3]!).getByText('还在继续…')).toBeVisible()
+    // 等的时候说明用了多久、正在做什么
+    expect(within(messages()[3]!).getByRole('status')).toHaveTextContent(/^还在继续… · 已用 \d+ 秒 · 命令：ls docs$/)
     expect(within(messages()[3]!).getByText('ls docs')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '停止' })).toBeVisible()
     expect(screen.getByText('上一条还没答完：现在发的不会打断它，会进队列，等前面的做完再发给模型。')).toBeVisible()
@@ -214,6 +215,63 @@ describe('大模型聊天', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument())
     expect(messages()).toHaveLength(4)
     expect(query(requests.filter(r => path(r).endsWith('/events')).at(-1)!).get('after')).toBe('14')
+  })
+
+  it('shows the answer as it is typed over the push channel, and picks it up again after a reload', async () => {
+    // 推送通道：一帧一帧到。逐字的增量先接在后面显示；这一段写完时 message 带来全文，替换掉攒的
+    const frame = (name: string, data: unknown, id: number) => `event: ${name}\nid: ${id}\ndata: ${JSON.stringify(data)}\n\n`
+    let push!: (text: string) => void, close!: () => void
+    const streams: string[] = []
+    const { requests, world } = setup('owner', {}, async r => {
+      if (path(r) === `${chat}/sessions/${S1}/messages` && r.method === 'POST') return Response.json(turn())
+      if (path(r) !== `${chat}/sessions/${S1}/stream`) return undefined
+      streams.push(query(r).get('after') ?? '')
+      const encoder = new TextEncoder()
+      const body = new ReadableStream<Uint8Array>({ start(controller) { push = text => controller.enqueue(encoder.encode(text)); close = () => controller.close() } })
+      return new Response(body, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const box = await composer()
+    await fireEvent.update(box, '讲个故事')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(streams).toEqual(['10']))
+    push(frame('chat', event(11, 'started'), 11) + frame('chat', event(12, 'delta', { text: '从前' }), 12))
+    expect(await screen.findByText('从前')).toBeVisible()
+    // 一帧可以分几次到
+    const next = frame('chat', event(13, 'delta', { text: '有座山' }), 13)
+    push(next.slice(0, 20)); push(next.slice(20))
+    expect(await screen.findByText('从前有座山')).toBeVisible()
+    push(frame('chat', event(14, 'message', { text: '从前有座山。' }), 14) + frame('chat', event(15, 'delta', { text: '山里' }), 15))
+    expect(await screen.findByText(/^从前有座山。\s+山里$/)).toBeVisible()
+    expect(screen.queryByText('从前有座山')).not.toBeInTheDocument()
+    // 用的是推送，没有去轮询
+    expect(requests.filter(r => path(r).endsWith('/events'))).toEqual([])
+
+    // 回合结束：以服务器给的整段会话为准；回答下面有用时和 token
+    world.conversations[S1] = talk({ turns: 2 }, [asked('写一个周报模板'), answered('好的，模板如下。'), asked('讲个故事', T2), answered('从前有座山。\n\n山里有座庙。', T2, { timing: { ran_seconds: 75 }, usage: { input_tokens: 1200, output_tokens: 34 } })], 16)
+    push(frame('chat', event(16, 'completed'), 16) + frame('end', { busy: false, last_id: 16 }, 16))
+    close()
+    expect(await screen.findByText(/山里有座庙。/)).toBeVisible()
+    expect(within(messages()[3]!).getByText('用时 1 分 15 秒 · 1,234 token')).toBeVisible()
+    await waitFor(() => expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument())
+  })
+
+  it('says what a queued message is waiting for, and shows text typed before the page was reloaded', async () => {
+    const until = now() + 3600
+    const T3 = `bt_${'5'.repeat(20)}`
+    setup('owner', { sessions: [session({ busy: true })], conversations: { [S1]: {
+      ...talk({ busy: true }, [
+        asked('第一问'), answered('写到一', T1, { status: 'running', partial: '半的话', timing: { started_at: now() - 65 } }),
+        asked('第二问', T2), answered('', T2, { status: 'queued', ahead_in_session: 0, waiting: { reason: 'quota', until, estimated: true } }),
+        asked('第三问', T3), answered('', T3, { status: 'queued', ahead_in_session: 0, waiting: { reason: 'platform_slot', running: 3 } }),
+      ]),
+    } } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    // 刷新页面时已经写出来的增量接着显示
+    expect(await screen.findByText(/^写到一\s+半的话$/)).toBeVisible()
+    expect(within(messages()[1]!).getByRole('status')).toHaveTextContent(/已用 1 分 \d+ 秒/)
+    expect(within(messages()[3]!).getByRole('status')).toHaveTextContent(/^排队中：这个平台因额度用完暂停了，预计 .+ 恢复后开始。$/)
+    expect(within(messages()[5]!).getByRole('status')).toHaveTextContent('排队中：在等这个平台的名额（同时进行的会话数到上限了）。')
   })
 
   it('asks once before sending into a session someone else made', async () => {

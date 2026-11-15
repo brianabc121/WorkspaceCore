@@ -3282,6 +3282,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 聊天：会话的新事件，逐条推送（admin，SSE）
+         * @description 和 .../events 是同一份数据，只是不用反复请求：每条事件 `event: chat`，data 是 LlmChatEventOut，id 是事件编号。会话里没有回合在跑、或者推送满 5 分钟时发一条 `event: end`（data 里有 busy 和 last_id）并结束；busy 为 true 时带着 last_id 再连。页面用带请求头的 fetch 读这个流（EventSource 带不了 X-Workspace-Id）。推送用不了时（代理不支持、旧版本）页面退回 .../events 的长轮询。
+         */
+        get: operations["llm_chat_session_stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}": {
         parameters: {
             query?: never;
@@ -3784,6 +3804,26 @@ export interface paths {
          * @description 不用填地址、令牌，也不登录服务器：地址和令牌由工作台自己掌握，不经过页面。409 LOCAL_UNAVAILABLE：没有随带；LOCAL_EXISTS：已经添加过；LOCAL_TAKEN：已经被另一个工作空间添加。503：它还没启动好。
          */
         post: operations["llm_bridge_add_local"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 所有 MCP 管理器上的会话（索引，不含对话内容；admin）
+         * @description 按最后活动倒序。数据来自工作台的会话索引，后台每分钟同步一次；sync=true 时先同步再读（连不上的管理器列在 sync_failed 里，仍给出已有的记录）。对话内容不在这里：用聊天页的接口按管理器和会话读。
+         */
+        get: operations["llm_bridge_index"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -11868,6 +11908,101 @@ export interface components {
              */
             token: string;
         };
+        /** LlmBridgeIndexList */
+        LlmBridgeIndexList: {
+            /** Next Offset */
+            next_offset: number | null;
+            /** Sessions */
+            sessions: components["schemas"]["LlmBridgeIndexSessionOut"][];
+            /**
+             * Sync Failed
+             * @description 这次没同步上的 MCP 管理器的名字（sync=true 时）
+             */
+            sync_failed: string[];
+        };
+        /**
+         * LlmBridgeIndexSessionOut
+         * @description 会话索引里的一条（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.4）：不含提问和回答。
+         */
+        LlmBridgeIndexSessionOut: {
+            /**
+             * Bridge Id
+             * Format: uuid
+             */
+            bridge_id: string;
+            /** Bridge Name */
+            bridge_name: string;
+            /** Busy */
+            busy: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Last Turn At */
+            last_turn_at: string | null;
+            /** Mode */
+            mode: string;
+            /** Model */
+            model: string | null;
+            /**
+             * Origin
+             * @description bridge：经管理器新建；external：官方程序里已有
+             */
+            origin: string;
+            /**
+             * Owner
+             * @description 建会话时的名字
+             */
+            owner: string;
+            /**
+             * Owner Id
+             * @description 实例的 id，或 user:<用户 id>；external 为空
+             */
+            owner_id: string | null;
+            /**
+             * Owner Kind
+             * @description agent / user / external
+             */
+            owner_kind: string;
+            /** Platform */
+            platform: string;
+            /** Session Id */
+            session_id: string;
+            /**
+             * Source
+             * @description 出处：建会话时工作台记下的——哪个实例或人，智能体当时在执行哪些任务
+             */
+            source: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Status
+             * @description active / archived
+             */
+            status: string;
+            /** Title */
+            title: string;
+            /**
+             * Tokens
+             * @description 累计 token：官方程序报的数相加，不是账单
+             */
+            tokens: number;
+            /**
+             * Turns Failed
+             * @description 失败和结果未知的回合数
+             */
+            turns_failed: number;
+            /** Turns Interrupted */
+            turns_interrupted: number;
+            /** Turns Total */
+            turns_total: number;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /**
          * LlmBridgeInstallOut
          * @description 工作台部署出去的 MCP 管理器在哪（docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md）。
@@ -12523,7 +12658,7 @@ export interface components {
             id: number;
             /**
              * Kind
-             * @description queued / started / message / command / files / notice / completed / failed / cancelled / unknown
+             * @description queued / started / delta / message / command / files / notice / completed / failed / cancelled / unknown。delta 是逐字的增量：接在这一回合正在写的那一段后面；随后到的 message 是这一段的全文，替换掉攒起来的增量
              */
             kind: string;
             /** Paths */
@@ -12735,6 +12870,16 @@ export interface components {
              * @description 是不是当前用户发的（只有 user 消息有）
              */
             mine?: boolean | null;
+            /**
+             * Next Turn Id
+             * @description 被打断或续跑时，接着做的是哪一回合
+             */
+            next_turn_id?: string | null;
+            /**
+             * Partial
+             * @description 进行中：最后一段完整的话之后、已经写出来的增量文字
+             */
+            partial?: string | null;
             /** @description 被额度打断的回合（status=interrupted）：什么时候自动继续 */
             resume?: components["schemas"]["LlmChatResumeOut"] | null;
             /**
@@ -12742,6 +12887,13 @@ export interface components {
              * @description user / assistant
              */
             role: string;
+            /**
+             * Source
+             * @description 这一回合的出处：哪个实例或人，智能体当时在执行哪些任务
+             */
+            source?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Status
              * @description 回答所在回合的状态：queued / running / completed / failed / cancelled / unknown / interrupted
@@ -12755,8 +12907,29 @@ export interface components {
             steps: components["schemas"]["LlmChatStepOut"][];
             /** Text */
             text: string;
+            /**
+             * Timing
+             * @description 回答所在回合的 queued_at / started_at / finished_at、waited_seconds（排了多久）、ran_seconds（做了多久）
+             */
+            timing?: {
+                [key: string]: unknown;
+            } | null;
             /** Turn Id */
             turn_id?: string | null;
+            /**
+             * Usage
+             * @description 这一回合的 token 数（官方程序报的，不是账单）
+             */
+            usage?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Waiting
+             * @description 排队时在等什么：{reason: session, position} 会话里前面还有消息；{reason: quota, until, estimated} 平台因额度暂停；{reason: platform_slot} 等平台的名额
+             */
+            waiting?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** LlmChatModelOut */
         LlmChatModelOut: {
@@ -35165,6 +35338,79 @@ export interface operations {
             };
         };
     };
+    llm_chat_session_stream: {
+        parameters: {
+            query?: {
+                after?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_chat_edit_queued: {
         parameters: {
             query?: never;
@@ -37577,6 +37823,83 @@ export interface operations {
             };
             /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_index: {
+        parameters: {
+            query?: {
+                /** @description 只看这个 MCP 管理器 */
+                bridge_id?: string | null;
+                /** @description 谁建的：智能体 / 人 / 官方程序里已有 */
+                owner_kind?: ("agent" | "user" | "external") | null;
+                /** @description 先同步一次 */
+                sync?: boolean;
+                limit?: number;
+                offset?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeIndexList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

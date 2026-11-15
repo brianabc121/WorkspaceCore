@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { CHAT_NO_TOOLS, seconds } from '../api'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { CHAT_NO_TOOLS, duration, seconds } from '../api'
 import { splitText, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
 import ChatAttachments from './ChatAttachments.vue'
 
@@ -16,7 +16,9 @@ const STEP: Record<string, string> = { message: '说明', command: '命令', fil
 const stepLabel = (step: ChatStep) => `${STEP[step.kind] ?? step.kind}${step.name && (step.kind === 'tool' || step.kind === 'tool_result') ? ` ${step.name}` : ''}`
 const CODE_STEPS = ['command', 'files', 'tool', 'tool_result']
 const FAILURE: Record<string, string> = { failed: '这一回合失败了', unknown: '这一回合的结果未知' }
-const parts = computed(() => splitText(props.message.text))
+// 正在写的那一段（逐字的增量）接在已经写完的后面一起显示
+const shown = computed(() => [props.message.text, props.message.partial].filter(Boolean).join('\n\n'))
+const parts = computed(() => splitText(shown.value))
 const fakeCall = computed(() => !!props.noTools && props.message.role === 'assistant' && /<tool_call>|<function_calls>|<invoke\b|<tool_use>/.test(props.message.text ?? ''))
 const reply = computed(() => props.message.role === 'assistant')
 const status = computed(() => (reply.value ? props.message.status ?? 'completed' : ''))
@@ -26,12 +28,41 @@ const who = computed(() => {
   if (props.message.mine) return '我'
   return props.message.by || '用户'
 })
+// 等待时每秒走一下，显示已经用了多久
+const now = ref(Date.now() / 1000)
+let ticker: ReturnType<typeof setInterval> | undefined
+watch(pending, on => {
+  clearInterval(ticker); ticker = undefined
+  if (on) { now.value = Date.now() / 1000; ticker = setInterval(() => { now.value = Date.now() / 1000 }, 1000) }
+}, { immediate: true })
+onBeforeUnmount(() => clearInterval(ticker))
+const elapsed = computed(() => {
+  const started = Number(props.message.timing?.started_at ?? 0)
+  return status.value === 'running' && started ? duration(Math.max(0, now.value - started)) : ''
+})
+// 开发回合正在做什么：最近的一步（命令、工具、提示）
+const doing = computed(() => {
+  if (status.value !== 'running') return ''
+  const last = [...(props.message.steps ?? [])].reverse().find(s => ['command', 'tool', 'notice', 'files'].includes(s.kind))
+  return last ? `${stepLabel(last)}：${last.text.split('\n')[0]!.slice(0, 80)}` : ''
+})
 const waiting = computed(() => {
   if (status.value === 'queued') {
-    const ahead = props.message.ahead_in_session
+    const wait = props.message.waiting, ahead = props.message.ahead_in_session
+    // 说清楚在等什么：会话里前面的消息、平台因额度暂停、平台的名额
+    if (wait?.reason === 'quota') return `排队中：这个平台因额度用完暂停了${wait.until ? `，${wait.estimated ? '预计 ' : ''}${seconds(Number(wait.until))} 恢复后开始` : ''}。`
+    if (wait?.reason === 'platform_slot') return '排队中：在等这个平台的名额（同时进行的会话数到上限了）。'
     return ahead ? `排队中：前面还有 ${ahead} 条` : '排队中…'
   }
-  return parts.value.length ? '还在继续…' : '正在回答…'
+  const base = parts.value.length ? '还在继续…' : '正在回答…'
+  return [base, elapsed.value && `已用 ${elapsed.value}`, doing.value].filter(Boolean).join(' · ')
+})
+// 回答完之后：用了多久、多少 token（官方程序报的数）
+const meta = computed(() => {
+  if (!reply.value || pending.value) return ''
+  const ran = Number(props.message.timing?.ran_seconds ?? 0), usage = props.message.usage as Record<string, unknown> | null | undefined
+  const tokens = usage ? Number(usage.total_tokens ?? 0) || Number(usage.input_tokens ?? 0) + Number(usage.output_tokens ?? 0) : 0
+  return [ran >= 1 && `用时 ${duration(ran)}`, tokens > 0 && `${tokens.toLocaleString()} token`].filter(Boolean).join(' · ')
 })
 const failure = computed(() => {
   if (status.value !== 'failed' && status.value !== 'unknown') return ''
@@ -87,6 +118,7 @@ const busy = computed(() => !!props.resuming && props.resuming === props.message
     </div>
     <p v-else-if="reply && status === 'completed'" class="lc-bubble lc-muted">（没有文字回答）</p>
     <ChatAttachments v-if="source && message.attachments?.length" :chat="source.chat" :bridge-id="source.bridgeId" :session-id="source.sessionId" :items="message.attachments" />
+    <p v-if="meta" class="lc-meta">{{ meta }}</p>
     <p v-if="fakeCall" class="lc-note" role="note">上面像“调用工具”的内容只是模型写出来的文字，并没有执行。{{ CHAT_NO_TOOLS }}</p>
     <p v-if="failure" class="lc-failure" role="alert">{{ failure }}</p>
     <div v-if="interrupted" class="lc-interrupted" role="note">

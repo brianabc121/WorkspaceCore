@@ -49,6 +49,7 @@
 .lc-side-foot { display: grid; gap: 6px; justify-items: start; padding: 8px 12px 10px; border-top: 1px solid var(--line); font-size: .82rem; }
 .lc-side-foot .check-field { margin: 0; }
 .lc-side-foot .asv-link svg { width: 14px; height: 14px; }
+.lc-meta { margin: 2px 0 0; color: var(--muted); font-size: .74rem; }
 .lc-note { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; }
 .lc-note.is-red { background: color-mix(in srgb, var(--danger) 8%, var(--surface)); color: var(--danger); }
 

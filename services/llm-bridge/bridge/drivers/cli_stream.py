@@ -139,6 +139,20 @@ def _error_kind(text: str) -> ErrorKind:
     return "platform_error"
 
 
+def _text_delta(event: dict[str, Any]) -> str:
+    """stream_event 里的一小段回答文字；别的增量（思考、工具参数）和子代理的不要。"""
+    if event.get("parent_tool_use_id"):
+        return ""
+    inner = event.get("event")
+    if not isinstance(inner, dict) or inner.get("type") != "content_block_delta":
+        return ""
+    delta = inner.get("delta")
+    if not isinstance(delta, dict) or delta.get("type") != "text_delta":
+        return ""
+    text = delta.get("text")
+    return text if isinstance(text, str) else ""
+
+
 def _block_text(content: Any) -> str:
     """消息内容 → 文字：字符串，或带 text 的块列表（text / input_text / output_text）。"""
     if isinstance(content, str):
@@ -336,7 +350,9 @@ class CliStreamDriver(Driver):
         return str(uuid.uuid4())
 
     def _args(self, spec: SessionSpec) -> list[str]:
-        args = ["-p", "--output-format", "stream-json", "--verbose"]
+        # --include-partial-messages：逐字的增量（stream_event），聊天页据此边写边显示。
+        # 在锁定版本的帮助文本和类型定义里核对过：Claude Code 2.1.323、CodeBuddy Code 2.184.0
+        args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
         assert spec.native_id is not None  # noqa: S101
         # 官方程序里已经有这个会话的记录就续接；按文件判断，不按回合数
         # （失败的回合也可能已经建了会话）
@@ -408,7 +424,11 @@ class CliStreamDriver(Driver):
                     continue
                 if not isinstance(event, dict):
                     continue
-                if event.get("type") == "assistant":
+                if event.get("type") == "stream_event":
+                    delta = _text_delta(event)
+                    if delta:
+                        await sink("delta", {"text": delta})
+                elif event.get("type") == "assistant":
                     await self._on_assistant(event, messages, outcome, sink)
                 elif event.get("type") == "user":
                     await self._on_tool_results(event, sink)

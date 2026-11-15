@@ -159,7 +159,10 @@ async def test_codex_turns(codex: CodexDriver, tmp_path: Path) -> None:
     assert outcome.text == "[gpt-a|workspaceWrite] 你好"
     assert outcome.usage["total_tokens"] == 7
     assert outcome.commands == ["ls"] and outcome.files == ["a.txt"]
-    assert [kind for kind, _ in sink.events] == ["command", "files", "message"]
+    kinds = [kind for kind, _ in sink.events]
+    assert kinds == ["command", "files", "delta", "delta", "message"]
+    # 逐字的增量拼起来就是那一段回答
+    assert "".join(p["text"] for k, p in sink.events if k == "delta") == outcome.text
     # 平台的用量限制 → rate_limited
     with pytest.raises(DriverError) as caught:
         await codex.run_turn(spec, "limit", sink)
@@ -269,7 +272,9 @@ async def test_cli_turns_resume_and_transcripts(tmp_path: Path) -> None:
     )
     assert first.commands == ["ls -la"] and first.files == ["src/a.py"]
     assert first.usage == {"input_tokens": 5, "output_tokens": 6}
-    assert [k for k, _ in sink.events] == ["message", "command", "files"]
+    assert [k for k, _ in sink.events] == ["delta", "delta", "message", "command", "files"]
+    # 逐字的增量拼起来就是那一段回答；思考的增量、子代理的增量不算
+    assert "".join(p["text"] for k, p in sink.events if k == "delta") == first.text
     # 第二回合自动改用 --resume（仿真程序对重复的 --session-id 会报错）
     assert (await driver.run_turn(spec, "第二条", Sink())).text.endswith(":: 第二条")
     (listed,) = await driver.list_native(10)

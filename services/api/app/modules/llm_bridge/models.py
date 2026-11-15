@@ -12,13 +12,18 @@
   地址和主机公钥：服务器从工作台移除、改密码、吊销密钥都不影响已经部署的管理器。
 - llm_bridge_deploy_jobs：部署、重新部署、重启、卸载任务，各一条记录，带步骤和脱敏后的日志。
   管理令牌、服务器密码、sudo 密码都不在这两张表里。
+- llm_bridge_sessions：会话索引（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.4）：每个管理器上有哪些会话、
+  谁建的、出处、回合数和用量。不含对话内容。
 """
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -48,10 +53,59 @@ class LlmBridge(Base):
     base_url: Mapped[str] = mapped_column(Text)
     token_ref: Mapped[str] = mapped_column(Text, server_default=text("''"))
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    # 会话索引同步到了管理器的哪个变更序号（llm_bridge_sessions，jobs.py）
+    index_rev: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class LlmBridgeSession(Base):
+    """会话索引：每个 MCP 管理器上有哪些会话（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.4）。
+
+    不含任何提问和回答——对话内容只在管理器里。由后台任务按管理器的变更序号增量同步，
+    用来跨管理器列出和筛选会话、汇总用量。标题是管理器里脱敏之后的那份。"""
+
+    __tablename__ = "llm_bridge_sessions"
+    __table_args__ = (
+        UniqueConstraint("bridge_id", "session_id"),
+        CheckConstraint("owner_kind IN ('agent', 'user', 'external')", name="owner_kind"),
+        Index("ix_llm_bridge_sessions_recent", "workspace_id", "updated_at"),
+        Index("ix_llm_bridge_sessions_owner", "workspace_id", "owner_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    bridge_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.llm_bridge_bridges.id", ondelete="CASCADE")
+    )
+    session_id: Mapped[str] = mapped_column(Text)
+    platform: Mapped[str] = mapped_column(Text)
+    mode: Mapped[str] = mapped_column(Text)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    status: Mapped[str] = mapped_column(Text)  # active / archived
+    origin: Mapped[str] = mapped_column(Text)  # bridge（经管理器新建）/ external（官方程序里已有）
+    # 谁建的：agent（owner_id 是实例的 id）/ user（owner_id 是 user:<用户 id>）/ external（没有）
+    owner_kind: Mapped[str] = mapped_column(Text)
+    owner_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    owner_label: Mapped[str] = mapped_column(Text, server_default=text("''"))
+    # 出处：建会话时工作台带过去的（实例或人，当时在做的任务）
+    source: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    busy: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    turns_total: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    turns_failed: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    turns_interrupted: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_turn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class LlmBridgeGrant(Base):

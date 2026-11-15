@@ -1,7 +1,8 @@
 # 工作台的路由与安全响应头：Caddyfile（HTTP :8080）与 https.Caddyfile（域名 + 自动 HTTPS）共用，
 # 在站点块里 import。改这里两边同时生效。
-# SSE（/api/v1/events/stream）不压缩：压缩会攒够一块才发，事件就不能立刻送到浏览器
-@compressible not path /api/v1/events/stream
+# SSE（/api/v1/events/stream，以及大模型聊天逐字输出的 .../chat/sessions/*/stream）不压缩：
+# 压缩会攒够一块才发，事件就不能立刻送到浏览器
+@compressible not path /api/v1/events/stream /api/v1/llm_bridge/bridges/*/chat/sessions/*/stream
 encode @compressible zstd gzip
 
 # 请求体上限：防止超大请求拖垮后端（Webhook 等需要更大限制时单独放宽）
@@ -34,7 +35,7 @@ handle @readyz_public {
 }
 
 # SSE：不缓冲，每个事件立即转发（Sprint 5 契约第 5 节）
-@events path /api/v1/events/stream
+@events path /api/v1/events/stream /api/v1/llm_bridge/bridges/*/chat/sessions/*/stream
 handle @events {
 	reverse_proxy api:8000 {
 		flush_interval -1
