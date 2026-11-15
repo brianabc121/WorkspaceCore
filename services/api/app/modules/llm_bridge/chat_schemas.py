@@ -277,6 +277,11 @@ class LlmChatGroupCreateIn(_In):
     targets: list[LlmChatTargetIn] = Field(
         min_length=2, max_length=MAX_GROUP_TARGETS, description="2 ~ 6 个目标，可以跨 MCP 管理器"
     )
+    send: bool = Field(
+        default=True,
+        description="false：只建好每个会话，问题先不发——页面要带附件时用："
+        "先把附件传到每个会话，再用“向这一组继续发”带上附件发出",
+    )
 
 
 class LlmChatGroupMemberOut(BaseModel):
@@ -326,3 +331,11 @@ class LlmChatGroupSendIn(_In):
         description="幂等号：重试用同一个，每个会话都不会重复发送",
     )
     takeover: bool = Field(default=False, description="不是自己建的一组要为 true（页面先让人确认）")
+    attachments: dict[
+        Annotated[int, Field(ge=0, lt=MAX_GROUP_TARGETS)],
+        Annotated[list[Annotated[str, Field(pattern=r"^ba_[0-9a-f]{20}$")]], Field(max_length=8)],
+    ] = Field(
+        default={},
+        description="随这个问题带上的附件：成员的位置（position）→ 传到它那个会话里的附件编号。"
+        "附件属于会话，所以每个成员各传各的",
+    )

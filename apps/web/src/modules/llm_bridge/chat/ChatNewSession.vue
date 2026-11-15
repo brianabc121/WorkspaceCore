@@ -5,6 +5,8 @@ import { ArrowLeft } from '@lucide/vue'
 import { ApiError } from '../../../services/api'
 import { MODES, SANDBOX, platformName, type Bridge, type Platform } from '../api'
 import { chatError, newRequestId, type ChatCreateBody, type LlmChatApi, type PlatformChoice } from './chatApi'
+import ChatLocalFiles from './ChatLocalFiles.vue'
+import { uploadAll, useLocalFiles } from './useLocalFiles'
 
 // 新建会话：管理器 → 平台（只列这个管理器控制的；没登录的不能选）→ 用法 → 模型、推理强度 → 开发环境 → 第一条消息。
 const props = defineProps<{
@@ -34,6 +36,9 @@ watch(environments, list => { if (!list.some(e => e.id === environment.value)) e
 watch(efforts, list => { if (!list.includes(effort.value)) effort.value = '' })
 const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
 
+// 第一条消息的附件：会话还没建，先留在页面里；建好会话后传上去，再带着发第一条消息
+const attach = useLocalFiles(computed(() => mode.value !== 'dev'))
+watch(mode, () => attach.recheck())
 const busy = ref(false), error = ref('')
 let pending: { key: string; id: string } | null = null
 const problem = computed(() => {
@@ -46,13 +51,14 @@ const problem = computed(() => {
 async function submit() {
   if (busy.value) return
   if (problem.value) { error.value = problem.value; return }
-  const first = text.value.trim()
+  const first = text.value.trim(), files = [...attach.files.value]
+  if (files.length && !first) { error.value = '带附件时要写第一条消息。'; return }
   const body: ChatCreateBody = {
     platform: platform.value!, mode: mode.value, title: title.value.trim(),
     ...(model.value ? { model: model.value } : {}), ...(effort.value ? { effort: effort.value } : {}),
     ...(mode.value === 'dev' ? { environment: environment.value } : {}),
   }
-  if (first) {
+  if (first && !files.length) {
     const key = JSON.stringify([props.manager.id, body, first])
     if (pending?.key !== key) pending = { key, id: newRequestId() }
     Object.assign(body, { text: first, request_id: pending.id })
@@ -61,6 +67,18 @@ async function submit() {
   try {
     const out = await props.chat.create(props.manager.id, body)
     pending = null
+    if (files.length) {
+      // 附件属于会话：建好之后传上去，再带着发第一条消息。没发成就带着原文进会话，在那里重新添加附件再发
+      const id = out.session.session_id
+      try {
+        const ids = await uploadAll(props.chat, props.manager.id, id, files)
+        await props.chat.send(props.manager.id, id, { text: first, request_id: newRequestId(), takeover: false, attachments: ids })
+        emit('created', id, '', '')
+      } catch (e) {
+        emit('created', id, first, `会话建好了，但带附件的第一条消息没有发出去：${chatError(e)}。请重新添加附件再发。`)
+      }
+      return
+    }
     // 会话建好了但第一条消息没发出去：带着原文进会话，可以在那里重新发
     emit('created', out.session.session_id, out.send_error ? first : '', out.send_error ? `会话建好了，但第一条消息没有发出去：${out.send_error}` : '')
   } catch (e) {
@@ -72,7 +90,7 @@ async function submit() {
 </script>
 
 <template>
-  <form class="lc-new-form" novalidate aria-label="新建会话" @submit.prevent="submit">
+  <form class="lc-new-form" :class="{ 'is-dropping': attach.dragging.value > 0 }" novalidate aria-label="新建会话" @submit.prevent="submit" v-on="attach.drop">
     <header class="lc-head">
       <button v-if="narrow" type="button" class="lc-icon" aria-label="返回会话列表" @click="emit('cancel')"><ArrowLeft aria-hidden="true" /></button>
       <div class="lc-head-main"><h2>新建会话</h2><p class="lc-head-meta">选好管理器、平台和用法，写下第一条消息。</p></div>
@@ -137,7 +155,8 @@ async function submit() {
           </div>
           <div class="form-field">
             <label for="lc-new-text">第一条消息</label>
-            <textarea id="lc-new-text" v-model="text" rows="5" maxlength="100000" placeholder="想问什么、想让它做什么" />
+            <textarea id="lc-new-text" v-model="text" rows="5" maxlength="100000" placeholder="想问什么、想让它做什么" @paste="attach.onPaste" />
+            <ChatLocalFiles :draft="attach" :disabled="busy" />
             <p class="form-help">可以先不写：只建好会话，之后再发。</p>
           </div>
         </template>

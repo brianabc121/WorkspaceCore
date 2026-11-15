@@ -5,10 +5,12 @@ import DataState from '../../../components/DataState.vue'
 import { platformName } from '../api'
 import { chatError, needsTakeover, newRequestId, type ColumnSend, type LlmChatApi } from './chatApi'
 import ChatCompareColumn from './ChatCompareColumn.vue'
+import ChatLocalFiles from './ChatLocalFiles.vue'
+import { uploadAll, useLocalFiles } from './useLocalFiles'
 
 // 多模型同问（docs/v2/LLM_CHAT_PLAN.md 第 3.4 节）：一组里每个模型一栏，并排看回答；下面的输入框向每一栏继续发。
 // 父组件按分组给 key，换一组时整个重建。窄屏时一次看一栏，用上面的标签切换（每一栏都在读自己的进度）。
-const props = defineProps<{ chat: LlmChatApi; groupId: string; narrow: boolean }>()
+const props = defineProps<{ chat: LlmChatApi; groupId: string; narrow: boolean; initialDraft?: string; initialError?: string }>()
 const emit = defineEmits<{ back: []; changed: [] }>()
 
 const group = props.chat.useGroup(toRef(props, 'groupId'))
@@ -17,7 +19,9 @@ const members = computed(() => data.value?.members ?? [])
 const sendable = computed(() => members.value.filter(m => m.session_id && m.bridge_id && m.bridge_enabled).length)
 const shown = ref(0)
 
-const draft = ref(''), sending = ref(false), error = ref(''), working = ref(false), confirmed = ref(false)
+const draft = ref(props.initialDraft ?? ''), sending = ref(false), error = ref(props.initialError ?? ''), working = ref(false), confirmed = ref(false)
+// 附件先留在页面里：发送时传到每个能发的会话上（附件属于会话）。里面有对话会话时只能带图片
+const attach = useLocalFiles(computed(() => !members.value.length || members.value.some(m => m.mode !== 'dev')))
 const latest = ref<Record<number, ColumnSend>>({})
 let pending: { text: string; id: string } | null = null, sequence = 0
 const foreign = computed(() => !!data.value && data.value.owner_kind !== 'me')
@@ -36,16 +40,19 @@ async function submit() {
   if (!text || sending.value || blocked.value) return
   if (foreign.value && !allowTakeover()) return
   if (pending?.text !== text) pending = { text, id: newRequestId() }
-  const body = { text, request_id: pending.id }
+  const files = [...attach.files.value]
   sending.value = true; error.value = ''
   try {
+    const attachments: Record<string, string[]> = {}
+    if (files.length) for (const m of members.value) if (m.session_id && m.bridge_id && m.bridge_enabled) attachments[m.position] = await uploadAll(props.chat, m.bridge_id, m.session_id, files)
+    const body = { text, request_id: pending.id, attachments }
     let out
     try { out = await props.chat.sendGroup(props.groupId, { ...body, takeover: foreign.value }) }
     catch (e) {
       if (!needsTakeover(e) || !allowTakeover()) throw e
       out = await props.chat.sendGroup(props.groupId, { ...body, takeover: true })
     }
-    pending = null; draft.value = ''
+    pending = null; draft.value = ''; attach.clear()
     const id = ++sequence
     latest.value = Object.fromEntries(out.results.map(r => [r.position, { id, text, turn: r.turn ?? null, error: r.error ?? '' }]))
     emit('changed')
@@ -90,12 +97,13 @@ async function archive() {
       <div class="lc-cols">
         <ChatCompareColumn v-for="m in members" v-show="!narrow || shown === m.position" :key="m.position" :chat="chat" :member="m" :latest="latest[m.position] ?? null" />
       </div>
-      <form class="lc-composer" aria-label="向这一组继续发" @submit.prevent="submit">
+      <form class="lc-composer" :class="{ 'is-dropping': attach.dragging.value > 0 }" aria-label="向这一组继续发" @submit.prevent="submit" v-on="blocked ? {} : attach.drop">
         <p v-if="blocked" class="lc-note" role="note">{{ blocked }}</p>
         <template v-else>
           <p v-if="foreign" class="lc-note" role="note">这一组是「{{ data.owner || '别的管理员' }}」建的：可以看；接着发问题前会让你确认一次。</p>
+          <ChatLocalFiles :draft="attach" :disabled="sending" />
           <div class="lc-compose-row">
-            <textarea v-model="draft" rows="2" maxlength="100000" aria-label="问题内容" :placeholder="`继续问这 ${sendable} 个模型：Enter 发送，Shift + Enter 换行`" @keydown="onKey" />
+            <textarea v-model="draft" rows="2" maxlength="100000" aria-label="问题内容" :placeholder="`继续问这 ${sendable} 个模型：Enter 发送，Shift + Enter 换行`" @keydown="onKey" @paste="attach.onPaste" />
             <button type="submit" class="primary-button" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : `发给 ${sendable} 个模型` }}</button>
           </div>
           <p v-if="sendable < members.length" class="lc-hint">有 {{ members.length - sendable }} 个不能继续发（会话没建成，或者它的 MCP 管理器已停用、已删除）。</p>

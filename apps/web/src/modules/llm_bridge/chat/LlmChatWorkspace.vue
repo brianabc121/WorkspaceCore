@@ -69,6 +69,12 @@ function created(id: string, draft: string, error: string) {
 }
 // 会话有变化（发了消息、回合结束）时顺带重读状态：会话信息里的额度和用量跟着更新
 function refreshList() { if (managerId.value) { void chat.invalidateSessions(managerId.value); void status.refetch() } }
+// 一组建好了但带附件的问题没发出去：带着原文和原因进这一组，在那里重新发
+function createdGroup(id: string, draft: string, error: string) {
+  openGroup(id, true)
+  carry.value = draft || error ? { session: id, draft, error } : null
+  refreshAll()
+}
 function openGroup(id: string, replace = false) { carry.value = null; void router[replace ? 'replace' : 'push'](here({ g: id })) }
 // 同问里的会话分散在几个管理器上：都刷新一下
 function refreshAll() { for (const b of list.value) void chat.invalidateSessions(b.id) }
@@ -104,10 +110,13 @@ async function sync() {
         @compare="router.push(here({ compare: '1' }))" @open-group="openGroup($event)"
       />
       <section v-if="showMain" class="lc-main" aria-label="对话">
-        <ChatCompare v-if="groupId" :key="`g:${groupId}`" :chat="chat" :group-id="groupId" :narrow="narrow" @back="router.push(here())" @changed="refreshAll" />
+        <ChatCompare
+          v-if="groupId" :key="`g:${groupId}`" :chat="chat" :group-id="groupId" :narrow="narrow"
+          :initial-draft="carry?.session === groupId ? carry.draft : ''" :initial-error="carry?.session === groupId ? carry.error : ''" @back="router.push(here())" @changed="refreshAll"
+        />
         <ChatCompareNew
           v-else-if="comparing && manager" :chat="chat" :api="api" :bridges="list" :manager-id="manager.id" :narrow="narrow"
-          @created="openGroup($event, true); refreshAll()" @cancel="router.push(here())"
+          @created="createdGroup" @cancel="router.push(here())"
         />
         <ChatNewSession
           v-else-if="creating && manager" :key="`new:${manager.id}`" :chat="chat" :bridges="list" :manager="manager" :choices="choices"

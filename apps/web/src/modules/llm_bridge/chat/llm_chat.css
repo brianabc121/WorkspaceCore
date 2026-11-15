@@ -205,7 +205,11 @@
 .lc-file svg { width: 16px; height: 16px; flex: none; color: var(--muted); }
 .lc-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lc-file-size { flex: none; color: var(--muted); font-size: .76rem; }
-.lc-composer.is-dropping { outline: 2px dashed var(--accent); outline-offset: -4px; background: var(--accent-soft); }
+.lc-local-files { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.lc-local-files > .lc-attached, .lc-local-files > .lc-note { flex-basis: 100%; }
+.lc-attach { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: .82rem; }
+.lc-attach svg { width: 15px; height: 15px; }
+.lc-new-form.is-dropping, .lc-composer.is-dropping { outline: 2px dashed var(--accent); outline-offset: -4px; background: var(--accent-soft); }
 .lc-attached { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .lc-attached li { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 4px 2px 10px; border-radius: 999px; background: var(--surface-2); font-size: .8rem; }
 .lc-step-kind.is-error { color: var(--danger); }

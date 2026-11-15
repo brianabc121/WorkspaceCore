@@ -814,6 +814,8 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST .../chat/groups/{group_id}/messages` | 向每个成员继续发：`text`、`request_id`、`takeover`；返回每个成员的 `turn` 或 `error`（管理器停用、登记被删除、会话没建成的这次不发）。别人建的一组要 `takeover=true`，否则 `409 TAKEOVER_REQUIRED`；已归档的一组 `409` |
 | `POST .../chat/groups/{group_id}/archive` | 归档这一组：只是不再并排显示，每个模型的会话不受影响 |
 
+**同问带附件**（T-0245）。附件属于会话，所以每个成员各传各的：建组时 `send=false` 只建好会话、不发问题（`results` 里没有 `turn`）；把附件传到每个成员的会话（单会话的上传接口）；再 `POST .../messages` 带 `attachments`——成员的 `position` → 它那个会话里的附件编号（每个成员最多 8 个）。别的会话的编号用不到这个会话上，只影响它自己那一栏。
+
 **限流与消息队列**（T-0236，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 2、4 节）。
 
 - 设置（`PUT .../bridges/{id}/settings`）：`concurrency` 的含义改成“每个**平台**同时进行的会话数”（默认 3，ChatGPT / Codex / Claude / CodeBuddy 各算各的；超过的排队等名额，不拒绝）；新增 `min_start_interval_seconds`（同一个平台两次开始之间至少隔几秒，默认 2，0–60）。

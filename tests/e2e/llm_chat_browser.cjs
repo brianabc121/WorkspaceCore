@@ -467,6 +467,14 @@ async function main() {
     await ask.getByRole('textbox', { name: '问题内容' }).press('Enter')
     await claudeColumn.getByText(':: 再问一句').waitFor({ timeout: 60000 })
     await buddyColumn.getByText(':: 再问一句').waitFor({ timeout: 60000 })
+    // 带图片继续问（T-0245）：图片传到每个模型自己的会话里，再一起发；两个模型都收到 1 张
+    await ask.getByLabel('选择要带上的图片或文件').setInputFiles({ name: `同问图 ${run}.png`, mimeType: 'image/png', buffer: PNG })
+    await ask.getByRole('list', { name: '要带上的附件' }).getByText(`同问图 ${run}.png`).waitFor({ timeout: 30000 })
+    await ask.getByRole('textbox', { name: '问题内容' }).fill('带图再问')
+    await ask.getByRole('textbox', { name: '问题内容' }).press('Enter')
+    await claudeColumn.getByText(':: 带图再问 images=1').waitFor({ timeout: 60000 })
+    await buddyColumn.getByText(':: 带图再问 images=1').waitFor({ timeout: 60000 })
+    check((await ask.getByRole('list', { name: '要带上的附件' }).count()) === 0, '发出去之后，同问里待发的附件应清空')
     // 每个模型就是一个普通会话：可以回到单会话里单独继续
     await claudeColumn.getByRole('link', { name: '在这个会话里继续' }).click()
     await page.getByRole('heading', { level: 2, name: QUESTION }).waitFor()

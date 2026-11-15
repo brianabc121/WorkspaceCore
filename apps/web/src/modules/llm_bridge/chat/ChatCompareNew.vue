@@ -4,11 +4,13 @@ import { ArrowLeft, Plus, X } from '@lucide/vue'
 import { ApiError } from '../../../services/api'
 import { MODES, SANDBOX, bridgeError, platformName, type Bridge, type LlmBridgeApi, type Platform } from '../api'
 import { GROUP_TARGETS, chatError, newRequestId, platformChoices, type ChatTarget, type LlmChatApi } from './chatApi'
+import ChatLocalFiles from './ChatLocalFiles.vue'
+import { uploadAll, useLocalFiles } from './useLocalFiles'
 
 // 新建一组同问：挑几个“管理器 + 平台 + 模型”（可以跨管理器），写一个问题，同时发给它们。
 // 打开时先把当前管理器上已登录、能对话的平台都加进来，省得一个个添加。
 const props = defineProps<{ chat: LlmChatApi; api: LlmBridgeApi; bridges: Bridge[]; managerId: string; narrow: boolean }>()
-const emit = defineEmits<{ created: [groupId: string]; cancel: [] }>()
+const emit = defineEmits<{ created: [groupId: string, draft: string, error: string]; cancel: [] }>()
 
 interface Chosen extends ChatTarget { key: number; label: string }
 const targets = ref<Chosen[]>([])
@@ -74,6 +76,9 @@ function remove(key: number) { touched = true; targets.value = targets.value.fil
 
 // ---- 发出 ----
 const text = ref(''), busy = ref(false), error = ref('')
+// 问题的附件：会话还没建，先留在页面里。里面有对话会话时只能带图片
+const attach = useLocalFiles(computed(() => !targets.value.length || targets.value.some(t => t.mode !== 'dev')))
+watch(() => targets.value.map(t => t.mode).join(), () => attach.recheck())
 let pending: { key: string; id: string } | null = null
 async function submit() {
   if (busy.value) return
@@ -81,13 +86,23 @@ async function submit() {
   if (targets.value.length < GROUP_TARGETS.min) { error.value = `至少选 ${GROUP_TARGETS.min} 个模型：只问一个的话用“新建会话”。`; return }
   if (!question) { error.value = '写下要问的问题。'; return }
   const list = targets.value.map(t => ({ bridge_id: t.bridge_id, platform: t.platform, mode: t.mode, ...(t.model ? { model: t.model } : {}), ...(t.effort ? { effort: t.effort } : {}), ...(t.environment ? { environment: t.environment } : {}) }))
-  const key = JSON.stringify([list, question])
+  const files = [...attach.files.value]
+  const key = JSON.stringify([list, question, files.length])
   if (pending?.key !== key) pending = { key, id: newRequestId() }
   busy.value = true; error.value = ''
   try {
-    const out = await props.chat.createGroup({ title: '', text: question, request_id: pending.id, targets: list })
+    // 带附件时先只建会话：附件属于会话，各传各的，再带着各自的编号一起发
+    const out = await props.chat.createGroup({ title: '', text: question, request_id: pending.id, targets: list, send: !files.length })
     pending = null
-    emit('created', out.group.id)
+    if (!files.length) { emit('created', out.group.id, '', ''); return }
+    try {
+      const attachments: Record<string, string[]> = {}
+      for (const m of out.group.members) if (m.session_id && m.bridge_id) attachments[m.position] = await uploadAll(props.chat, m.bridge_id, m.session_id, files)
+      await props.chat.sendGroup(out.group.id, { text: question, request_id: newRequestId(), takeover: false, attachments })
+      emit('created', out.group.id, '', '')
+    } catch (e) {
+      emit('created', out.group.id, question, `这一组建好了，但带附件的问题没有发出去：${chatError(e)}。请重新添加附件再发。`)
+    }
   } catch (e) {
     const unknown = e instanceof ApiError && ['WRITE_UNKNOWN', 'EXTERNAL_TIMEOUT'].includes(e.code)
     error.value = unknown ? '连接中断或超时，不确定有没有建好：稍等一下看左边“同问”里有没有出现；没有的话再点一次（同一个问题不会建出两组）。' : chatError(e)
@@ -96,7 +111,7 @@ async function submit() {
 </script>
 
 <template>
-  <form class="lc-new-form" novalidate aria-label="多模型同问" @submit.prevent="submit">
+  <form class="lc-new-form" :class="{ 'is-dropping': attach.dragging.value > 0 }" novalidate aria-label="多模型同问" @submit.prevent="submit" v-on="attach.drop">
     <header class="lc-head">
       <button v-if="narrow" type="button" class="lc-icon" aria-label="返回会话列表" @click="emit('cancel')"><ArrowLeft aria-hidden="true" /></button>
       <div class="lc-head-main"><h2>多模型同问</h2><p class="lc-head-meta">同一个问题同时发给几个模型，并排看回答。每个模型各开一个会话，之后可以单独继续；可以跨 MCP 管理器。</p></div>
@@ -148,7 +163,8 @@ async function submit() {
 
       <div class="form-field">
         <label for="lc-compare-text">问题</label>
-        <textarea id="lc-compare-text" v-model="text" rows="5" maxlength="100000" placeholder="同时问它们的问题" />
+        <textarea id="lc-compare-text" v-model="text" rows="5" maxlength="100000" placeholder="同时问它们的问题" @paste="attach.onPaste" />
+        <ChatLocalFiles :draft="attach" :disabled="busy" />
       </div>
       <p v-if="error" class="lc-note is-red" role="alert">{{ error }}</p>
       <div class="lb-actions">

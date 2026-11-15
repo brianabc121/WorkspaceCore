@@ -660,6 +660,43 @@ describe('大模型聊天', () => {
     expect(screen.getByText('这个会话里还没有消息。')).toBeVisible()
   })
 
+  it('creates a session with a pasted image: the session first, then the upload, then the first message', async () => {
+    const order: string[] = [], sent: Schema['LlmChatSendIn'][] = [], createBodies: Schema['LlmChatCreateIn'][] = []
+    const A9 = `ba_${'9'.repeat(20)}`
+    setup('owner', {}, async (r, w) => {
+      const p = path(r)
+      if (p === `${chat}/sessions` && r.method === 'POST') {
+        order.push('create'); createBodies.push(await r.json() as Schema['LlmChatCreateIn'])
+        const made = session({ session_id: S2, platform: 'chatgpt', title: '' })
+        w.conversations[S2] = { session: made, messages: [], last_event_id: 1 }
+        return Response.json({ session: made, turn: null, send_error: '' }, { status: 201 })
+      }
+      if (p === `${chat}/sessions/${S2}/attachments` && r.method === 'POST') {
+        order.push(`upload:${query(r).get('name')}`)
+        return Response.json({ id: A9, name: query(r).get('name'), media_type: 'image/png', size: 4, direction: 'input', at: now() }, { status: 201 })
+      }
+      if (p === `${chat}/sessions/${S2}/messages` && r.method === 'POST') { order.push('send'); sent.push(await r.json() as Schema['LlmChatSendIn']); return Response.json(turn()) }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&new=1`)
+    const form = await screen.findByRole('form', { name: '新建会话' })
+    await within(form).findByRole('group', { name: '平台' })
+    const box = within(form).getByLabelText('第一条消息')
+    await fireEvent.paste(box, { clipboardData: { files: [new File(['abcd'], 'image.png', { type: 'image/png' }), new File(['%PDF'], '报告.pdf', { type: 'application/pdf' })] } })
+    expect(within(within(form).getByRole('list', { name: '要带上的附件' })).getAllByRole('listitem')).toHaveLength(1)
+    expect(within(form).getByText(/「报告.pdf」不是图片/)).toBeVisible()
+    // 只有附件、没写字：不建会话
+    await fireEvent.click(within(form).getByRole('button', { name: '新建会话' }))
+    expect(await within(form).findByText('带附件时要写第一条消息。')).toBeVisible()
+    expect(order).toEqual([])
+    await fireEvent.update(box, '看这张图')
+    await fireEvent.click(within(form).getByRole('button', { name: '新建并发送' }))
+    await waitFor(() => expect(order).toEqual(['create', 'upload:image.png', 'send']))
+    expect(createBodies[0]).not.toHaveProperty('text')
+    expect(sent).toEqual([{ text: '看这张图', request_id: expect.stringMatching(/^web-/), takeover: false, attachments: [A9] }])
+    expect(await composer()).toHaveValue('')
+  })
+
   it('lets a stopped manager be read but not written, and switches managers', async () => {
     const { requests } = setup('owner', { bridges: [bridge({ id: TWO, name: '备用', enabled: false }), bridge()] })
     const { router } = await openApp(`/llm_bridge?m=${TWO}&s=${S1}`)
@@ -758,7 +795,7 @@ describe('多模型同问', () => {
     expect(within(claude).getByText('排队中…')).toBeVisible()
     expect(within(gpt).getByText('这一个没有发出去：这个小时的发送次数用完了')).toBeVisible()
     expect(within(gpt).queryByText('举一个例子')).not.toBeInTheDocument()
-    expect(bodies).toEqual([{ text: '举一个例子', request_id: expect.stringMatching(/^web-/), takeover: false }])
+    expect(bodies).toEqual([{ text: '举一个例子', request_id: expect.stringMatching(/^web-/), takeover: false, attachments: {} }])
     expect(within(form).getByRole('textbox', { name: '问题内容' })).toHaveValue('')
   })
 
@@ -786,7 +823,7 @@ describe('多模型同问', () => {
     expect(writes(requests)).toEqual([])
     confirm.mockReturnValue(true)
     await fireEvent.keyDown(box, { key: 'Enter' })
-    await waitFor(() => expect(bodies).toEqual([{ text: '我也问一句', request_id: expect.stringMatching(/^web-/), takeover: true }]))
+    await waitFor(() => expect(bodies).toEqual([{ text: '我也问一句', request_id: expect.stringMatching(/^web-/), takeover: true, attachments: {} }]))
 
     await fireEvent.click(screen.getByRole('button', { name: '归档这一组' }))
     expect(await screen.findByText(/这一组同问已归档，不能再一起发；每个模型的会话还在，可以单独继续。/)).toBeVisible()
@@ -795,6 +832,65 @@ describe('多模型同问', () => {
     // 归档后不在“同问”里了；每一栏还能看
     await waitFor(() => expect(within(screen.getByRole('complementary', { name: '会话列表' })).queryByRole('region', { name: '同问' })).not.toBeInTheDocument())
     expect(screen.getByRole('region', { name: 'Claude（主账号）' })).toBeVisible()
+  })
+
+  it('sends a dropped image to every model of a group: one upload per session, then one send', async () => {
+    const uploads: string[] = [], bodies: Schema['LlmChatGroupSendIn'][] = []
+    const idOf = (session: string) => `ba_${session === S1 ? '1'.repeat(20) : '2'.repeat(20)}`
+    setup('owner', { bridges: two, groups: [groupOf()], conversations: both() }, async r => {
+      const upload = /\/bridges\/([^/]+)\/chat\/sessions\/(bs_\w+)\/attachments$/.exec(path(r))
+      if (upload && r.method === 'POST') {
+        uploads.push(`${upload[1]}:${upload[2]}:${query(r).get('name')}`)
+        return Response.json({ id: idOf(upload[2]!), name: query(r).get('name'), media_type: 'image/png', size: 2, direction: 'input', at: now() }, { status: 201 })
+      }
+      if (path(r) !== `${groups}/${GROUP}/messages` || r.method !== 'POST') return undefined
+      bodies.push(await r.json() as Schema['LlmChatGroupSendIn'])
+      return Response.json({ group: groupOf(), results: [] })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&g=${GROUP}`)
+    const form = await screen.findByRole('form', { name: '向这一组继续发' })
+    const dropped = { types: ['Files'], files: [new File(['xy'], '图.png', { type: 'image/png' })] }
+    await fireEvent.dragEnter(form, { dataTransfer: dropped })
+    expect(await within(form).findByText('松开鼠标，把图片加到这条消息里。')).toBeVisible()
+    await fireEvent.drop(form, { dataTransfer: dropped })
+    expect(within(within(form).getByRole('list', { name: '要带上的附件' })).getAllByRole('listitem')).toHaveLength(1)
+    await fireEvent.update(within(form).getByRole('textbox', { name: '问题内容' }), '看这张图')
+    await fireEvent.click(within(form).getByRole('button', { name: '发给 2 个模型' }))
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    // 没建成会话的那个成员不传也不发
+    expect(uploads).toEqual([`${ONE}:${S1}:图.png`, `${TWO}:${S2}:图.png`])
+    expect(bodies[0]).toEqual({ text: '看这张图', request_id: expect.stringMatching(/^web-/), takeover: false, attachments: { 0: [idOf(S1)], 1: [idOf(S2)] } })
+    await waitFor(() => expect(within(form).queryByRole('list', { name: '要带上的附件' })).not.toBeInTheDocument())
+  })
+
+  it('starts a group with an image: sessions first, uploads next, then the question', async () => {
+    const order: string[] = [], created: Schema['LlmChatGroupCreateIn'][] = [], sent: Schema['LlmChatGroupSendIn'][] = []
+    const made = groupOf({ members: [member(0), member(1, { platform: 'chatgpt', model: null, session_id: S2 })] })
+    setup('owner', { conversations: both() }, async (r, w) => {
+      const upload = /\/chat\/sessions\/(bs_\w+)\/attachments$/.exec(path(r))
+      if (upload && r.method === 'POST') {
+        order.push(`upload:${upload[1]}`)
+        return Response.json({ id: `ba_${'7'.repeat(20)}`, name: 'image.png', media_type: 'image/png', size: 4, direction: 'input', at: now() }, { status: 201 })
+      }
+      if (path(r) === groups && r.method === 'POST') {
+        order.push('create'); created.push(await r.json() as Schema['LlmChatGroupCreateIn'])
+        w.groups = [made]
+        return Response.json({ group: made, results: [] }, { status: 201 })
+      }
+      if (path(r) === `${groups}/${GROUP}/messages` && r.method === 'POST') { order.push('send'); sent.push(await r.json() as Schema['LlmChatGroupSendIn']); return Response.json({ group: made, results: [] }) }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&compare=1`)
+    const form = await screen.findByRole('form', { name: '多模型同问' })
+    await within(form).findByRole('list', { name: '发给（2 个）' })
+    const box = within(form).getByLabelText('问题')
+    await fireEvent.paste(box, { clipboardData: { files: [new File(['abcd'], 'image.png', { type: 'image/png' })] } })
+    await fireEvent.update(box, '看这张图')
+    await fireEvent.click(within(form).getByRole('button', { name: '发给 2 个模型' }))
+    await waitFor(() => expect(order).toEqual(['create', `upload:${S1}`, `upload:${S2}`, 'send']))
+    expect(created[0]!.send).toBe(false)
+    expect(sent[0]).toMatchObject({ text: '看这张图', takeover: false, attachments: { 0: [`ba_${'7'.repeat(20)}`], 1: [`ba_${'7'.repeat(20)}`] } })
+    expect(await screen.findByRole('heading', { level: 2, name: '解释幂等' })).toBeVisible()
   })
 
   it('starts a group with the logged-in platforms and lets models be added across managers', async () => {
@@ -833,7 +929,7 @@ describe('多模型同问', () => {
     expect(await screen.findByRole('heading', { level: 2, name: '解释幂等' })).toBeVisible()
     expect(bodies).toEqual([{ title: '', text: '解释幂等', request_id: expect.stringMatching(/^web-/), targets: [
       { bridge_id: ONE, platform: 'claude', mode: 'chat' }, { bridge_id: TWO, platform: 'claude', mode: 'chat' },
-    ] }])
+    ], send: true }])
     expect(router.currentRoute.value.query).toEqual({ m: ONE, g: GROUP })
     expect(await screen.findByRole('region', { name: 'Claude（备用）' })).toBeVisible()
   })
