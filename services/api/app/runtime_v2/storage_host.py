@@ -1,20 +1,25 @@
 """Trusted, node-local fixed ext4 volumes. No Kubernetes or tenant path authority.
 
-Only LinuxOps crosses the kernel/tool boundary. Ordinary socket clients can
-provision or inspect; restore/setup are operator-only CLI operations. Ambiguous
-phases preserve bytes and require operator reconciliation; deletion is unsupported.
+Only LinuxOps crosses the kernel/tool boundary. Ordinary socket clients use
+fixed provision/inspect/retire actions; restore/setup are operator-only CLI operations. Ambiguous
+phases preserve bytes and require operator reconciliation. Retirement independently
+verifies cluster absence and host namespace references before inode-bound cleanup.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import errno
 import fcntl
 import hashlib
 import json
 import os
 import re
+import selectors
+import signal
 import socket
+import ssl
 import stat
 import struct
 import subprocess
@@ -25,16 +30,21 @@ from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4, uuid5
 
 PROFILE = "workspace-loop-ext4-v1"
 MAX_MESSAGE = 65536
+KUBE_TIMEOUT = 20
 GIB = 1024**3
+RETIRE_CONFIG = {"kubeconfig_path", "kubectl_path", "cluster_uid"}
+RETIRE_PHASES = {"retire_verified", "unmounting", "unmounted", "detaching", "detached", "unlinking"}
 VOLUME_NAMESPACE = UUID("484bf3a8-1f91-4665-aa12-2c469643412f")
 TOOLS = {
     "losetup": "/usr/sbin/losetup",
     "mkfs.ext4": "/usr/sbin/mkfs.ext4",
     "mount": "/usr/bin/mount",
+    "umount": "/usr/bin/umount",
     "blkid": "/usr/sbin/blkid",
 }
 
@@ -129,6 +139,9 @@ class Config:
     controller_uid: int
     emergency_bytes: int
     scratch_bytes: int
+    kubeconfig_path: str | None = None
+    kubectl_path: str | None = None
+    cluster_uid: str | None = None
 
     def validate(self) -> None:
         _name(self.node_name)
@@ -138,6 +151,15 @@ class Config:
         _integer(self.controller_uid, 1, 2**31 - 1)
         _integer(self.emergency_bytes, GIB, 2**63 - 1)
         _integer(self.scratch_bytes, GIB, 2**63 - 1)
+        retirement = [getattr(self, key) for key in RETIRE_CONFIG]
+        if any(value is not None for value in retirement):
+            if any(not isinstance(value, str) or not value for value in retirement):
+                raise StorageError("retirement configuration must be a complete static bundle")
+            _uuid(self.cluster_uid)
+            for value in (self.kubeconfig_path, self.kubectl_path):
+                path = Path(cast(str, value))
+                if not path.is_absolute() or ".." in path.parts:
+                    raise StorageError("retirement paths must be fixed absolute paths")
         paths = [
             Path(self.backing_base),
             Path(self.mount_base),
@@ -158,7 +180,9 @@ class Config:
     def load(cls, path: str) -> Config:
         _secure_ancestors(Path(path).parent, 0)
         data = _read_json(Path(path), 0)
-        if set(data) != set(cls.__dataclass_fields__):
+        if set(data) - set(cls.__dataclass_fields__) or set(
+            cls.__dataclass_fields__
+        ) - RETIRE_CONFIG - set(data):
             raise StorageError("config fields must match fixed schema")
         try:
             config = cls(**data)
@@ -199,8 +223,8 @@ def _read_json(path: Path, uid: int) -> dict[str, Any]:
         raise StorageError("missing or unsafe durable state") from exc
 
 
-def _json(raw: bytes) -> Any:
-    if len(raw) > MAX_MESSAGE:
+def _json(raw: bytes, max_bytes: int = MAX_MESSAGE) -> Any:
+    if len(raw) > max_bytes:
         raise StorageError("message too large")
 
     def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -339,12 +363,12 @@ class LinuxOps:
             [TOOLS["mount"], "-t", "ext4", "-o", "rw,nodev,nosuid", "--", device, str(target)]
         )
 
-    def _mounts(self) -> list[dict[str, Any]]:
+    def _parse_mounts(self, text: str) -> list[dict[str, Any]]:
         def unescape(value: str) -> str:
             return re.sub(r"\\([0-7]{3})", lambda match: chr(int(match[1], 8)), value)
 
         entries = []
-        for line in Path("/proc/self/mountinfo").read_text().splitlines():
+        for line in text.splitlines():
             left, right = line.split(" - ", 1)
             fields, extra = left.split(), right.split()
             entries.append(
@@ -360,6 +384,9 @@ class LinuxOps:
                 }
             )
         return entries
+
+    def _mounts(self) -> list[dict[str, Any]]:
+        return self._parse_mounts(Path("/proc/self/mountinfo").read_text())
 
     def base_mount(self, path: Path) -> dict[str, Any]:
         matches = [
@@ -391,6 +418,526 @@ class LinuxOps:
             "available_bytes": st.f_bavail * st.f_frsize,
             "used_bytes": (st.f_blocks - st.f_bfree) * st.f_frsize,
         }
+
+    def validate_kube_config(self, config: Config, uid: int, ancestors: bool) -> str:
+        if not config.kubeconfig_path or not config.kubectl_path or not config.cluster_uid:
+            raise StorageError("root retirement cluster audit is not configured")
+        _uuid(config.cluster_uid)
+        path = Path(config.kubeconfig_path)
+        executable = Path(config.kubectl_path)
+        if (
+            not path.is_absolute()
+            or ".." in path.parts
+            or not executable.is_absolute()
+            or ".." in executable.parts
+        ):
+            raise StorageError("fixed absolute audit paths required")
+        if ancestors:
+            _secure_ancestors(path.parent, uid)
+            _secure_ancestors(executable.parent, uid)
+            _secure_ancestors(executable.resolve(strict=True).parent, uid)
+        st = executable.resolve(strict=True).stat()
+        if (
+            not stat.S_ISREG(st.st_mode)
+            or st.st_uid != uid
+            or st.st_mode & 0o022
+            or not st.st_mode & 0o111
+        ):
+            raise StorageError("untrusted kubectl executable")
+        data = _read_json(path, uid)
+        required = {"apiVersion", "kind", "current-context", "clusters", "contexts", "users"}
+        if (
+            not required.issubset(data)
+            or set(data) - required - {"preferences"}
+            or data["apiVersion"] != "v1"
+            or data["kind"] != "Config"
+            or data.get("preferences", {}) != {}
+        ):
+            raise StorageError("flattened strict kubeconfig JSON required")
+        for key in ("clusters", "contexts", "users"):
+            if not isinstance(data[key], list) or len(data[key]) != 1:
+                raise StorageError("one static Kubernetes context required")
+        cluster_row, context_row, user_row = (
+            data[key][0] for key in ("clusters", "contexts", "users")
+        )
+        if (
+            not isinstance(cluster_row, dict)
+            or set(cluster_row) != {"name", "cluster"}
+            or not isinstance(context_row, dict)
+            or set(context_row) != {"name", "context"}
+            or not isinstance(user_row, dict)
+            or set(user_row) != {"name", "user"}
+        ):
+            raise StorageError("invalid static context entries")
+        cluster, context, user = cluster_row["cluster"], context_row["context"], user_row["user"]
+        if (
+            not isinstance(cluster, dict)
+            or set(cluster) != {"server", "certificate-authority-data"}
+            or not isinstance(context, dict)
+            or set(context) - {"cluster", "user", "namespace"}
+            or context.get("cluster") != cluster_row["name"]
+            or context.get("user") != user_row["name"]
+            or data["current-context"] != context_row["name"]
+            or not isinstance(user, dict)
+        ):
+            raise StorageError("dynamic or insecure Kubernetes configuration refused")
+        if "namespace" in context:
+            _name(context["namespace"], 63)
+        try:
+            endpoint = urlsplit(cluster["server"])
+            if (
+                endpoint.scheme != "https"
+                or not endpoint.hostname
+                or endpoint.username
+                or endpoint.password
+                or endpoint.path not in ("", "/")
+                or endpoint.query
+                or endpoint.fragment
+                or (endpoint.port is not None and not 1 <= endpoint.port <= 65535)
+            ):
+                raise StorageError("Kubernetes API requires verified HTTPS")
+            ca = base64.b64decode(cluster["certificate-authority-data"], validate=True)
+            ssl.create_default_context(cadata=ca.decode("ascii"))
+            if set(user) == {"token"}:
+                if (
+                    not isinstance(user["token"], str)
+                    or not user["token"]
+                    or len(user["token"]) > 8192
+                    or any(c.isspace() for c in user["token"])
+                ):
+                    raise StorageError("invalid embedded Kubernetes token")
+            elif set(user) == {"client-certificate-data", "client-key-data"}:
+                certificate = base64.b64decode(user["client-certificate-data"], validate=True)
+                private_key = base64.b64decode(user["client-key-data"], validate=True)
+                if b"-----BEGIN CERTIFICATE-----" not in certificate or not re.match(
+                    rb"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----", private_key
+                ):
+                    raise StorageError("embedded certificate/key PEM required")
+            else:
+                raise StorageError("external credentials or credential plugins refused")
+        except (ValueError, TypeError, UnicodeError, ssl.SSLError) as exc:
+            raise StorageError("invalid static TLS configuration") from exc
+        return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+    def _execute_kube(self, argv: list[str]) -> str:
+        # Separate bounded reader: API output must never fill unbounded communicate buffers.
+        deadline = time.monotonic() + KUBE_TIMEOUT
+        output = bytearray()
+        error = bytearray()
+        process = subprocess.Popen(  # noqa: S603 -- root-owned static executable, fixed read-only argv
+            argv,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+            env={"PATH": "/usr/sbin:/usr/bin:/usr/local/bin", "LC_ALL": "C"},
+        )
+        try:
+            with selectors.DefaultSelector() as selector:
+                for pipe, destination in ((process.stdout, output), (process.stderr, error)):
+                    if pipe is None:
+                        raise StorageError("missing command output pipe")
+                    selector.register(pipe, selectors.EVENT_READ, destination)
+                while selector.get_map():
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise StorageError("Kubernetes audit timed out")
+                    for key, _ in selector.select(min(remaining, 1)):
+                        chunk = os.read(
+                            key.fileobj if isinstance(key.fileobj, int) else key.fileobj.fileno(),
+                            65536,
+                        )
+                        if not chunk:
+                            selector.unregister(key.fileobj)
+                            continue
+                        key.data.extend(chunk)
+                        if len(output) > 8 * 1024**2 or len(error) > 16384:
+                            raise StorageError("Kubernetes audit output too large")
+                if process.wait(timeout=max(0.1, deadline - time.monotonic())) != 0:
+                    raise StorageError("Kubernetes audit failed")
+            return output.decode("utf-8", errors="strict")
+        except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
+            raise StorageError("Kubernetes audit failed or unknown") from exc
+        finally:
+            if process.poll() is None:
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+            if process.stdout is not None:
+                process.stdout.close()
+            if process.stderr is not None:
+                process.stderr.close()
+
+    def kube_audit(
+        self, config: Config, request: StorageRequest, uid: int, ancestors: bool
+    ) -> dict[str, Any]:
+        fingerprint = self.validate_kube_config(config, uid, ancestors)
+        cache = Path(config.state_base) / ".kube-cache"
+        with suppress(FileExistsError):
+            cache.mkdir(mode=0o700)
+        st = cache.lstat()
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != uid or stat.S_IMODE(st.st_mode) != 0o700:
+            raise StorageError("untrusted Kubernetes cache")
+        prefix = [
+            cast(str, config.kubectl_path),
+            "--kubeconfig",
+            cast(str, config.kubeconfig_path),
+            "--request-timeout=10s",
+            "--cache-dir",
+            str(cache),
+        ]
+
+        def get(resource: str, *args: str) -> Any:
+            text = self._execute_kube([*prefix, "get", resource, *args, "-o", "json"])
+            return _json(text.encode(), 8 * 1024**2) if text.strip() else None
+
+        namespace = get("namespace", "kube-system")
+        node = get("node", config.node_name)
+        for value, kind, name, expected_uid in (
+            (namespace, "Namespace", "kube-system", config.cluster_uid),
+            (node, "Node", config.node_name, config.node_uid),
+        ):
+            if (
+                not isinstance(value, dict)
+                or value.get("kind") != kind
+                or value.get("apiVersion") != "v1"
+                or not isinstance(value.get("metadata"), dict)
+                or value["metadata"].get("name") != name
+                or value["metadata"].get("uid") != expected_uid
+                or not isinstance(value["metadata"].get("resourceVersion"), str)
+                or not value["metadata"]["resourceVersion"]
+            ):
+                raise StorageError("cluster or node UID audit failed")
+        try:
+            machine = node["status"]["nodeInfo"]["machineID"].strip().lower()
+            if (
+                not re.fullmatch(r"[0-9a-f]{32}", machine)
+                or hashlib.sha256(("machine-id:" + machine).encode("ascii")).hexdigest()
+                != config.machine_id_sha256
+                or self.machine_hash() != config.machine_id_sha256
+            ):
+                raise StorageError("current node/machine identity changed")
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise StorageError("node machine identity missing") from exc
+        pv_name = "pv-" + request.volume_id
+        if (
+            get(
+                "pvc",
+                request.pvc_name,
+                "--namespace",
+                request.pvc_namespace,
+                "--ignore-not-found=true",
+            )
+            is not None
+        ):
+            raise StorageError("PVC name exists; UID replacement is not deletion proof")
+        if get("pv", pv_name, "--ignore-not-found=true") is not None:
+            raise StorageError("PV name exists; UID replacement is not deletion proof")
+        pods = get("pods", "--all-namespaces", "--chunk-size=0")
+        attachments = get("volumeattachments.storage.k8s.io", "--chunk-size=0")
+        for value, kind in ((pods, "PodList"), (attachments, "VolumeAttachmentList")):
+            if (
+                not isinstance(value, dict)
+                or value.get("kind") != kind
+                or not isinstance(value.get("items"), list)
+                or not isinstance(value.get("metadata"), dict)
+                or not isinstance(value["metadata"].get("resourceVersion"), str)
+                or not value["metadata"]["resourceVersion"]
+                or value["metadata"].get("continue")
+            ):
+                raise StorageError("incomplete or malformed cluster reference inventory")
+        target = Path(config.mount_base) / request.volume_id
+        for pod in pods["items"]:
+            if (
+                not isinstance(pod, dict)
+                or not isinstance(pod.get("metadata"), dict)
+                or not isinstance(pod.get("spec"), dict)
+                or not isinstance(pod["metadata"].get("namespace"), str)
+                or not isinstance(pod["metadata"].get("name"), str)
+                or not isinstance(pod["spec"].get("volumes", []), list)
+            ):
+                raise StorageError("malformed Pod inventory")
+            for volume in pod["spec"].get("volumes", []):
+                if not isinstance(volume, dict):
+                    raise StorageError("malformed Pod volume")
+                claim = volume.get("persistentVolumeClaim")
+                if claim is not None:
+                    if not isinstance(claim, dict) or not isinstance(claim.get("claimName"), str):
+                        raise StorageError("malformed PVC reference")
+                    if (
+                        pod["metadata"]["namespace"] == request.pvc_namespace
+                        and claim["claimName"] == request.pvc_name
+                    ):
+                        raise StorageError("Pod or helper still references the PVC")
+                host_path = volume.get("hostPath")
+                if host_path is not None:
+                    if not isinstance(host_path, dict) or not isinstance(
+                        host_path.get("path"), str
+                    ):
+                        raise StorageError("malformed host path reference")
+                    path = Path(os.path.normpath(host_path["path"]))
+                    if path == target or path in target.parents or target in path.parents:
+                        raise StorageError("Pod host path overlaps the owned mount")
+        for attachment in attachments["items"]:
+            if (
+                not isinstance(attachment, dict)
+                or not isinstance(attachment.get("spec"), dict)
+                or not isinstance(attachment["spec"].get("source"), dict)
+            ):
+                raise StorageError("malformed volume attachment inventory")
+            source = attachment["spec"]["source"]
+            if source.get("persistentVolumeName") == pv_name:
+                raise StorageError("volume attachment still references owned PV")
+            if "inlineVolumeSpec" in source:
+                # Inline attachment cannot be proven unrelated from a name-only inventory.
+                raise StorageError("inline volume attachment requires operator audit")
+        if self.validate_kube_config(config, uid, ancestors) != fingerprint:
+            raise StorageError("Kubernetes audit configuration changed during sample")
+        # Re-read the named resources after the potentially large inventory sample.
+        if (
+            get(
+                "pvc",
+                request.pvc_name,
+                "--namespace",
+                request.pvc_namespace,
+                "--ignore-not-found=true",
+            )
+            is not None
+            or get("pv", pv_name, "--ignore-not-found=true") is not None
+        ):
+            raise StorageError("PVC/PV changed during audit")
+        for resource, name, expected_uid in (
+            ("namespace", "kube-system", config.cluster_uid),
+            ("node", config.node_name, config.node_uid),
+        ):
+            refreshed = get(resource, name)
+            if (
+                not isinstance(refreshed, dict)
+                or not isinstance(refreshed.get("metadata"), dict)
+                or refreshed["metadata"].get("uid") != expected_uid
+            ):
+                raise StorageError("node or cluster changed during reference sample")
+            if (
+                resource == "node"
+                and refreshed.get("status", {}).get("nodeInfo", {}).get("machineID")
+                != node["status"]["nodeInfo"]["machineID"]
+            ):
+                raise StorageError("node machine identity changed during reference sample")
+        return {
+            "cluster_uid": config.cluster_uid,
+            "node_uid": config.node_uid,
+            "pvc_name": request.pvc_name,
+            "pvc_namespace": request.pvc_namespace,
+            "pv_name": pv_name,
+            "pods_resource_version": pods["metadata"]["resourceVersion"],
+            "attachments_resource_version": attachments["metadata"]["resourceVersion"],
+            "sampled_at_ns": time.time_ns(),
+        }
+
+    def _task_inventory(self) -> list[Path]:
+        tasks: list[Path] = []
+        try:
+            for process in Path("/proc").iterdir():
+                if process.name.isdecimal():
+                    tasks.extend(
+                        path for path in (process / "task").iterdir() if path.name.isdecimal()
+                    )
+                    if len(tasks) > 20000:
+                        raise StorageError("process inventory exceeds safe audit bound")
+        except OSError as exc:
+            raise StorageError("unreadable or changing host process inventory") from exc
+        return sorted(tasks)
+
+    def _proc_mountinfo(self, path: Path) -> list[dict[str, Any]]:
+        try:
+            with path.open("r") as stream:
+                text = stream.read(8 * 1024**2 + 1)
+            if len(text) > 8 * 1024**2:
+                raise StorageError("mount namespace inventory exceeds bound")
+            return self._parse_mounts(text)
+        except (OSError, ValueError, IndexError) as exc:
+            raise StorageError("unreadable or malformed mount namespace") from exc
+
+    def _task_identity(self, task: Path) -> tuple[int, bool, bool]:
+        # Start time fences PID/TID reuse; scheduling state changes do not replace identity.
+        with (task / "stat").open("r") as stream:
+            raw = stream.read(4097)
+        if len(raw) > 4096 or ")" not in raw:
+            raise StorageError("malformed process identity")
+        fields = raw.rsplit(")", 1)[1].split()
+        if len(fields) < 20:
+            raise StorageError("incomplete process identity")
+        flags, started = int(fields[6]), int(fields[19])
+        if started < 0:
+            raise StorageError("invalid process start identity")
+        return started, bool(flags & 0x00200000), fields[0] == "Z"
+
+    def _task_snapshot(self, task: Path) -> tuple[tuple[int, bool, bool], tuple[int, int] | None]:
+        identity = self._task_identity(task)
+        try:
+            namespace = os.stat(task / "ns/mnt")
+            namespace_key: tuple[int, int] | None = (namespace.st_dev, namespace.st_ino)
+        except FileNotFoundError:
+            namespace_key = None
+        if self._task_identity(task) != identity:
+            raise StorageError("task identity changed while reading its namespace")
+        return identity, namespace_key
+
+    def _empty_kernel_or_zombie(self, task: Path) -> tuple[int, bool, bool] | None:
+        # PF_KTHREAD is a kernel-maintained proc stat flag, never a caller claim.
+        started, kernel, zombie = self._task_identity(task)
+        if not (kernel or zombie):
+            return None
+        if list((task / "fd").iterdir()):
+            return None
+        for link in ("cwd", "root"):
+            try:
+                os.stat(task / link)
+            except FileNotFoundError:
+                continue
+            return None
+        return started, kernel, zombie
+
+    def mount_references(
+        self,
+        device: str,
+        target: Path,
+        expected: dict[str, Any] | None,
+        backing: dict[str, int],
+        own_fd: int | None,
+    ) -> dict[str, Any]:
+        # No setns is needed. Root must have host /proc visibility and ptrace read permission.
+        descriptors = []
+        try:
+            host = os.stat("/proc/1/ns/mnt")
+            own = os.stat("/proc/self/ns/mnt")
+            host_key = (host.st_dev, host.st_ino)
+            if (own.st_dev, own.st_ino) != host_key:
+                raise StorageError("storage service is not in the host mount namespace")
+            proc_mount = next((m for m in self._mounts() if m["target"] == "/proc"), None)
+            if (
+                proc_mount is None
+                or proc_mount["fstype"] != "proc"
+                or any(
+                    option.startswith("hidepid=") and option != "hidepid=0"
+                    for option in proc_mount["options"] + proc_mount["super_options"]
+                )
+            ):
+                raise StorageError("host process visibility cannot be proven")
+            major, minor = (int(value) for value in device.split(":"))
+            fs_device = os.makedev(major, minor)
+            tasks = self._task_inventory()
+            seen = set()
+            seen_expected = 0
+            fd_count = 0
+            namespace_bytes = 0
+            nonuserspace: dict[Path, tuple[int, bool, bool]] = {}
+            snapshots: dict[Path, tuple[tuple[int, bool, bool], tuple[int, int] | None]] = {}
+            for task in tasks:
+                snapshot = self._task_snapshot(task)
+                snapshots[task] = snapshot
+                try:
+                    namespace_fd = os.open(task / "ns/mnt", os.O_RDONLY | os.O_CLOEXEC)
+                except FileNotFoundError:
+                    identity = self._empty_kernel_or_zombie(task)
+                    if identity is None:
+                        raise StorageError("live process mount namespace is missing") from None
+                    nonuserspace[task] = identity
+                    continue
+                # Own every successful open before fstat/snapshot can raise.
+                descriptors.append(namespace_fd)
+                namespace = os.fstat(namespace_fd)
+                namespace_key = (namespace.st_dev, namespace.st_ino)
+                if namespace_key != snapshot[1] or self._task_snapshot(task) != snapshot:
+                    raise StorageError("task namespace or identity changed before mountinfo")
+                if namespace_key in seen:
+                    os.close(namespace_fd)
+                    descriptors.pop()
+                else:
+                    seen.add(namespace_key)
+                    mounts = self._proc_mountinfo(task / "mountinfo")
+                    if self._task_snapshot(task) != snapshot:
+                        raise StorageError("task namespace or identity changed during mountinfo")
+                    namespace_bytes += len(mounts)
+                    if namespace_bytes > 250000:
+                        raise StorageError("namespace inventory exceeds safe bound")
+                    for mount in mounts:
+                        mount_path = Path(mount["target"])
+                        allowed = (
+                            namespace_key == host_key and expected is not None and mount == expected
+                        )
+                        if allowed:
+                            seen_expected += 1
+                        elif (
+                            mount["device"] == device
+                            or mount_path == target
+                            or target in mount_path.parents
+                        ):
+                            raise StorageError("live mount reference outside the owned host mount")
+                for link in ("cwd", "root"):
+                    try:
+                        process_device = os.stat(task / link).st_dev
+                    except FileNotFoundError:
+                        identity = self._empty_kernel_or_zombie(task)
+                        if identity is None:
+                            raise StorageError("live process filesystem evidence missing") from None
+                        nonuserspace[task] = identity
+                        break
+                    if process_device == fs_device:
+                        raise StorageError("process cwd/root references the owned filesystem")
+                if task in nonuserspace:
+                    continue
+                for fd_path in (task / "fd").iterdir():
+                    fd_count += 1
+                    if fd_count > 250000:
+                        raise StorageError("open file inventory exceeds safe bound")
+                    try:
+                        value = fd_path.stat()
+                    except FileNotFoundError:
+                        # Closed descriptors are absent; the task inventory fences process churn.
+                        continue
+                    if value.st_dev == fs_device or (
+                        stat.S_ISBLK(value.st_mode) and value.st_rdev == fs_device
+                    ):
+                        raise StorageError("open descriptor references owned filesystem/device")
+                    if (
+                        value.st_dev == backing["device"]
+                        and value.st_ino == backing["inode"]
+                        and not (
+                            task.parts[2] == str(os.getpid())
+                            and own_fd is not None
+                            and fd_path.name == str(own_fd)
+                        )
+                    ):
+                        raise StorageError("another descriptor retains the backing inode")
+            if seen_expected != (1 if expected is not None else 0):
+                raise StorageError("owned host mount was not uniquely observed")
+            if tasks != self._task_inventory():
+                raise StorageError("host process inventory changed during reference audit")
+            for task, snapshot in snapshots.items():
+                if self._task_snapshot(task) != snapshot:
+                    raise StorageError("task identity or namespace changed before audit completed")
+            for task, identity in nonuserspace.items():
+                if self._empty_kernel_or_zombie(task) != identity:
+                    raise StorageError("nonuserspace process identity changed during audit")
+            return {
+                "host_namespace": f"{host.st_dev}:{host.st_ino}",
+                "namespace_count": len(seen),
+                "nonuserspace_tasks": len(nonuserspace),
+                "task_count": len(tasks),
+                "fd_count": fd_count,
+                "sampled_at_ns": time.time_ns(),
+            }
+        except (OSError, ValueError, KeyError, IndexError) as exc:
+            raise StorageError("incomplete host namespace/reference proof") from exc
+        finally:
+            for descriptor in descriptors:
+                os.close(descriptor)
+
+    def unmount_owned(self, target: Path) -> None:
+        self._execute([TOOLS["umount"], "--", str(target)])
+
+    def detach_owned(self, device: str) -> None:
+        self._execute([TOOLS["losetup"], "--detach", "--", device])
 
     def prepare_data(self, target: Path, trusted_uid: int) -> dict[str, int]:
         root_fd = os.open(target, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -492,7 +1039,7 @@ class StorageHost:
         with self._lock():
             setup_path = self.state / "setup.json"
             if setup_path.exists():
-                return self._check_setup()
+                return self._check_setup(upgrade=True)
             if (
                 list(self.backing.iterdir())
                 or list(self.mounts.iterdir())
@@ -501,6 +1048,8 @@ class StorageHost:
                 raise StorageError("nonempty uninitialized storage bases")
             if self.ops.machine_hash() != self.config.machine_id_sha256:
                 raise StorageError("machine identity mismatch")
+            if self.config.kubeconfig_path is not None:
+                self.ops.validate_kube_config(self.config, self.uid, self.check_ancestors)
             evidence = {
                 "profile": PROFILE,
                 "config": asdict(self.config),
@@ -513,11 +1062,16 @@ class StorageHost:
             _write_json(setup_path, evidence)
             return evidence
 
-    def _check_setup(self) -> dict[str, Any]:
+    def _check_setup(self, *, upgrade: bool = False) -> dict[str, Any]:
         value = _read_json(self.state / "setup.json", self.uid)
+        saved = value.get("config")
+        current_config = asdict(self.config)
+        if not isinstance(saved, dict):
+            raise StorageError("invalid setup configuration")
         if (
             value.get("profile") != PROFILE
-            or value.get("config") != asdict(self.config)
+            or {k: v for k, v in saved.items() if k not in RETIRE_CONFIG}
+            != {k: v for k, v in current_config.items() if k not in RETIRE_CONFIG}
             or value.get("machine_id_sha256") != self.ops.machine_hash()
             or value.get("base_device") != self.backing.stat().st_dev
         ):
@@ -525,6 +1079,30 @@ class StorageHost:
         current = self.ops.base_mount(self.backing)
         if any(current[key] != value["base_mount"][key] for key in ("device", "root", "target")):
             raise StorageError("backing mount changed")
+        old_retirement = {key: saved.get(key) for key in RETIRE_CONFIG}
+        new_retirement = {key: current_config[key] for key in RETIRE_CONFIG}
+        if old_retirement != new_retirement:
+            if (
+                not upgrade
+                or any(item is not None for item in old_retirement.values())
+                or any(item is None for item in new_retirement.values())
+            ):
+                raise StorageError("retirement bundle changed; explicit additive setup required")
+            self.ops.validate_kube_config(self.config, self.uid, self.check_ancestors)
+            value["config"] = current_config
+            value["retirement_configured_at_ns"] = time.time_ns()
+            _write_json(self.state / "setup.json", value)
+        if self.config.kubeconfig_path is not None:
+            self.ops.validate_kube_config(self.config, self.uid, self.check_ancestors)
+        cache = self.state / ".kube-cache"
+        if os.path.lexists(cache):
+            st = cache.lstat()
+            if (
+                not stat.S_ISDIR(st.st_mode)
+                or st.st_uid != self.uid
+                or stat.S_IMODE(st.st_mode) != 0o700
+            ):
+                raise StorageError("untrusted Kubernetes cache directory")
         return value
 
     def _paths(self, request: StorageRequest) -> tuple[Path, Path, Path]:
@@ -586,12 +1164,17 @@ class StorageHost:
             raise StorageError("missing or unsafe backing file") from exc
 
     def _loop(self, image: Path, backing: dict[str, int]) -> str | None:
-        device = f"{os.major(backing['device'])}:{os.minor(backing['device'])}"
+        device = (os.major(backing["device"]), os.minor(backing["device"]))
         matches = []
         for row in self.ops.loops():
-            same_inode = (
-                row.get("back-ino") == backing["inode"] and row.get("back-maj:min") == device
-            )
+            value = row.get("back-maj:min")
+            if (
+                not isinstance(value, str)
+                or re.fullmatch(r"[0-9]+:[0-9]+", value.strip(" \t\r\n")) is None
+            ):
+                raise StorageError("invalid loop backing device numbers")
+            major, minor = (int(part) for part in value.strip(" \t\r\n").split(":"))
+            same_inode = row.get("back-ino") == backing["inode"] and (major, minor) == device
             if row.get("back-file") == str(image) or same_inode:
                 if (
                     not same_inode
@@ -698,6 +1281,7 @@ class StorageHost:
                         "incomplete allocation retained; operator reconciliation required"
                     )
                 return self._proof(request, receipt)
+            self._no_pending_retirement()
             if os.path.lexists(image) or os.path.lexists(target):
                 raise StorageError("unknown artifact; never adopt or format")
             if self.ops.free_bytes(self.backing) < (
@@ -777,12 +1361,198 @@ class StorageHost:
                 raise StorageError("incomplete volume")
             return self._proof(request, receipt)
 
+    def _retirement_audit(
+        self,
+        request: StorageRequest,
+        receipt: dict[str, Any],
+        expected: dict[str, Any] | None,
+        own_fd: int | None,
+    ) -> None:
+        cluster = self.ops.kube_audit(self.config, request, self.uid, self.check_ancestors)
+        references = self.ops.mount_references(
+            receipt["retirement"]["mount_device"],
+            self._paths(request)[1],
+            expected,
+            receipt["backing"],
+            own_fd,
+        )
+        receipt["retirement"]["cluster_audit"] = cluster
+        receipt["retirement"]["reference_audit"] = references
+
+    def _retired_absence(self, request: StorageRequest, receipt: dict[str, Any]) -> None:
+        image, target, _ = self._paths(request)
+        if os.path.lexists(image) or self.ops.mount_at(target) is not None:
+            raise StorageError("retired volume unexpectedly has backing or mount")
+        self._target(target)
+        for row in self.ops.loops():
+            if row.get("back-file") in (str(image), str(image) + " (deleted)"):
+                raise StorageError("retired volume still has a loop attachment")
+        if receipt.get("phase") == "retired" and (
+            not isinstance(receipt.get("retired_at_ns"), int)
+            or not isinstance(receipt.get("retirement_operation_id"), str)
+        ):
+            raise StorageError("invalid retirement tombstone")
+
+    def retire(self, request: StorageRequest) -> dict[str, Any]:
+        self._validate_request(request)
+        with self._lock():
+            self._check_setup()
+            image, target, journal = self._paths(request)
+            receipt = self._load(request)
+            phase = receipt.get("phase")
+            if phase not in {"ready", "retired", *RETIRE_PHASES}:
+                raise StorageError("unproven incomplete allocation cannot be retired")
+            # Authentication, node/cluster identity and absence are independently re-read.
+            self.ops.kube_audit(self.config, request, self.uid, self.check_ancestors)
+            if phase == "retired":
+                if receipt.get("retirement_operation_id") != request.operation_id:
+                    raise StorageError("retirement operation differs from durable tombstone")
+                self._retired_absence(request, receipt)
+                return receipt
+            if phase == "ready":
+                proof = self._proof(request, receipt)
+                receipt["retirement_operation_id"] = request.operation_id
+                receipt["retirement"] = {
+                    "loop_device": proof["live"]["loop_device"],
+                    "mount_device": proof["live"]["mount"]["device"],
+                    "started_at_ns": time.time_ns(),
+                    "parent_free_before_bytes": self.ops.free_bytes(self.backing),
+                }
+                self._retirement_audit(request, receipt, proof["live"]["mount"], None)
+                self._phase(journal, receipt, "retire_verified")
+                phase = "retire_verified"
+            elif receipt.get("retirement_operation_id") != request.operation_id:
+                raise StorageError("incomplete retirement belongs to another operation")
+            retirement = receipt.get("retirement")
+            if (
+                not isinstance(retirement, dict)
+                or not re.fullmatch(r"/dev/loop[0-9]+", retirement.get("loop_device", ""))
+                or not re.fullmatch(r"[0-9]+:[0-9]+", retirement.get("mount_device", ""))
+            ):
+                raise StorageError("invalid durable retirement identity")
+            file_fd: int | None = None
+            try:
+                if os.path.lexists(image):
+                    file_fd = os.open(image, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                    self._backing(request, receipt)
+                    current = os.fstat(file_fd)
+                    _file_stat(current, self.uid, 0o600)
+                    if (
+                        current.st_dev != receipt["backing"]["device"]
+                        or current.st_ino != receipt["backing"]["inode"]
+                    ):
+                        raise StorageError("pinned retirement inode changed")
+                    self._filesystem(str(image), receipt)
+                elif phase != "unlinking":
+                    raise StorageError("backing disappeared before durable unlink intent")
+                if phase in ("retire_verified", "unmounting"):
+                    mounted = self.ops.mount_at(target)
+                    if mounted is not None:
+                        proof = self._proof(request, receipt)
+                        if (
+                            proof["live"]["loop_device"] != retirement["loop_device"]
+                            or proof["live"]["mount"]["device"] != retirement["mount_device"]
+                        ):
+                            raise StorageError("loop changed during retirement")
+                        self._retirement_audit(request, receipt, proof["live"]["mount"], file_fd)
+                        self._phase(journal, receipt, "unmounting")
+                        self.ops.unmount_owned(target)
+                    elif phase != "unmounting":
+                        raise StorageError("mount disappeared before durable unmount intent")
+                    if self.ops.mount_at(target) is not None:
+                        raise StorageError("unmount did not remove the owned mount")
+                    self._target(target)
+                    self._retirement_audit(request, receipt, None, file_fd)
+                    self._phase(journal, receipt, "unmounted")
+                    phase = "unmounted"
+                if phase in ("unmounted", "detaching"):
+                    if self.ops.mount_at(target) is not None:
+                        raise StorageError("owned target remounted during retirement")
+                    backing = self._backing(request, receipt)
+                    device = self._loop(image, backing)
+                    if device is not None:
+                        if device != retirement["loop_device"]:
+                            raise StorageError("loop attachment changed during retirement")
+                        self._filesystem(device, receipt)
+                        self._retirement_audit(request, receipt, None, file_fd)
+                        self._phase(journal, receipt, "detaching")
+                        self.ops.detach_owned(device)
+                    elif phase != "detaching":
+                        raise StorageError("loop disappeared before durable detach intent")
+                    # losetup may implement lazy detach; readback, not exit status, is proof.
+                    if self._loop(image, self._backing(request, receipt)) is not None:
+                        raise StorageError("loop detach still pending; backing remains reserved")
+                    self._retirement_audit(request, receipt, None, file_fd)
+                    self._phase(journal, receipt, "detached")
+                    phase = "detached"
+                if phase not in ("detached", "unlinking"):
+                    raise StorageError("unsupported retirement recovery phase")
+                if self.ops.mount_at(target) is not None:
+                    raise StorageError("unexpected mount before backing unlink")
+                self._target(target)
+                if self._loop(image, receipt["backing"]) is not None:
+                    raise StorageError("loop attachment exists before backing unlink")
+                self._retirement_audit(request, receipt, None, file_fd)
+                if file_fd is not None:
+                    self._backing(request, receipt)
+                    self._filesystem(str(image), receipt)
+                    self._phase(journal, receipt, "unlinking")
+                    base_fd = os.open(self.backing, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    try:
+                        current = os.stat(image.name, dir_fd=base_fd, follow_symlinks=False)
+                        pinned = os.fstat(file_fd)
+                        _file_stat(current, self.uid, 0o600)
+                        if (current.st_dev, current.st_ino) != (
+                            pinned.st_dev,
+                            pinned.st_ino,
+                        ) or current.st_size != request.nominal_gib * GIB:
+                            raise StorageError("backing changed immediately before unlink")
+                        os.unlink(image.name, dir_fd=base_fd)
+                        os.fsync(base_fd)
+                        if os.fstat(file_fd).st_nlink != 0:
+                            raise StorageError("backing inode still has another link")
+                    finally:
+                        os.close(base_fd)
+                    os.close(file_fd)
+                    file_fd = None
+                # This also detects descriptors left after an unlink-to-tombstone crash.
+                self._retirement_audit(request, receipt, None, None)
+                self._retired_absence(request, receipt)
+                retirement["parent_free_after_bytes"] = self.ops.free_bytes(self.backing)
+                retirement["observed_reclaimed_bytes"] = max(
+                    0,
+                    retirement["parent_free_after_bytes"] - retirement["parent_free_before_bytes"],
+                )
+                retirement["released_backing_bytes"] = receipt["backing"]["allocated_bytes"]
+                receipt["retired_at_ns"] = time.time_ns()
+                self._phase(journal, receipt, "retired")
+                return receipt
+            except OSError as exc:
+                raise StorageError("retirement failed or unknown; durable phase retained") from exc
+            finally:
+                if file_fd is not None:
+                    os.close(file_fd)
+
+    def _no_pending_retirement(self) -> None:
+        for path in self.state.glob("*.json"):
+            if path.name in ("setup.json", ".socket.json"):
+                continue
+            if _read_json(path, self.uid).get("phase") in RETIRE_PHASES:
+                raise StorageError("pending retirement fences new allocations and loop reuse")
+
     def restore_mounts(self) -> list[dict[str, Any]]:
         with self._lock():
             self._check_setup()
             receipts = []
+            tombstones = []
             for path in self.state.iterdir():
-                if path.name in ("setup.json", ".lock", ".listener.lock", ".socket.json"):
+                if path.name in (
+                    "setup.json",
+                    ".lock",
+                    ".listener.lock",
+                    ".socket.json",
+                    ".kube-cache",
+                ):
                     continue
                 if not re.fullmatch(r"[0-9a-f-]{36}\.json", path.name):
                     raise StorageError("unknown state artifact blocks kubelet admission")
@@ -795,11 +1565,15 @@ class StorageHost:
                     raise StorageError("invalid receipt") from exc
                 self._validate_request(req)
                 receipt = self._load(req)
+                if receipt.get("phase") == "retired" and path == self._paths(req)[2]:
+                    self._retired_absence(req, receipt)
+                    tombstones.append((req, receipt))
+                    continue
                 if receipt.get("phase") != "ready" or path != self._paths(req)[2]:
                     raise StorageError("incomplete receipt blocks kubelet admission")
                 receipts.append((req, receipt))
             known_images = {self._paths(req)[0].name for req, _ in receipts}
-            known_targets = {self._paths(req)[1].name for req, _ in receipts}
+            known_targets = {self._paths(req)[1].name for req, _ in receipts + tombstones}
             if {p.name for p in self.backing.iterdir()} != known_images or {
                 p.name for p in self.mounts.iterdir()
             } != known_targets:
@@ -833,7 +1607,7 @@ def decode_message(raw: bytes) -> tuple[str, StorageRequest]:
         or set(value) != {"version", "action", "request"}
         or type(value["version"]) is not int
         or value["version"] != 1
-        or value["action"] not in ("provision", "inspect")
+        or value["action"] not in ("provision", "inspect", "retire")
     ):
         raise StorageError("unsupported fixed protocol")
     return value["action"], StorageRequest.from_dict(value["request"])
@@ -932,7 +1706,11 @@ def serve(host: StorageHost) -> None:
                         raise StorageError("one frame per connection")
                     action, request = decode_message(frame)
                     result = (
-                        host.provision(request) if action == "provision" else host.inspect(request)
+                        host.provision(request)
+                        if action == "provision"
+                        else host.inspect(request)
+                        if action == "inspect"
+                        else host.retire(request)
                     )
                     response = {"version": 1, "ok": True, "receipt": result}
                 except (StorageError, OSError, ValueError, KeyError, TypeError):
@@ -944,7 +1722,7 @@ def serve(host: StorageHost) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "mode", choices=("setup", "provision", "inspect", "restore-mounts", "serve")
+        "mode", choices=("setup", "provision", "inspect", "retire", "restore-mounts", "serve")
     )
     parser.add_argument("--config", default="/etc/workspace/runtime-v2/storage-host.json")
     args = parser.parse_args()
@@ -961,7 +1739,13 @@ def main() -> int:
             result = host.restore_mounts()
         else:
             request = StorageRequest.from_dict(_json(sys.stdin.buffer.read(MAX_MESSAGE + 1)))
-            result = host.provision(request) if args.mode == "provision" else host.inspect(request)
+            result = (
+                host.provision(request)
+                if args.mode == "provision"
+                else host.inspect(request)
+                if args.mode == "inspect"
+                else host.retire(request)
+            )
         print(json.dumps(result, sort_keys=True))
         return 0
     except (StorageError, OSError, ValueError, KeyError, TypeError) as exc:

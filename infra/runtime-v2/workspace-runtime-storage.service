@@ -18,11 +18,14 @@ TimeoutStartSec=15min
 TimeoutStopSec=15
 UMask=0077
 NoNewPrivileges=true
-CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_MKNOD
-RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=CAP_SYS_ADMIN CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_MKNOD CAP_SYS_PTRACE
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictRealtime=true
 RestrictSUIDSGID=true
 LockPersonality=true
+# AF_INET/AF_INET6 are only for the root-configured verified HTTPS Kubernetes audit;
+# requests still arrive exclusively on AF_UNIX. CAP_SYS_PTRACE permits read-only
+# /proc namespace/fd evidence across UIDs; no setns or ptrace operation is exposed.
 # Mounts must enter the host mount namespace. Do not add PrivateMounts,
 # PrivateDevices, PrivateTmp, ProtectSystem, ProtectHome, or mount-namespace
 # filesystem restrictions to this dedicated hook without a new design.

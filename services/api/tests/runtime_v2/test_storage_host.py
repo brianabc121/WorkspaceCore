@@ -5,6 +5,7 @@ import os
 import socket
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -20,7 +21,7 @@ from app.runtime_v2.storage_host import (
 )
 
 
-def request():
+def request() -> StorageRequest:
     return StorageRequest.from_dict(
         {
             "workspace_id": str(uuid4()),
@@ -42,37 +43,37 @@ def request():
 class Kernel(LinuxOps):
     """Real files/journals, fake allocation, filesystem tools and mount namespace."""
 
-    def __init__(self):
-        self.commands = []
-        self.loop_rows = {}
-        self.mounts = {}
-        self.detached_data = {}
+    def __init__(self) -> None:
+        self.commands: list[list[str]] = []
+        self.loop_rows: dict[str, dict[str, Any]] = {}
+        self.mounts: dict[str, dict[str, Any]] = {}
+        self.detached_data: dict[str, Path] = {}
         self.fs_uuid = ""
         self.sparse = False
         self.hole_on_format = False
         self.fail_format = False
         self.free = 20 * 1024**3
 
-    def machine_hash(self):
+    def machine_hash(self) -> str:
         return "a" * 64
 
-    def tool_versions(self):
+    def tool_versions(self) -> dict[str, str]:
         return {"losetup": "test", "mkfs.ext4": "test", "mount": "test", "blkid": "test"}
 
-    def base_mount(self, path):
+    def base_mount(self, path: Path) -> dict[str, Any]:
         return {"mount_id": 10, "device": "8:1", "root": "/", "target": "/"}
 
-    def free_bytes(self, path):
+    def free_bytes(self, path: Path) -> int:
         return self.free
 
-    def allocate(self, fd, size):
+    def allocate(self, fd: int, size: int) -> None:
         os.ftruncate(fd, size)
         self.sparse = False
 
-    def allocated_bytes(self, fd):
+    def allocated_bytes(self, fd: int) -> int:
         return 0 if self.sparse else os.fstat(fd).st_size
 
-    def _execute(self, argv):
+    def _execute(self, argv: list[str]) -> str:
         self.commands.append(argv)
         if argv[0] == "/usr/sbin/losetup":
             if "--json" in argv:
@@ -114,7 +115,7 @@ class Kernel(LinuxOps):
             return ""
         raise AssertionError(argv)
 
-    def lose_mounts(self):
+    def lose_mounts(self) -> None:
         for target in self.mounts:
             data = Path(target) / "data"
             detached = Path(target).parent.parent / (Path(target).name + "-detached")
@@ -122,18 +123,18 @@ class Kernel(LinuxOps):
             self.detached_data[target] = detached
         self.mounts.clear()
 
-    def mount_at(self, path):
+    def mount_at(self, path: Path) -> dict[str, Any] | None:
         return self.mounts.get(str(path))
 
-    def loop_device(self, path):
+    def loop_device(self, path: str) -> str:
         return "7:7"
 
-    def data_evidence(self, target, trusted_uid):
+    def data_evidence(self, target: Path, trusted_uid: int) -> dict[str, int]:
         evidence = super().data_evidence(target, trusted_uid)
         major, minor = map(int, self.loop_device("/dev/loop7").split(":"))
         return {**evidence, "device": os.makedev(major, minor)}
 
-    def capacity(self, path):
+    def capacity(self, path: Path) -> dict[str, int]:
         return {
             "usable_bytes": 1000_000_000,
             "available_bytes": 900_000_000,
@@ -141,8 +142,11 @@ class Kernel(LinuxOps):
         }
 
 
+HostFixture = tuple[StorageHost, Kernel, StorageRequest]
+
+
 @pytest.fixture
-def host(tmp_path):
+def host(tmp_path: Path) -> HostFixture:
     req = request()
     cfg = Config(
         node_name=req.node_name,
@@ -162,7 +166,7 @@ def host(tmp_path):
     return instance, kernel, req
 
 
-def test_provision_and_retry_require_live_proof_and_never_reformat(host):
+def test_provision_and_retry_require_live_proof_and_never_reformat(host: HostFixture) -> None:
     service, kernel, req = host
     receipt = service.provision(req)
     assert receipt["phase"] == "ready"
@@ -192,15 +196,21 @@ def test_provision_and_retry_require_live_proof_and_never_reformat(host):
 @pytest.mark.parametrize(
     "field,value", [("nominal_gib", 2), ("pvc_uid", str(uuid4())), ("workspace_id", str(uuid4()))]
 )
-def test_allocation_rejects_identity_or_size_change(host, field, value):
+def test_allocation_rejects_identity_or_size_change(
+    host: HostFixture, field: str, value: str | int
+) -> None:
     service, _, req = host
     service.provision(req)
     with pytest.raises(StorageError):
-        service.provision(replace(req, **{field: value}))
+        changed = req.as_dict()
+        changed[field] = value
+        service.provision(StorageRequest.from_dict(changed))
 
 
 @pytest.mark.parametrize("damage", ["missing", "filesystem", "inode", "sparse", "discard"])
-def test_inspection_never_reports_unmounted_or_wrong_backing_ready(host, damage):
+def test_inspection_never_reports_unmounted_or_wrong_backing_ready(
+    host: HostFixture, damage: str
+) -> None:
     service, kernel, req = host
     receipt = service.provision(req)
     if damage == "missing":
@@ -217,7 +227,7 @@ def test_inspection_never_reports_unmounted_or_wrong_backing_ready(host, damage)
         service.inspect(req)
 
 
-def test_mkfs_holes_refilled_only_while_owned_provisioning(host):
+def test_mkfs_holes_refilled_only_while_owned_provisioning(host: HostFixture) -> None:
     service, kernel, req = host
     kernel.hole_on_format = True
     assert service.provision(req)["backing"]["allocated_bytes"] >= 1073741824
@@ -227,7 +237,7 @@ def test_mkfs_holes_refilled_only_while_owned_provisioning(host):
     assert kernel.sparse
 
 
-def test_crash_phase_never_reformats_and_keeps_backing(host):
+def test_crash_phase_never_reformats_and_keeps_backing(host: HostFixture) -> None:
     service, kernel, req = host
     kernel.fail_format = True
     with pytest.raises(StorageError):
@@ -242,7 +252,7 @@ def test_crash_phase_never_reformats_and_keeps_backing(host):
     assert images[0].exists()
 
 
-def test_host_margin_prevents_any_image_allocation(host):
+def test_host_margin_prevents_any_image_allocation(host: HostFixture) -> None:
     service, kernel, req = host
     kernel.free = 3 * 1024**3
     with pytest.raises(StorageError, match="margin"):
@@ -250,7 +260,9 @@ def test_host_margin_prevents_any_image_allocation(host):
     assert not list(Path(service.config.backing_base).iterdir())
 
 
-def test_unknown_backing_symlink_and_hardlink_are_preserved(host, tmp_path):
+def test_unknown_backing_symlink_and_hardlink_are_preserved(
+    host: HostFixture, tmp_path: Path
+) -> None:
     service, _, req = host
     foreign = tmp_path / "foreign"
     foreign.write_bytes(b"keep")
@@ -262,7 +274,7 @@ def test_unknown_backing_symlink_and_hardlink_are_preserved(host, tmp_path):
     assert foreign.read_bytes() == b"keep"
 
 
-def test_stopped_retained_mount_restored_without_formatting(host):
+def test_stopped_retained_mount_restored_without_formatting(host: HostFixture) -> None:
     service, kernel, req = host
     first = service.provision(req)
     kernel.lose_mounts()
@@ -272,7 +284,7 @@ def test_stopped_retained_mount_restored_without_formatting(host):
     assert len([a for a in kernel.commands if "mkfs.ext4" in a[0]]) == 1
 
 
-def test_unknown_artifact_blocks_boot_restore(host):
+def test_unknown_artifact_blocks_boot_restore(host: HostFixture) -> None:
     service, _, _ = host
     foreign = Path(service.config.backing_base) / "unknown.img"
     foreign.write_bytes(b"retain")
@@ -285,14 +297,14 @@ def test_unknown_artifact_blocks_boot_restore(host):
     "change",
     [{"path": "/etc/passwd"}, {"nominal_gib": True}, {"generation": 0}, {"pvc_name": "../../bad"}],
 )
-def test_request_is_exact_typed_and_path_free(change):
+def test_request_is_exact_typed_and_path_free(change: dict[str, object]) -> None:
     data = request().as_dict()
     data.update(change)
     with pytest.raises(StorageError):
         StorageRequest.from_dict(data)
 
 
-def test_protocol_rejects_oversize_duplicate_keys_and_cleanup():
+def test_protocol_rejects_oversize_duplicate_keys_and_cleanup() -> None:
     for raw in [
         b" " * 65537,
         b'{"version":1,"version":1}',
@@ -302,7 +314,7 @@ def test_protocol_rejects_oversize_duplicate_keys_and_cleanup():
             decode_message(raw)
 
 
-def test_wrong_peer_uid_refused_before_read():
+def test_wrong_peer_uid_refused_before_read() -> None:
     left, right = socket.socketpair()
     try:
         with pytest.raises(StorageError, match="peer"):
@@ -312,12 +324,12 @@ def test_wrong_peer_uid_refused_before_read():
         right.close()
 
 
-def test_controller_can_traverse_socket_parent(host):
+def test_controller_can_traverse_socket_parent(host: HostFixture) -> None:
     service, _, _ = host
     assert Path(service.config.socket_path).parent.stat().st_mode & 0o111 == 0o111
 
 
-def test_backing_hardlink_added_after_ready_rejected(host, tmp_path):
+def test_backing_hardlink_added_after_ready_rejected(host: HostFixture, tmp_path: Path) -> None:
     service, _, req = host
     receipt = service.provision(req)
     os.link(receipt["backing_path"], tmp_path / "second-link")
@@ -325,24 +337,26 @@ def test_backing_hardlink_added_after_ready_rejected(host, tmp_path):
         service.inspect(req)
 
 
-def test_inode_replacement_during_allocation_never_reaches_mkfs(host):
+def test_inode_replacement_during_allocation_never_reaches_mkfs(
+    host: HostFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
     service, kernel, req = host
     original = kernel.allocate
 
-    def race(fd, size):
+    def race(fd: int, size: int) -> None:
         original(fd, size)
         image = Path(service.config.backing_base) / f"{req.volume_id}.img"
         image.rename(image.with_suffix(".retained"))
         image.write_bytes(b"foreign")
 
-    kernel.allocate = race
+    monkeypatch.setattr(kernel, "allocate", race)
     with pytest.raises(StorageError):
         service.provision(req)
     assert not any("mkfs.ext4" in argv[0] for argv in kernel.commands)
     assert (Path(service.config.backing_base) / f"{req.volume_id}.img").read_bytes() == b"foreign"
 
 
-def test_bad_receipt_preserves_allocated_file(host):
+def test_bad_receipt_preserves_allocated_file(host: HostFixture) -> None:
     service, _, req = host
     receipt = service.provision(req)
     journal = Path(service.config.state_base) / f"{req.volume_id}.json"
@@ -352,15 +366,15 @@ def test_bad_receipt_preserves_allocated_file(host):
     assert Path(receipt["backing_path"]).exists()
 
 
-def test_node_replacement_refused(host):
+def test_node_replacement_refused(host: HostFixture, monkeypatch: pytest.MonkeyPatch) -> None:
     service, kernel, req = host
-    kernel.machine_hash = lambda: "b" * 64
+    monkeypatch.setattr(kernel, "machine_hash", lambda: "b" * 64)
     with pytest.raises(StorageError):
         service.provision(req)
     assert not list(Path(service.config.backing_base).iterdir())
 
 
-def test_incomplete_format_blocks_boot_restore(host):
+def test_incomplete_format_blocks_boot_restore(host: HostFixture) -> None:
     service, kernel, req = host
     kernel.fail_format = True
     with pytest.raises(StorageError):
@@ -369,7 +383,9 @@ def test_incomplete_format_blocks_boot_restore(host):
         service.restore_mounts()
 
 
-def test_root_config_requires_exact_fields_owner_mode_and_no_symlink(host, tmp_path):
+def test_root_config_requires_exact_fields_owner_mode_and_no_symlink(
+    host: HostFixture, tmp_path: Path
+) -> None:
     service, _, _ = host
     from dataclasses import asdict
 
@@ -387,7 +403,7 @@ def test_root_config_requires_exact_fields_owner_mode_and_no_symlink(host, tmp_p
         Config.load(str(alias))
 
 
-def test_concurrent_retry_serialized_to_one_image_and_one_format(host):
+def test_concurrent_retry_serialized_to_one_image_and_one_format(host: HostFixture) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
     service, kernel, req = host
@@ -399,16 +415,18 @@ def test_concurrent_retry_serialized_to_one_image_and_one_format(host):
 
 
 @pytest.mark.parametrize("phase", ["created", "allocated", "formatting", "formatted", "mounting"])
-def test_crash_after_each_durable_phase_never_reformats(host, phase):
+def test_crash_after_each_durable_phase_never_reformats(
+    host: HostFixture, phase: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     service, kernel, req = host
     write_phase = service._phase
 
-    def crash(journal, receipt, next_phase):
+    def crash(journal: Path, receipt: dict[str, Any], next_phase: str) -> None:
         write_phase(journal, receipt, next_phase)
         if next_phase == phase:
             raise StorageError("simulated process death")
 
-    service._phase = crash
+    monkeypatch.setattr(service, "_phase", crash)
     with pytest.raises(StorageError):
         service.provision(req)
     before = len(kernel.commands)
@@ -418,7 +436,7 @@ def test_crash_after_each_durable_phase_never_reformats(host, phase):
     assert len(list(Path(service.config.backing_base).iterdir())) == 1
 
 
-def test_listener_restart_and_duplicate_process_never_unlink_live_socket(host):
+def test_listener_restart_and_duplicate_process_never_unlink_live_socket(host: HostFixture) -> None:
     from app.runtime_v2.storage_host import _listener
 
     service, _, _ = host
@@ -431,7 +449,7 @@ def test_listener_restart_and_duplicate_process_never_unlink_live_socket(host):
         assert Path(service.config.socket_path).is_socket()
 
 
-def test_listener_never_removes_unknown_existing_socket(host):
+def test_listener_never_removes_unknown_existing_socket(host: HostFixture) -> None:
     from app.runtime_v2.storage_host import _listener
 
     service, _, _ = host
@@ -445,7 +463,7 @@ def test_listener_never_removes_unknown_existing_socket(host):
         foreign.close()
 
 
-def test_only_dedicated_data_child_is_exposed_and_lost_found_preserved(host):
+def test_only_dedicated_data_child_is_exposed_and_lost_found_preserved(host: HostFixture) -> None:
     service, _, req = host
     receipt = service.provision(req)
     assert receipt["data_path"] == receipt["mount_path"] + "/data"
@@ -457,7 +475,7 @@ def test_only_dedicated_data_child_is_exposed_and_lost_found_preserved(host):
     assert (lost_found / "retain").read_text() == "filesystem metadata"
 
 
-def test_data_child_replacement_rejected_even_with_valid_loop_mount(host):
+def test_data_child_replacement_rejected_even_with_valid_loop_mount(host: HostFixture) -> None:
     service, _, req = host
     receipt = service.provision(req)
     data = Path(receipt["data_path"])
@@ -467,20 +485,22 @@ def test_data_child_replacement_rejected_even_with_valid_loop_mount(host):
         service.inspect(req)
 
 
-def test_restore_accepts_changed_loop_device_but_preserves_data_inode(host):
+def test_restore_accepts_changed_loop_device_but_preserves_data_inode(
+    host: HostFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
     service, kernel, req = host
     first = service.provision(req)
     data_file = Path(first["data_path"]) / "checksum.txt"
     data_file.write_text("retained checksum")
     kernel.lose_mounts()
-    kernel.loop_device = lambda path: "7:8"
+    monkeypatch.setattr(kernel, "loop_device", lambda path: "7:8")
     restored = service.restore_mounts()[0]
     assert restored["data"]["inode"] == first["data"]["inode"]
     assert Path(restored["data_path"]).joinpath("checksum.txt").read_text() == "retained checksum"
     assert restored["live"]["mount"]["device"] == "7:8"
 
 
-def test_standalone_source_parses_as_python39():
+def test_standalone_source_parses_as_python39() -> None:
     import ast
 
     from app.runtime_v2 import storage_host
@@ -488,7 +508,7 @@ def test_standalone_source_parses_as_python39():
     ast.parse(Path(storage_host.__file__).read_text(), feature_version=(3, 9))
 
 
-def test_machine_hash_matches_telemetry_normalization(monkeypatch):
+def test_machine_hash_matches_telemetry_normalization(monkeypatch: pytest.MonkeyPatch) -> None:
     import hashlib
 
     monkeypatch.setattr(Path, "read_bytes", lambda self: b" 0123456789ABCDEF0123456789ABCDEF\n")
