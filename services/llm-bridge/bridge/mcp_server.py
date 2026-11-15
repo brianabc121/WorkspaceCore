@@ -54,8 +54,10 @@ def tool_definition(tool: ToolDef) -> types.Tool:
     )
 
 
-def error_result(code: str, message: str) -> types.CallToolResult:
-    payload = {"error": {"code": code, "message": message}}
+def error_result(
+    code: str, message: str, details: dict[str, Any] | None = None
+) -> types.CallToolResult:
+    payload = {"error": {**(details or {}), "code": code, "message": message}}
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
         is_error=True,
@@ -97,14 +99,22 @@ async def run_tool(
     if name == "llm_send":
         return await engine.send(caller, **args)
     if name == "llm_turn_get":
-        return await engine.get_turn(caller, args["turn_id"], args["wait_seconds"])
+        return await engine.get_turn(caller, args["turn_id"], args["wait_seconds"], args["detail"])
+    if name == "llm_file_get":
+        return engine.file_text(
+            caller, args["session_id"], args["file_id"], args["offset"], args["max_chars"]
+        )
     if name == "llm_turn_cancel":
         return await engine.cancel_turn(caller, args["turn_id"])
     if name == "llm_session_list":
         return await engine.list_sessions(caller, **args)
     if name == "llm_session_get":
         return await engine.get_session(
-            caller, args["session_id"], limit=args["limit"], offset=args["offset"]
+            caller,
+            args["session_id"],
+            limit=args["limit"],
+            offset=args["offset"],
+            order=args["order"],
         )
     if name == "llm_queue":
         return engine.caller_queue(caller, args["session_id"])
@@ -128,7 +138,7 @@ async def _call_tool(
     try:
         return ok_result(await run_tool(engine, _caller(ctx), params.name, params.arguments or {}))
     except BridgeError as error:
-        return error_result(error.code, error.message)
+        return error_result(error.code, error.message, error.details)
 
 
 def _input_schema(name: str) -> dict[str, Any] | None:

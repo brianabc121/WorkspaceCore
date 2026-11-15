@@ -99,10 +99,12 @@ _CURSOR_V2 = "v2."
 class ToolCallError(Exception):
     """MCP 工具的错误（ToolError 的 code）。"""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        # 给调用方的补充（能不能重试、多久以后）：和 code、message 一起放在错误里
+        self.details = details or {}
 
 
 @dataclass(frozen=True)

@@ -431,7 +431,7 @@ async def test_source_is_kept_and_index_feed_follows_changes(bridge: Bridge) -> 
     assert "机密的内容" not in json.dumps(page, ensure_ascii=False)
     # 没有新的变化：下一页是空的，序号不动
     again = (await bridge.admin("GET", "/admin/index", params={"after": page["last_rev"]})).json()
-    assert again == {"sessions": [], "last_rev": page["last_rev"]}
+    assert again == {"sessions": [], "last_rev": page["last_rev"], "pauses": []}
     # 回合换了状态（失败）也算变化
     await tool(
         "llm_send",
@@ -482,6 +482,149 @@ async def test_deltas_stream_while_running_and_are_dropped_afterwards(bridge: Br
     view = (await bridge.admin("GET", f"/admin/sessions/{a}")).json()
     reply = next(m for m in view["messages"] if m["role"] == "assistant")
     assert "partial" not in reply and reply["timing"]["ran_seconds"] >= 0.5
+
+
+async def test_agent_reads_output_files_and_pages_from_the_newest(bridge: Bridge) -> None:
+    """按编号读回合产出的文字文件；读会话可以从最新的开始；没做完的回合说明原因（T-0250）。"""
+    made = await bridge.admin(
+        "POST",
+        "/admin/environments",
+        json={"platform": "fake", "mode": "dev", "name": "空", "sandbox": "exec"},
+    )
+    assert made.status_code in (200, 201), made.text
+    session = await bridge.tool(
+        "c1",
+        "llm_session_create",
+        {"platform": "fake", "mode": "dev", "environment": made.json()["id"]},
+    )
+    a = session["session_id"]
+    turn = await _send(bridge, "c1", a, "write:out/report.md", "r1")
+    (output,) = turn["outputs"]
+    assert output["name"].endswith("report.md")
+    got = await bridge.tool(
+        "c1", "llm_file_get", {"session_id": a, "file_id": output["id"], "max_chars": 4}
+    )
+    assert got["text"] == "gene" and got["next_offset"] == 4 and got["chars"] == len("generated\n")
+    rest = await bridge.tool(
+        "c1", "llm_file_get", {"session_id": a, "file_id": output["id"], "offset": 4}
+    )
+    assert rest["text"] == "rated\n" and rest["next_offset"] is None
+    # 别人读不了；不是这个会话的文件读不了
+    other = await bridge.tool("c2", "llm_file_get", {"session_id": a, "file_id": output["id"]})
+    assert other["error"]["code"] == "NOT_FOUND"
+    # 读会话：默认从最早的开始；newest 从最新的开始，页内仍按时间先后
+    await _send(bridge, "c1", a, "fail:invalid", "r2")
+    newest = await bridge.tool(
+        "c1", "llm_session_get", {"session_id": a, "limit": 2, "order": "newest"}
+    )
+    assert newest["total"] == 4 and newest["next_offset"] == 2
+    assert [m["role"] for m in newest["messages"]] == ["user", "status"]
+    assert newest["messages"][1]["failure"]["retryable"] is False
+    oldest = await bridge.tool("c1", "llm_session_get", {"session_id": a, "limit": 2})
+    assert [m["role"] for m in oldest["messages"]] == ["user", "assistant"]
+    # 给工作台的回合状态：不含内容
+    status = (
+        await bridge.admin("POST", "/admin/turns/status", json={"ids": [turn["turn_id"], "bt_x"]})
+    ).json()["turns"]
+    assert (
+        status[turn["turn_id"]]["status"] == "completed" and status["bt_x"]["status"] == "missing"
+    )
+    assert "generated" not in json.dumps(status)
+
+
+async def test_search_finds_text_in_questions_and_answers_and_usage_adds_up(bridge: Bridge) -> None:
+    """全文搜索和用量汇总（改进方案 4.2 的 B1、B5）。"""
+    a = await _session(bridge, "agent-1")
+    await _send(bridge, "agent-1", a, "帮我写一份季度复盘", "r1")
+    b = await _session(bridge, "user:u1")
+    await _send(bridge, "user:u1", b, "今天天气怎么样", "r2")
+    await _send(bridge, "user:u1", b, "fail:invalid", "r3")
+
+    found = (await bridge.admin("GET", "/admin/search", params={"q": "季度复盘"})).json()["hits"]
+    assert [h["session_id"] for h in found] == [a]
+    # 回答里也有这几个字（仿真程序把提问原样带回来）：给的是最新的一处
+    assert found[0]["role"] == "assistant" and "季度复盘" in found[0]["snippet"]
+    assert (await bridge.admin("GET", "/admin/search", params={"q": "没有这句话"})).json() == {
+        "hits": []
+    }
+    # 通配符当普通字符；太短的不搜
+    assert (await bridge.admin("GET", "/admin/search", params={"q": "%_"})).json()["hits"] == []
+    assert (await bridge.admin("GET", "/admin/search", params={"q": "x"})).status_code == 422
+
+    rows = (await bridge.admin("GET", "/admin/usage")).json()["rows"]
+    by_owner = {r["owner_id"]: r for r in rows}
+    assert by_owner["agent-1"]["turns"] == 1 and by_owner["agent-1"]["failed"] == 0
+    assert by_owner["user:u1"]["turns"] == 2 and by_owner["user:u1"]["failed"] == 1
+    assert by_owner["agent-1"]["tokens"] > 0 and by_owner["agent-1"]["platform"] == "fake"
+    assert by_owner["agent-1"]["day"] == time.strftime("%Y-%m-%d", time.gmtime())
+
+
+def _init_repo(workdir: Path) -> None:
+    """把工作目录变成一个有一次提交的 git 仓库（a.txt 的内容是 old）。"""
+    import subprocess
+
+    git = ["git", "-C", str(workdir), "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (workdir / "a.txt").write_text("old\n")
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+
+
+async def test_dev_turn_leaves_a_patch_and_retention_clears_content(bridge: Bridge) -> None:
+    """开发回合留下改动补丁（归档后还在）；保留期到了只清内容（改进方案 4.2 的 B3、B8）。"""
+    made = await bridge.admin(
+        "POST",
+        "/admin/environments",
+        json={"platform": "fake", "mode": "dev", "name": "仓库", "sandbox": "exec"},
+    )
+    session = await bridge.tool(
+        "c1",
+        "llm_session_create",
+        {"platform": "fake", "mode": "dev", "environment": made.json()["id"]},
+    )
+    a = session["session_id"]
+    workdir = Path(bridge.engine.store.get_session(a)["workdir"])  # type: ignore[index]
+    _init_repo(workdir)
+    (workdir / "a.txt").write_text("new\n")
+    turn = await _send(bridge, "c1", a, "write:out/b.txt", "r1")
+    names = [o["name"] for o in turn["outputs"]]
+    assert "改动（到这一回合为止）.patch" in names
+    patch = next(o for o in turn["outputs"] if o["name"].endswith(".patch"))
+    text = (await bridge.tool("c1", "llm_file_get", {"session_id": a, "file_id": patch["id"]}))[
+        "text"
+    ]
+    assert "-old" in text and "+new" in text and "out/b.txt" in text
+    # 没有新的改动：下一回合不再存一份一样的
+    again = await _send(bridge, "c1", a, "没改东西", "r2")
+    assert not [o for o in again.get("outputs", []) if o["name"].endswith(".patch")]
+    # 归档后工作目录删了，补丁还在
+    await bridge.tool("c1", "llm_session_archive", {"session_id": a})
+    assert not await asyncio.to_thread(workdir.exists)
+    kept = await bridge.admin("GET", f"/admin/sessions/{a}/attachments/{patch['id']}")
+    assert kept.status_code == 200 and b"+new" in kept.content
+
+    # 保留期：默认一直保留；设了之后，最后活动早于它的会话清掉内容，回合的状态和用量留着
+    assert bridge.engine.purge_expired() == 0
+    assert (
+        await bridge.admin("PUT", "/admin/settings", json={"retention_days": 1})
+    ).status_code == 200
+    assert bridge.engine.purge_expired() == 0  # 刚活动过的不清
+    bridge.engine.store._exec("UPDATE sessions SET updated_at = updated_at - 3 * 86400")
+    assert bridge.engine.purge_expired() == 1
+    view = (await bridge.admin("GET", f"/admin/sessions/{a}")).json()
+    assert view["session"]["purged_at"] and view["session"]["turns"] == 2
+    assert all(not m["text"] for m in view["messages"])
+    statuses = [m["status"] for m in view["messages"] if m["role"] == "assistant"]
+    assert statuses == ["completed", "completed"]
+    assert (
+        await bridge.admin("GET", f"/admin/sessions/{a}/attachments/{patch['id']}")
+    ).status_code == 404
+    assert (await bridge.admin("GET", "/admin/search", params={"q": "没改东西"})).json()[
+        "hits"
+    ] == []
+    usage = (await bridge.admin("GET", "/admin/usage")).json()["rows"]
+    assert sum(r["turns"] for r in usage) == 2
+    assert bridge.engine.purge_expired() == 0  # 清过的不再清
 
 
 async def test_external_sessions(bridge: Bridge) -> None:

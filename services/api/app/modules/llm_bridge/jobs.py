@@ -16,6 +16,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
+from app.domain import notifications
 from app.domain.connectors import ConnectorRuntime
 from app.domain.sync import SyncContext
 from app.integrations.base import ConnectorError
@@ -70,6 +71,81 @@ def _row(bridge: LlmBridge, item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+async def _notify_failures(db: AsyncSession, bridge: LlmBridge, rows: list[dict[str, Any]]) -> None:
+    """智能体的会话里多了失败（或结果未知）的回合：通知管理员，链接直接到那个会话。"""
+    agent_rows = [r for r in rows if r["owner_kind"] == "agent" and r["turns_failed"] > 0]
+    if not agent_rows:
+        return
+    known = dict(
+        (
+            await db.execute(
+                select(LlmBridgeSession.session_id, LlmBridgeSession.turns_failed).where(
+                    LlmBridgeSession.bridge_id == bridge.id,
+                    LlmBridgeSession.session_id.in_([r["session_id"] for r in agent_rows]),
+                )
+            )
+        ).all()
+    )
+    for row in agent_rows:
+        if row["turns_failed"] <= known.get(row["session_id"], 0):
+            continue
+        await notifications.notify_admins(
+            db,
+            bridge.workspace_id,
+            type_="llm_bridge.turn_failed",
+            severity="warning",
+            title=f"智能体「{row['owner_label'] or '未知'}」的大模型回合失败了",
+            body=f"{row['title'] or '（没有标题）'}（{row['platform']}，{bridge.name}）",
+            link=f"/llm_bridge?m={bridge.id}&s={row['session_id']}",
+            key=f"{row['session_id']}:{row['turns_failed']}",
+        )
+
+
+async def _notify_pauses(db: AsyncSession, bridge_id: uuid.UUID, pauses: Any) -> None:
+    """平台因额度用完暂停了：通知管理员一次；恢复后清掉记号，下次暂停再通知。"""
+    bridge = await db.get(LlmBridge, bridge_id)
+    if bridge is None or not isinstance(pauses, list):
+        return
+    current: dict[str, Any] = {}
+    for pause in pauses:
+        if (
+            isinstance(pause, dict)
+            and isinstance(pause.get("platform"), str)
+            and pause.get("until")
+        ):
+            current[pause["platform"]] = pause
+    notified = dict(bridge.pause_notified or {})
+    changed = False
+    for platform, pause in current.items():
+        until = round(float(pause["until"]))
+        if notified.get(platform) == until:
+            continue
+        when = f"{datetime.fromtimestamp(until, UTC):%m-%d %H:%M} UTC"
+        guess = "（平台没有给出重置时间，这是估计的）" if pause.get("estimated") else ""
+        await notifications.notify_admins(
+            db,
+            bridge.workspace_id,
+            type_="llm_bridge.quota_paused",
+            severity="warning",
+            title=f"{platform} 的额度用完了，「{bridge.name}」上这个平台已暂停",
+            body=f"暂停到 {when}{guess}；到时间后自动恢复，被打断的会话会自动继续。",
+            link="/llm_bridge?view=manage",
+            key=f"{bridge.id}:{platform}:{until}",
+        )
+        notified[platform] = until
+        changed = True
+    for platform in [p for p in notified if p not in current]:
+        del notified[platform]
+        changed = True
+    if changed:
+        await db.execute(
+            update(LlmBridge)
+            .where(LlmBridge.id == bridge_id)
+            .values(pause_notified=notified, updated_at=LlmBridge.updated_at)
+        )
+        await db.commit()
+
+
 async def sync_bridge(
     db: AsyncSession, settings: Settings, runtime: ConnectorRuntime, bridge_id: uuid.UUID
 ) -> int:
@@ -80,8 +156,11 @@ async def sync_bridge(
         return 0
     client, rev, done = await service.client(bridge), bridge.index_rev, 0
     await db.commit()  # 等管理器回答时不占着事务
-    for _ in range(MAX_PAGES):
+    backfill = rev == 0
+    for page in range(MAX_PAGES):
         data = await client.admin("GET", f"/index?after={rev}&limit={PAGE}")
+        if page == 0 and isinstance(data, dict):
+            await _notify_pauses(db, bridge_id, data.get("pauses"))
         items = data.get("sessions") if isinstance(data, dict) else None
         if not isinstance(items, list) or not items:
             break
@@ -89,6 +168,8 @@ async def sync_bridge(
         if bridge is None:  # 同步到一半登记被删了
             return done
         rows = [_row(bridge, i) for i in items if isinstance(i, dict) and i.get("session_id")]
+        if rows and not backfill:  # 第一次同步是补历史，不为旧的失败发通知
+            await _notify_failures(db, bridge, rows)
         if rows:
             statement = insert(LlmBridgeSession).values(rows)
             keep = ("workspace_id", "bridge_id", "session_id", "created_at")

@@ -63,6 +63,12 @@ export function relatedLink(entry: AuditEntry, isOwner: boolean): { to: RouteLoc
     case 'task': return { to: { path: '/tasks', query: { task: id } }, label: '查看任务' }
     case 'integration': return { to: '/settings/integrations', label: '查看集成设置' }
     case 'workspace': return { to: '/settings', label: '查看工作空间设置' }
+    // 大模型客户端：记录里带着会话就到聊天页的那个会话（和回合），否则到管理页
+    case 'llm_bridge': {
+      const meta = entry.metadata ?? {}, session = meta.session ?? meta.session_id, turn = meta.turn_id
+      if (typeof session === 'string' && /^bs_[0-9a-f]{20}$/.test(session)) return { to: { path: '/llm_bridge', query: { m: id, s: session, ...(typeof turn === 'string' ? { t: turn } : {}) } }, label: '查看会话' }
+      return { to: { path: '/llm_bridge', query: { view: 'manage', m: id } }, label: '查看 MCP 管理器' }
+    }
     default: return null
   }
 }

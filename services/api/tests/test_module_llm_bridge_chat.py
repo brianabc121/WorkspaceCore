@@ -823,3 +823,34 @@ async def test_chat_stream_pushes_deltas_and_resumes_from_a_cursor(rig: Rig) -> 
         404,
         422,
     )
+
+
+async def test_chat_model_changes_between_turns(rig: Rig) -> None:  # noqa: F811
+    """换模型从下一回合起生效；标题在发出第一条时就定下来（T-0253）。"""
+    session_id = (await new_chat(rig, None))["session"]["session_id"]
+    base = chat(rig, f"/sessions/{session_id}")
+    first = await rig.api(
+        "POST", f"{base}/messages", json={"text": "sleep:0.3", "request_id": "m1"}
+    )
+    assert first.status_code == 200, first.text
+    # 第一回合还没做完，标题已经有了
+    listed = (await rig.api("GET", chat(rig, "/sessions"))).json()["sessions"]
+    assert listed[0]["title"] == "sleep:0.3" and listed[0]["busy"] is True
+    changed = await rig.api("PUT", f"{base}/model", json={"model": "fake-2"})
+    assert changed.status_code == 200 and changed.json()["model"] == "fake-2"
+    second = await rig.api("POST", f"{base}/messages", json={"text": "换了吗", "request_id": "m2"})
+    assert second.status_code == 200
+    for _ in range(60):
+        view = (await rig.api("GET", base)).json()
+        if not view["session"]["busy"]:
+            break
+        await asyncio.sleep(0.1)
+    replies = [m["text"] for m in view["messages"] if m["role"] == "assistant"]
+    # 已经在跑的那一回合用原来的模型，后面的用新的
+    assert replies == ["[fake-1] sleep:0.3", "[fake-2] 换了吗"]
+    assert (await rig.api("PUT", f"{base}/model", json={"model": "有 空格"})).status_code == 422
+    actions = [e["action"] for e in (await rig.env.get("/api/v1/audit-logs", limit=20))["items"]]
+    assert "llm_bridge.chat_session_model_changed" in actions
+    archived = await rig.api("POST", f"{base}/archive")
+    assert archived.status_code == 200
+    assert (await rig.api("PUT", f"{base}/model", json={"model": "fake-1"})).status_code == 409

@@ -33,10 +33,11 @@ PROTOCOL_VERSION = "2025-06-18"
 class BridgeCallError(Exception):
     """会话桥明确返回的错误（工具错误或管理接口的错误）。"""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, details: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.details = details or {}  # 会话桥给的补充：retryable、retry_after_seconds
 
 
 def _invalid() -> ConnectorError:
@@ -67,7 +68,12 @@ def _json_or_none(response: httpx.Response) -> Any:
 def _error_of(body: Any) -> BridgeCallError | None:
     error = body.get("error") if isinstance(body, dict) else None
     if isinstance(error, dict) and isinstance(error.get("code"), str):
-        return BridgeCallError(error["code"], str(error.get("message") or "")[:500])
+        details = {
+            key: error[key]
+            for key in ("retryable", "retry_after_seconds")
+            if isinstance(error.get(key), (bool, int, float))
+        }
+        return BridgeCallError(error["code"], str(error.get("message") or "")[:500], details)
     return None
 
 

@@ -69,6 +69,17 @@ class SendInput(_Input):
 class TurnGetInput(_Input):
     turn_id: str
     wait_seconds: float = Field(default=0, ge=0, le=50)
+    detail: Literal["summary", "steps"] = Field(
+        default="summary",
+        description="summary：状态和最终回答；steps：再带上过程（中间说的话、命令、改动的文件、工具调用）",
+    )
+
+
+class FileGetInput(_Input):
+    session_id: str
+    file_id: str = Field(description="回合结果 outputs 里的 id")
+    offset: int = Field(default=0, ge=0, description="从第几个字符开始")
+    max_chars: int = Field(default=20_000, ge=1, le=100_000)
 
 
 class TurnCancelInput(_Input):
@@ -89,6 +100,10 @@ class SessionGetInput(_Input):
     session_id: str
     limit: int = Field(default=50, ge=1, le=200)
     offset: int = Field(default=0, ge=0)
+    order: Literal["oldest", "newest"] = Field(
+        default="oldest",
+        description="oldest：从最早的开始翻页；newest：从最新的开始（offset=0 是最新的一页，页内仍按时间先后）",
+    )
 
 
 class SessionArchiveInput(_Input):
@@ -147,6 +162,13 @@ TOOLS: tuple[ToolDef, ...] = (
         True,
     ),
     ToolDef("llm_session_get", "查看一个会话的信息和消息记录。" + _NOTE, SessionGetInput, True),
+    ToolDef(
+        "llm_file_get",
+        "按编号读一个回合产出的文件（回合结果的 outputs 里有编号）。只能读文字文件，"
+        "一次最多 max_chars 个字符，没读完时返回 next_offset。" + _NOTE,
+        FileGetInput,
+        True,
+    ),
     ToolDef(
         "llm_queue",
         "查看一个会话的消息队列：正在处理的那一条和排队中的各条（按将要处理的顺序）。",

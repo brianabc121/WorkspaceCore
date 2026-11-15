@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
@@ -31,6 +31,8 @@ const managerId = computed(() => {
 })
 const manager = computed(() => list.value.find(b => b.id === managerId.value) ?? null)
 const sessionId = computed(() => { const s = one(route.query.s); return s && /^bs_[0-9a-f]{20}$/.test(s) ? s : null })
+// 链接里带 t=<回合>：打开会话后定位到那一回合
+const targetTurn = computed(() => { const t = one(route.query.t); return t && /^bt_[0-9a-f]{20}$/.test(t) ? t : null })
 const groupId = computed(() => { const g = one(route.query.g); return g && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(g) && !sessionId.value ? g : null })
 const creating = computed(() => route.query.new === '1' && !sessionId.value && !groupId.value)
 const comparing = computed(() => route.query.compare === '1' && !sessionId.value && !groupId.value && !creating.value)
@@ -43,7 +45,10 @@ const statusProblem = computed(() => {
   return data && !data.reachable ? `这个 MCP 管理器连不上${data.error ? `：${data.error}` : '。'}` : ''
 })
 const filter = ref<SessionFilter>({ q: '', platform: null, status: 'active' })
-const sessions = chat.useSessions(managerId, filter)
+// 列表先读 100 个；“加载更多”读到 200 个（接口一次最多这么多），再多就到“会话记录”里找
+const pageSize = ref(100)
+watch([managerId, filter], () => { pageSize.value = 100 })
+const sessions = chat.useSessions(managerId, filter, pageSize)
 // 一个管理器都没有时页面只显示说明，不用读分组
 const groups = chat.useGroups(computed(() => filter.value.status), computed(() => list.value.length > 0))
 
@@ -106,6 +111,7 @@ async function sync() {
         :loading="sessions.isPending.value" :error="sessions.data.value ? null : sessions.error.value" :filter="filter" :selected="sessionId"
         :can-create="!!manager?.enabled" :syncing="syncing" :sync-notice="syncNotice" :sync-error="syncError"
         :groups="groups.data.value ?? []" :selected-group="groupId" :can-compare="list.some(b => b.enabled)"
+        :more="sessions.data.value?.next_offset == null ? null : pageSize < 200 ? 'load' : 'records'" @more="pageSize = 200"
         @update:manager-id="pickManager($event)" @update:filter="filter = $event" @select="open" @create="router.push(here({ new: '1' }))" @sync="sync" @retry="sessions.refetch()"
         @compare="router.push(here({ compare: '1' }))" @open-group="openGroup($event)"
       />
@@ -124,7 +130,7 @@ async function sync() {
           @update:manager-id="pickManager($event, { new: '1' })" @created="created" @cancel="router.push(here())"
         />
         <ChatConversation
-          v-else-if="sessionId && manager" :key="`${manager.id}:${sessionId}`" :chat="chat" :bridge="manager" :session-id="sessionId" :narrow="narrow" :quotas="status.data.value?.quota ?? null"
+          v-else-if="sessionId && manager" :key="`${manager.id}:${sessionId}`" :chat="chat" :bridge="manager" :session-id="sessionId" :narrow="narrow" :quotas="status.data.value?.quota ?? null" :target-turn="targetTurn"
           :initial-draft="carry?.session === sessionId ? carry.draft : ''" :initial-error="carry?.session === sessionId ? carry.error : ''"
           @back="router.push(here())" @changed="refreshList"
         />

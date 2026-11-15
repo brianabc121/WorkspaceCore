@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, toRef } from 'vue'
-import { Archive, ArrowLeft, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
+import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue'
+import { Archive, ArrowLeft, Download, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
-import { CHAT_NO_TOOLS, MODES, platformName, type Bridge, type Quota } from '../api'
+import { CHAT_NO_TOOLS, MODES, platformName, seconds, type Bridge, type Platform, type Quota } from '../api'
 import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, needsTakeover, newRequestId, ownerText, type ChatAttachment, type LlmChatApi } from './chatApi'
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
@@ -12,7 +12,7 @@ import ChatQueue from './ChatQueue.vue'
 
 // 中间一栏：一个会话的对话。父组件按“管理器 + 会话”给 key，换会话时整个重建。
 // 内容和进度（长轮询读事件）在 useLiveConversation 里。
-const props = defineProps<{ chat: LlmChatApi; bridge: Bridge; sessionId: string; narrow: boolean; initialDraft?: string; initialError?: string; quotas?: Record<string, Quota> | null }>()
+const props = defineProps<{ chat: LlmChatApi; bridge: Bridge; sessionId: string; narrow: boolean; initialDraft?: string; initialError?: string; quotas?: Record<string, Quota> | null; targetTurn?: string | null }>()
 const emit = defineEmits<{ back: []; changed: [] }>()
 
 const bridgeId = computed(() => props.bridge.id)
@@ -25,8 +25,17 @@ function scrollDown(force = false) {
   if (force) stick = true
   void nextTick(() => { const el = box.value; if (el && stick) el.scrollTop = el.scrollHeight })
 }
+// 从通知、执行记录、会话记录点过来时带着回合编号：第一次读到内容后滚到那一回合并标出来
+let jumped = false
+function jump() {
+  if (jumped || !props.targetTurn) return
+  const el = box.value?.querySelector<HTMLElement>(`li.is-reply[data-turn="${props.targetTurn}"]`)
+  if (!el) return
+  jumped = true; stick = false
+  el.scrollIntoView?.({ block: 'center' })
+}
 const { conversation, session, messages, lost, activeTurn, poll, reload, sent, resume, resuming, resumeError } = useLiveConversation(
-  props.chat, bridgeId, toRef(props, 'sessionId'), { activity: () => scrollDown(), changed: () => emit('changed') },
+  props.chat, bridgeId, toRef(props, 'sessionId'), { activity: () => { scrollDown(); void nextTick(jump) }, changed: () => { badge(); emit('changed') } },
 )
 
 // ---- 发送 ----
@@ -56,6 +65,20 @@ function allowTakeover() {
   confirmed.value = window.confirm(takeoverText.value)
   return confirmed.value
 }
+// 草稿按会话存在浏览器里：切换会话、刷新页面都还在；发出去就清掉
+const draftKey = `llm_chat_draft:${props.bridge.id}:${props.sessionId}`
+function loadDraft() { try { return window.localStorage.getItem(draftKey) ?? '' } catch { return '' } }
+function saveDraft(value: string) {
+  try { if (value) window.localStorage.setItem(draftKey, value.slice(0, 100000)); else window.localStorage.removeItem(draftKey) } catch { /* 存不了就算了 */ }
+}
+if (!draft.value) draft.value = loadDraft()
+watch(draft, saveDraft)
+// 回答到了而人不在这个页面：在标签页标题上标出来，回来就恢复
+let titleBefore: string | null = null
+function badge() { if (document.hidden && titleBefore === null) { titleBefore = document.title; document.title = `● 有新回答 · ${titleBefore}` } }
+function unbadge() { if (!document.hidden && titleBefore !== null) { document.title = titleBefore; titleBefore = null } }
+document.addEventListener('visibilitychange', unbadge)
+onBeforeUnmount(() => { document.removeEventListener('visibilitychange', unbadge); if (titleBefore !== null) document.title = titleBefore })
 async function submit() {
   const text = draft.value.trim()
   if (!text || sending.value || blocked.value) return
@@ -143,10 +166,27 @@ function reimport() {
 }
 
 function onKey(event: KeyboardEvent) {
+  if (event.isComposing) return
+  // Esc：停止正在回答的回合
+  if (event.key === 'Escape' && activeTurn.value?.status === 'running') { event.preventDefault(); void stop(); return }
+  // 输入框空着时按 ↑：把自己上一条发的消息放回来改
+  if (event.key === 'ArrowUp' && !draft.value) {
+    const mine = [...messages.value].reverse().find(m => m.role === 'user' && m.mine && m.text)
+    if (mine) { event.preventDefault(); draft.value = mine.text }
+    return
+  }
   // Enter 发送，Shift + Enter 换行；输入法还在选字时的 Enter 不算
-  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+  if (event.key !== 'Enter' || event.shiftKey) return
   event.preventDefault()
   void submit()
+}
+// 重试 / 重新生成：把那一回合的提问原样再发一次（新的回合，原来的还在）
+async function again(turnId: string) {
+  const asked = messages.value.find(m => m.role === 'user' && m.turn_id === turnId && m.delivery !== 'inserted')
+  if (!asked?.text) return
+  if (draft.value.trim()) { sendError.value = '输入框里还有没发的内容：先发出去或清空，再点重试。'; return }
+  draft.value = asked.text
+  await submit()
 }
 async function stop() {
   const turn = activeTurn.value?.turn_id
@@ -171,6 +211,28 @@ function saveTitle() {
   const value = title.value.trim()
   if (!value) { headError.value = '标题不能为空。'; return }
   return act(async () => { await props.chat.rename(props.bridge.id, props.sessionId, value); renaming.value = false })
+}
+// 换模型：Claude / CodeBuddy 每个回合起一次官方程序，模型可以逐回合换；ChatGPT / Codex 的会话换不了
+const canSwitch = computed(() => !!session.value && ['claude', 'workbuddy'].includes(session.value.platform) && session.value.origin === 'bridge' && session.value.status === 'active' && props.bridge.enabled)
+const optionPlatform = computed(() => (canSwitch.value && infoOpen.value ? (session.value!.platform as Platform) : null))
+const optionMode = computed<'chat' | 'dev'>(() => (session.value?.mode === 'dev' ? 'dev' : 'chat'))
+const options = props.chat.useOptions(bridgeId, optionPlatform, optionMode)
+const models = computed(() => (canSwitch.value ? (options.data.value?.models ?? []).map(m => ({ id: m.id, name: m.name })) : []))
+function setModel(id: string) {
+  if (!id || id === session.value?.model) return
+  return act(() => props.chat.setModel(props.bridge.id, props.sessionId, id))
+}
+// 导出：提问、回答、每回合的状态和用时，存成一个 Markdown 文件
+async function exportSession() {
+  if (working.value || !session.value) return
+  working.value = true; headError.value = ''
+  try {
+    const blob = await props.chat.exportBlob(props.bridge.id, props.sessionId)
+    const url = URL.createObjectURL(blob), link = document.createElement('a')
+    link.href = url; link.download = `${session.value.title || '会话'}.md`; link.rel = 'noopener'
+    document.body.append(link); link.click(); link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  } catch (e) { headError.value = `没能导出：${chatError(e)}` } finally { working.value = false }
 }
 function archive() {
   if (!window.confirm('归档这个会话？\n\n归档后不能再往里发消息，记录保留，可以在“看已归档的”里找到。')) return
@@ -199,18 +261,20 @@ function archive() {
         <div v-if="session" class="lc-head-actions">
           <button v-if="session.origin === 'external'" type="button" class="lc-icon" aria-label="重新导入" title="重新向官方程序读一次内容" :disabled="working" @click="reimport"><RefreshCw aria-hidden="true" /></button>
           <button v-if="!renaming && session.origin !== 'external'" type="button" class="lc-icon" aria-label="改标题" title="改标题" :disabled="working" @click="startRename"><Pencil aria-hidden="true" /></button>
+          <button type="button" class="lc-icon" aria-label="导出会话" title="导出成 Markdown 文件" :disabled="working" @click="exportSession"><Download aria-hidden="true" /></button>
           <button v-if="session.status !== 'archived'" type="button" class="lc-icon" aria-label="归档会话" title="归档" :disabled="working" @click="archive"><Archive aria-hidden="true" /></button>
           <button type="button" class="lc-icon" :aria-pressed="infoOpen" aria-label="会话信息" title="会话信息" @click="infoOpen = !infoOpen"><Info aria-hidden="true" /></button>
         </div>
       </header>
       <p v-if="headError" class="lc-note is-red" role="alert">{{ headError }}</p>
+      <p v-if="session?.purged_at" class="lc-note" role="note">这个会话的对话内容已经按保留期清除（{{ seconds(session.purged_at) }}）：只剩下每个回合的状态、用时和用量。</p>
 
       <div ref="box" class="lc-scroll" @scroll.passive="onScroll">
         <DataState v-if="conversation.isPending.value || (conversation.error.value && !session)" :loading="conversation.isPending.value" :error="conversation.error.value" :empty="false" empty-text="" @retry="conversation.refetch()" />
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :no-tools="session.mode === 'chat'" :resuming="resuming" :source="source" @resume="resume" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :no-tools="session.mode === 'chat'" :target="!!targetTurn && m.turn_id === targetTurn" :last="i === messages.length - 1" :busy-action="sending" :resuming="resuming" :source="source" @resume="resume" @again="again" />
           </ol>
           <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
@@ -247,6 +311,6 @@ function archive() {
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>
       </form>
     </div>
-    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" :quota="quotas?.[session.platform] ?? null" @close="infoOpen = false" />
+    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" :quota="quotas?.[session.platform] ?? null" :models="models" :changing="working" @model="setModel" @close="infoOpen = false" />
   </div>
 </template>

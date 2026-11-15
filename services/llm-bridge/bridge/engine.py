@@ -16,6 +16,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import os
 import re
 import shutil
 import time
@@ -31,7 +32,7 @@ from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
 from bridge.drivers.base import Driver, DriverError, Mode, SessionSpec
 from bridge.redact import mask_identity, redact
-from bridge.store import Row, Store, message_of, new_id
+from bridge.store import Row, Store, message_of, new_id, usage_tokens
 
 logger = logging.getLogger("bridge.engine")
 
@@ -58,6 +59,9 @@ DEFAULTS: dict[str, Any] = {
     "auto_resume": True,
     "auto_resume_max": 3,  # 同一次中断最多自动续几次
     "resume_text": RESUME_TEXT,
+    # 对话内容保留多少天（按会话最后活动算）；0 是一直保留。到期只清内容：
+    # 会话这一行、回合的状态和用量都留着（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 的 B8）
+    "retention_days": 0,
 }
 SETTING_LIMITS = {
     "concurrency": (1, 16),
@@ -66,12 +70,18 @@ SETTING_LIMITS = {
     "send_per_hour": (1, 10_000),
     "max_text_chars": (1, 1_000_000),
     "auto_resume_max": (1, 10),
+    "retention_days": (0, 3650),
 }
 MAX_WAIT_SECONDS = 50
+RETENTION_CHECK_SECONDS = 6 * 3600  # 多久按保留期清一次
 # 逐字的增量：攒到这么多字、或者过了这么久，就写成一条事件
 DELTA_FLUSH_CHARS = 240
 DELTA_FLUSH_SECONDS = 0.12
 MAX_EVENT_WAIT_SECONDS = 25
+MAX_STEP_OUTPUT = 8000  # 过程里一条命令的输出最多给这么多字符
+MAX_PATCH_BYTES = 2 * 1024 * 1024  # 开发回合留下的改动补丁最大这么大，超过的截断
+PATCH_NAME = "改动（到这一回合为止）.patch"
+MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024  # 智能体按编号读产出文件：只读这么大以内的文字文件
 EVENT_POLL_SECONDS = 0.1  # 等新事件时多久看一次
 ACCOUNT_CACHE_SECONDS = 60
 _MODEL_RE = re.compile(r"^[\w.\-:\[\]/]{1,100}$")
@@ -99,10 +109,13 @@ EXTERNAL_PLATFORM = {
 
 
 class BridgeError(Exception):
-    def __init__(self, code: str, message: str) -> None:
+    """details：给调用方的补充（例如 retry_after_seconds），和 code、message 一起放在错误里。"""
+
+    def __init__(self, code: str, message: str, details: Row | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.message = message
+        self.details = details or {}
 
 
 def from_driver(error: DriverError) -> BridgeError:
@@ -187,6 +200,7 @@ class Engine:
         self._pause_wake: dict[str, asyncio.Event] = {}
         self._resume_wake = asyncio.Event()
         self._resumer: asyncio.Task[None] | None = None
+        self._retainer: asyncio.Task[None] | None = None
         self._accounts: dict[str, tuple[float, Row]] = {}
         self._idle_seconds = 60.0
 
@@ -281,12 +295,13 @@ class Engine:
             (self.attachment_root / stale["path"]).unlink(missing_ok=True)
             self.store.delete_attachment(stale["id"])
         self._resumer = asyncio.create_task(self._resume_loop(), name="quota-resume")
+        self._retainer = asyncio.create_task(self._retention_loop(), name="retention")
 
     def _limiter(self, platform: str) -> SlotLimiter:
         return self._limiters.setdefault(platform, SlotLimiter())
 
     async def shutdown(self) -> None:
-        tasks = list(self._workers.values()) + ([self._resumer] if self._resumer else [])
+        tasks = list(self._workers.values()) + [t for t in (self._resumer, self._retainer) if t]
         for task in tasks:
             task.cancel()
         for task in tasks:
@@ -729,13 +744,20 @@ class Engine:
         }
 
     async def get_session(
-        self, caller: Caller, session_id: str, *, limit: int = 50, offset: int = 0
+        self,
+        caller: Caller,
+        session_id: str,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        order: str = "oldest",
     ) -> Row:
         session = self._session(caller, session_id, metadata_only=True)
         view: Row = {
             "session": session_view(session, full=True),
             "messages": [],
             "next_offset": None,
+            "total": 0,
         }
         if session["caller_id"] != caller.id and not caller.can("takeover"):
             view["note"] = "不是你的会话：只能看到基本信息，没有读取内容的权限"
@@ -769,16 +791,27 @@ class Engine:
                         }
                     )
                 elif turn["status"] != "cancelled":
-                    messages.append(
-                        {
-                            "role": "status",
-                            "text": turn["status"],
-                            "at": turn["finished_at"],
-                            "turn_id": turn["id"],
-                        }
-                    )
-        view["messages"] = messages[offset : offset + limit]
-        view["next_offset"] = offset + limit if len(messages) > offset + limit else None
+                    note: Row = {
+                        "role": "status",
+                        "text": turn["status"],
+                        "at": turn["finished_at"],
+                        "turn_id": turn["id"],
+                    }
+                    if turn["status"] in ("failed", "unknown", "interrupted"):
+                        # 没做完的回合：说明原因和接着做的是哪一回合，不只给一个状态
+                        note["failure"] = self._failure(turn, session)
+                        nxt = turn.get("superseded_by") or turn.get("resumed_by")
+                        if nxt:
+                            note["next_turn_id"] = nxt
+                    messages.append(note)
+        total = len(messages)
+        view["total"] = total
+        if order == "newest":  # 从最新的开始翻页；页内仍按时间先后
+            end = max(0, total - offset)
+            view["messages"] = messages[max(0, end - limit) : end]
+        else:
+            view["messages"] = messages[offset : offset + limit]
+        view["next_offset"] = offset + limit if total > offset + limit else None
         return view
 
     async def _archive(self, session: Row, *, remote: bool) -> None:
@@ -847,7 +880,14 @@ class Engine:
         if sent + self.store.count_inserted_since(caller.id, hour_ago) >= self.setting(
             "send_per_hour"
         ):
-            raise BridgeError("RATE_LIMITED", "这个调用方本小时的发送次数已到上限")
+            # 最早的那一次满一小时后就又能发了
+            oldest = self.store.oldest_turn_since(caller.id, hour_ago)
+            retry = max(1, round((oldest or time.time()) + 3600 - time.time()))
+            raise BridgeError(
+                "RATE_LIMITED",
+                f"这个调用方本小时的发送次数已到上限，大约 {retry // 60 + 1} 分钟后可以再发",
+                {"retryable": True, "retry_after_seconds": retry},
+            )
         self._require_platform(session["platform"])
         await self.require_ready(session["slot"])
         attached = self._pending_attachments(session, attachments or [])
@@ -881,6 +921,11 @@ class Engine:
             delivery="merged" if merged else "turn",
             source=caller.source,
         )
+        if not session["title"]:
+            # 标题在发出第一条时就定下来，不等第一回合做完：列表里马上看得出是哪个会话
+            self.store.update_session(
+                session_id, title=redact(" ".join(text.split()))[:120], updated_at=time.time()
+            )
         if edge is not None:  # 插入的消息排在这个会话队列的最前面
             self.store.update_turn(turn["id"], position=edge - 1)
         asked = self.store.user_message(turn["id"])
@@ -1093,6 +1138,7 @@ class Engine:
         if session["mode"] == "dev":  # 开发会话里改动、新建的文件收进附件
             for path in list(dict.fromkeys(outcome.files))[: files.MAX_OUTPUT_PER_TURN]:
                 self._collect_output(session, turn_id, Path(path))
+            await self._collect_patch(session, turn_id)
         result = redact(outcome.text)
         said = [
             m["text"]
@@ -1123,12 +1169,72 @@ class Engine:
             assert turn is not None  # noqa: S101
         return self.turn_view(turn)
 
-    async def get_turn(self, caller: Caller, turn_id: str, wait_seconds: float = 0) -> Row:
+    async def get_turn(
+        self, caller: Caller, turn_id: str, wait_seconds: float = 0, detail: str = "summary"
+    ) -> Row:
         turn = self.store.get_turn(turn_id)
         if turn is None:
             raise BridgeError("NOT_FOUND", "没有这个回合")
         self._session(caller, turn["session_id"])
-        return await self.wait_turn(turn_id, wait_seconds)
+        view = await self.wait_turn(turn_id, wait_seconds)
+        if detail == "steps":  # 过程：中间说的话、命令、改动的文件、工具调用和结果
+            mine = [
+                m
+                for m in self.store.list_messages(turn["session_id"], imported=False)
+                if m["turn_id"] == turn_id
+            ]
+            view["steps"] = [step for step in (_step(m) for m in mine) if step]
+        return view
+
+    def turns_status(self, turn_ids: list[str]) -> Row:
+        """给工作台用：这些回合现在怎样了（不含内容）。回合结束时工作台据此叫醒发起的智能体。"""
+        out: Row = {}
+        for turn_id in turn_ids[:200]:
+            turn = self.store.get_turn(turn_id)
+            if turn is None:
+                out[turn_id] = {"status": "missing"}
+                continue
+            session = self.store.get_session(turn["session_id"]) or {}
+            item: Row = {
+                "status": turn["status"],
+                "session_id": turn["session_id"],
+                "platform": session.get("platform"),
+                "next_turn_id": turn.get("superseded_by") or turn.get("resumed_by"),
+            }
+            if turn["status"] == "interrupted":
+                item["kind"] = turn["error_kind"]
+                item["resume_state"] = turn["resume_state"]
+            elif turn["status"] in ("failed", "unknown"):
+                item["kind"] = turn["error_kind"]
+            out[turn_id] = item
+        return {"turns": out}
+
+    def file_text(
+        self, caller: Caller, session_id: str, file_id: str, offset: int, size: int
+    ) -> Row:
+        """按编号读一个回合产出的文字文件的一段。"""
+        self._session(caller, session_id)
+        row, path = self.attachment_file(session_id, file_id)
+        if row["direction"] != "output":
+            raise BridgeError("NOT_FOUND", "没有这个文件")
+        if row["size"] > MAX_TEXT_FILE_BYTES:
+            raise BridgeError("NOT_SUPPORTED", "文件太大，不能这样读")
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            raise BridgeError("NOT_SUPPORTED", "不是文字文件，读不了内容") from None
+        text = redact(text)
+        piece = text[offset : offset + size]
+        more = offset + len(piece) < len(text)
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "media_type": row["media_type"],
+            "size": row["size"],
+            "chars": len(text),
+            "text": piece,
+            "next_offset": offset + len(piece) if more else None,
+        }
 
     async def _cancel_turn(self, turn: Row, session: Row) -> None:
         if turn["status"] == "queued":
@@ -1227,6 +1333,57 @@ class Engine:
                 failure["retry_after_seconds"] = max(0, round(until - time.time()))
         return failure
 
+    def search(self, query: str, limit: int) -> Row:
+        """全文搜索：哪些会话的提问或回答里有这段文字，带一小段上下文。"""
+        text = " ".join(query.split())[:120]
+        if len(text) < 2:
+            raise BridgeError("VALIDATION_FAILED", "至少写两个字")
+        hits = []
+        for row in self.store.search_messages(text, min(max(limit, 1), 200)):
+            body = row["text"] or ""
+            at = body.lower().find(text.lower())
+            start, end = max(0, at - 40), min(len(body), at + len(text) + 60)
+            snippet = ("…" if start else "") + body[start:end] + ("…" if end < len(body) else "")
+            hits.append(
+                {
+                    "session_id": row["session_id"],
+                    "turn_id": row["turn_id"],
+                    "role": row["role"],
+                    "snippet": " ".join(snippet.split()),
+                    "at": row["at"],
+                }
+            )
+        return {"hits": hits}
+
+    def usage(self, days: int) -> Row:
+        """最近 days 天按天、平台、发起人的用量：回合数、失败和中断的数量、token。
+
+        token 是官方程序报的数相加，不是账单。"""
+        since = time.time() - max(1, min(days, 366)) * 86400
+        totals: dict[tuple[str, str, str], Row] = {}
+        for row in self.store.usage_by_day(since):
+            key = (row["day"], row["platform"], row["owner_id"] or "")
+            item = totals.setdefault(
+                key,
+                {
+                    "day": row["day"],
+                    "platform": row["platform"],
+                    "owner_id": row["owner_id"],
+                    "owner": row["owner"] or "",
+                    "turns": 0,
+                    "failed": 0,
+                    "interrupted": 0,
+                    "tokens": 0,
+                },
+            )
+            item["turns"] += 1
+            item["failed"] += row["status"] in ("failed", "unknown")
+            item["interrupted"] += row["status"] == "interrupted"
+            item["tokens"] += usage_tokens((row["summary"] or {}).get("usage") or {})
+            if row["owner"]:
+                item["owner"] = row["owner"]
+        return {"rows": list(totals.values())}
+
     def index_page(self, after: int, limit: int) -> Row:
         """给工作台同步会话索引用：变更序号在 after 之后的会话（不含对话内容）。"""
         rows = self.store.changed_sessions(max(after, 0), min(max(limit, 1), 500))
@@ -1245,7 +1402,16 @@ class Engine:
             }
             for row in rows
         ]
-        return {"sessions": items, "last_rev": rows[-1]["rev"] if rows else after}
+        # 现在因为额度暂停着的平台：工作台据此通知管理员
+        pauses = [
+            {"platform": platform, "until": pause["until"], "estimated": bool(pause["estimated"])}
+            for platform, pause in self.store.pauses().items()
+        ]
+        return {
+            "sessions": items,
+            "last_rev": rows[-1]["rev"] if rows else after,
+            "pauses": pauses,
+        }
 
     # ---- 聊天页用（管理接口；docs/v2/LLM_CHAT_PLAN.md 第 4.1 节） ----
     def admin_session_view(self, session: Row, busy: set[str] | None = None) -> Row:
@@ -1410,6 +1576,95 @@ class Engine:
         )
         if image:
             self.store.add_event(session["id"], turn_id, "image", {"name": name})
+
+    async def _collect_patch(self, session: Row, turn_id: str) -> None:
+        """开发回合结束时，把工作目录相对仓库最新提交的全部改动存成一份补丁。
+
+        工作目录归档后会删掉，补丁留在附件里，回溯时还看得到改了什么。
+        不是 git 仓库、没有改动、和上一回合留下的一样，就不存。"""
+        workdir = Path(session["workdir"] or "")
+        if not (workdir / ".git").exists():
+            return
+
+        async def git(*args: str) -> bytes:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "-C",
+                str(workdir),
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env={"GIT_TERMINAL_PROMPT": "0", "PATH": os.environ.get("PATH", "")},
+            )
+            try:
+                out, _ = await asyncio.wait_for(proc.communicate(), 30)
+            except TimeoutError:
+                proc.kill()
+                return b""
+            return out if proc.returncode == 0 else b""
+
+        try:
+            diff = await git("diff", "HEAD", "--no-color")
+            untracked = (await git("ls-files", "--others", "--exclude-standard")).decode(
+                "utf-8", "replace"
+            )
+        except OSError:
+            return
+        new_files = [line for line in untracked.splitlines() if line.strip()][:200]
+        if not diff.strip() and not new_files:
+            return
+        head = ""
+        if new_files:
+            head = "# 新建、还没有纳入版本管理的文件（内容见这一回合的产出文件）：\n" + "".join(
+                f"#   {name}\n" for name in new_files
+            )
+        data = head.encode() + diff
+        if len(data) > MAX_PATCH_BYTES:
+            data = data[:MAX_PATCH_BYTES] + "\n# （补丁太大，后面的没有保存）\n".encode()
+        data = redact(data.decode("utf-8", "replace")).encode()
+        digest = hashlib.sha256(data).hexdigest()
+        previous = [
+            a for a in self.store.list_attachments(session["id"]) if a["name"] == PATCH_NAME
+        ]
+        if previous and previous[-1]["sha256"] == digest:
+            return
+        if len(self.store.turn_attachments(turn_id, "output")) >= files.MAX_OUTPUT_PER_TURN:
+            return
+        message_id = self.store.add_message(session["id"], turn_id, "process", "file", PATCH_NAME)
+        self._put_attachment(
+            session["id"],
+            "output",
+            PATCH_NAME,
+            "text/x-diff",
+            data,
+            turn_id=turn_id,
+            message_id=message_id,
+        )
+
+    # ---- 保留期（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 的 B8） ----
+    def purge_expired(self) -> int:
+        """最后活动早于保留期的会话：清掉对话内容，留下会话、回合的状态和用量。返回清了几个。"""
+        days = int(self.setting("retention_days") or 0)
+        if days <= 0:
+            return 0
+        busy = self.store.busy_sessions()
+        done = 0
+        for session in self.store.expired_sessions(time.time() - days * 86400):
+            if session["id"] in busy:
+                continue
+            for attachment in self.store.list_attachments(session["id"]):
+                (self.attachment_root / attachment["path"]).unlink(missing_ok=True)
+            self.store.purge_session(session["id"])
+            done += 1
+        return done
+
+    async def _retention_loop(self) -> None:
+        while True:
+            try:
+                self.purge_expired()
+            except Exception:
+                logger.exception("按保留期清理对话内容失败")
+            await asyncio.sleep(RETENTION_CHECK_SECONDS)
 
     def attachment_file(self, session_id: str, attachment_id: str) -> tuple[Row, Path]:
         row = self.store.get_attachment(attachment_id)
@@ -1902,6 +2157,27 @@ class Engine:
         self.store.update_session(session_id, title=clean, updated_at=session["updated_at"])
         return self.admin_session_view(self._required_session(session_id))
 
+    async def set_model(self, session_id: str, model: str) -> Row:
+        """换这个会话之后用的模型：从下一回合起，已经在跑的不受影响。
+
+        Claude Code、CodeBuddy Code 每个回合起一次官方命令行，模型是那一次的参数，所以能换。
+        Codex 的会话（线程）建好后能不能逐回合换模型没有在锁定版本上核验过：不支持，明确报出来。"""
+        session = self._required_session(session_id)
+        if session["status"] != "active":
+            raise BridgeError("CONFLICT", "会话已归档，不能换模型")
+        if session["origin"] != "bridge":
+            raise BridgeError("NOT_SUPPORTED", "官方程序里已有的会话不能在这里换模型")
+        if session["slot"] == "openai":
+            raise BridgeError(
+                "NOT_SUPPORTED", "ChatGPT / Codex 的会话不能中途换模型：要换就新建一个会话"
+            )
+        channel = self._channel(session["platform"], session["mode"])
+        picked = await self._pick_model(channel, model)
+        if picked != session["model"]:
+            self.store.update_session(session_id, model=picked, updated_at=session["updated_at"])
+            self.store.add_event(session_id, None, "model", {"model": picked})
+        return self.admin_session_view(self._required_session(session_id))
+
     # ---- 管理页用 ----
     async def overview(self) -> Row:
         enabled = self.platforms()
@@ -1970,6 +2246,21 @@ class Engine:
             for key in ("quota", "load"):
                 if isinstance(view.get(key), dict):
                     out[key] = {p: v for p, v in view[key].items() if caller.may_use(p)}
+        # 只留调用方用得上的：账号是谁、怎么登录的、什么套餐，智能体不需要知道
+        out["accounts"] = {
+            slot: {k: a[k] for k in ("slot", "label", "enabled", "state", "running") if k in a}
+            for slot, a in out["accounts"].items()
+        }
+        if isinstance(out.get("quota"), dict):
+            out["quota"] = {
+                platform: {
+                    **quota,
+                    "windows": [
+                        {k: v for k, v in w.items() if k != "plan"} for w in quota["windows"]
+                    ],
+                }
+                for platform, quota in out["quota"].items()
+            }
         return out
 
 
@@ -2000,6 +2291,11 @@ def _step(message: Row) -> Row | None:
     for key in ("name", "truncated", "error", "exit_code"):
         if data.get(key) not in (None, False, ""):
             step[key] = data[key]
+    if data.get("output"):  # 命令的输出：回溯时要看，太长的只给前面一段
+        output = str(data["output"])
+        step["output"] = output[:MAX_STEP_OUTPUT]
+        if len(output) > MAX_STEP_OUTPUT:
+            step["truncated"] = True
     return step
 
 
@@ -2055,6 +2351,7 @@ def session_view(session: Row, *, full: bool = False) -> Row:
         "status": session["status"],
         "origin": session["origin"],
         "source": session.get("source"),
+        "purged_at": session.get("purged_at"),
         "owner": session["caller_label"],
         "created_at": session["created_at"],
         "updated_at": session["updated_at"],

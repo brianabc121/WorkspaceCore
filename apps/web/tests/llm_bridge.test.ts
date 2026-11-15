@@ -19,7 +19,7 @@ const lbModule: Schema['ModuleOut'] = { ...newsModule, key: 'llm_bridge', name: 
 
 const bridge: Schema['LlmBridgeOut'] = { id: BRIDGE, name: '主账号', base_url: 'http://10.0.0.5:8787', enabled: true, has_token: true, created_at: at, updated_at: at }
 const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', enabled: true, state: 'logged_out', registered: false, identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
-const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
+const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
 const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBridgeStatusOut'] => ({
   reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 1, running: 2, load: {}, quota: {}, settings,
   accounts: [
@@ -306,6 +306,76 @@ describe('大模型客户端管理', () => {
     expect(bodies).toEqual([{ enabled: true, can_write: true, can_account: true, can_takeover: false, platforms: ['codex'], bridge_ids: null, environment_ids: [ENV] }])
   })
 
+  it('lists the sessions of every manager, filters them, searches the content and sums up usage', async () => {
+    const indexed = (over: Partial<Schema['LlmBridgeIndexSessionOut']> = {}): Schema['LlmBridgeIndexSessionOut'] => ({
+      bridge_id: BRIDGE, bridge_name: '主账号', session_id: `bs_${'a'.repeat(20)}`, platform: 'claude', mode: 'dev', model: 'sonnet', title: '季度复盘', status: 'active', origin: 'bridge',
+      owner_kind: 'agent', owner_id: INSTANCE, owner: '甲', source: { kind: 'agent', tasks: [{ task_id: 't-1', title: '写复盘' }] }, busy: false, turns_total: 3, turns_failed: 1, turns_interrupted: 0, tokens: 12345,
+      created_at: at, updated_at: at, last_turn_at: at, ...over,
+    })
+    const queries: URLSearchParams[] = []
+    const requests = setup('owner', r => {
+      const url = new URL(r.url), p = url.pathname
+      if (p === '/api/v1/llm_bridge/sessions/owners') return Response.json({ owners: [{ owner_kind: 'agent', owner_id: INSTANCE, owner: '甲', sessions: 2 }, { owner_kind: 'user', owner_id: 'user:u1', owner: '测试用户', sessions: 1 }] })
+      if (p === '/api/v1/llm_bridge/sessions/search') return Response.json({ hits: [{ session: indexed(), bridge_id: BRIDGE, bridge_name: '主账号', session_id: `bs_${'a'.repeat(20)}`, turn_id: null, role: 'assistant', snippet: '…本季度的三个要点是…', at: 1794531600 }], failed: ['备用'] })
+      if (p === '/api/v1/llm_bridge/usage') return Response.json({ days: 30, failed: [], rows: [
+        { day: '2026-11-15', bridge_id: BRIDGE, bridge_name: '主账号', platform: 'claude', owner_kind: 'agent', owner_id: INSTANCE, owner: '甲', turns: 4, failed: 1, interrupted: 0, tokens: 9000 },
+        { day: '2026-11-14', bridge_id: BRIDGE, bridge_name: '主账号', platform: 'codex', owner_kind: 'agent', owner_id: INSTANCE, owner: '甲', turns: 2, failed: 0, interrupted: 0, tokens: 1000 },
+        { day: '2026-11-15', bridge_id: BRIDGE, bridge_name: '主账号', platform: 'claude', owner_kind: 'user', owner_id: 'user:u1', owner: '测试用户', turns: 1, failed: 0, interrupted: 0, tokens: 500 },
+      ] })
+      if (p === '/api/v1/llm_bridge/sessions') {
+        queries.push(url.searchParams)
+        const only = url.searchParams.get('owner_id')
+        return Response.json({ sessions: only === 'user:u1' ? [indexed({ title: '我自己问的', owner_kind: 'user', owner_id: 'user:u1', owner: '测试用户', source: null, turns_failed: 0, mode: 'chat' })] : [indexed()], next_offset: null, sync_failed: url.searchParams.get('sync') ? ['备用'] : [] })
+      }
+      return undefined
+    })
+    await openApp('/llm_bridge?view=records')
+    expect(await screen.findByRole('heading', { level: 1, name: '会话记录' })).toBeVisible()
+    // 列表：谁建的、平台和用法、回合和失败、token；点标题进聊天页；出处里的任务能点到任务
+    const table = await screen.findByRole('table', { name: '会话记录' })
+    const row = within(table).getAllByRole('row')[1]!
+    expect(within(row).getByRole('link', { name: '打开会话：季度复盘' })).toHaveAttribute('href', `/llm_bridge?m=${BRIDGE}&s=bs_${'a'.repeat(20)}`)
+    expect(within(row).getByRole('link', { name: '写复盘' })).toHaveAttribute('href', '/tasks?task=t-1')
+    expect(row).toHaveTextContent('甲智能体')
+    expect(row).toHaveTextContent('Claude · 开发')
+    expect(row).toHaveTextContent('1 个失败')
+    expect(row).toHaveTextContent('12,345')
+
+    // 筛选：选具体的人、只看有问题的 → 条件带到接口上
+    const filters = screen.getByRole('form', { name: '筛选会话' })
+    await fireEvent.update(within(filters).getByLabelText('谁建的'), 'user:u1')
+    expect(await within(await screen.findByRole('table', { name: '会话记录' })).findByText('我自己问的')).toBeVisible()
+    await fireEvent.click(within(filters).getByLabelText('只看有失败或中断的'))
+    await waitFor(() => expect(queries.at(-1)!.get('problem')).toBe('true'))
+    expect(queries.at(-1)!.get('owner_id')).toBe('user:u1')
+    await fireEvent.click(within(filters).getByRole('button', { name: '清除筛选' }))
+    await waitFor(() => expect(queries.at(-1)!.has('owner_id')).toBe(false))
+    // 现在同步：没同步上的说出来
+    await fireEvent.click(screen.getByRole('button', { name: '现在同步' }))
+    expect(await screen.findByText('这些 MCP 管理器没有同步上：备用（列表里是它们上一次同步到的）')).toBeVisible()
+
+    // 全文搜索
+    const search = screen.getByRole('search', { name: '搜索对话内容' })
+    await fireEvent.click(within(search).getByRole('button', { name: '搜索' }))
+    expect(await screen.findByText('至少写两个字。')).toBeVisible()
+    await fireEvent.update(within(search).getByLabelText('要找的文字'), '三个要点')
+    await fireEvent.click(within(search).getByRole('button', { name: '搜索' }))
+    const hits = await screen.findByRole('list', { name: '“三个要点”的搜索结果' })
+    expect(within(hits).getByText('…本季度的三个要点是…')).toBeVisible()
+    expect(within(hits).getByRole('link', { name: '季度复盘' })).toHaveAttribute('href', `/llm_bridge?m=${BRIDGE}&s=bs_${'a'.repeat(20)}`)
+    expect(screen.getByText('这些 MCP 管理器没有搜到（连不上或版本太旧）：备用')).toBeVisible()
+    expect(new URL(requests.find(r => path(r) === '/api/v1/llm_bridge/sessions/search')!.url).searchParams.get('q')).toBe('三个要点')
+
+    // 用量：按人汇总，token 多的在前
+    const usage = await screen.findByRole('table', { name: '用量' })
+    const lines = within(usage).getAllByRole('row').slice(1)
+    expect(lines[0]).toHaveTextContent('甲智能体')
+    expect(within(lines[0]!).getByRole('cell', { name: '6' })).toBeVisible()
+    expect(lines[0]).toHaveTextContent('10,000')
+    expect(lines[1]).toHaveTextContent('测试用户人')
+    expect(screen.getByText('一共 7 个回合，10,500 个 token。')).toBeVisible()
+  })
+
   it('sends the whole grant on every toggle; disabling clears the flags but keeps the chosen platforms', async () => {
     let current = grant()
     const requests = setup('owner', async r => {
@@ -467,7 +537,7 @@ describe('大模型客户端管理', () => {
     await fireEvent.update(concurrency, '4')
     await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
     expect(await within(set).findByText('设置已保存。')).toBeVisible()
-    expect(await writes(requests)[0]!.clone().json()).toEqual({ concurrency: 4, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, auto_resume_max: 3, auto_resume: true, resume_text: '继续意外中断的任务' })
+    expect(await writes(requests)[0]!.clone().json()).toEqual({ concurrency: 4, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, auto_resume_max: 3, auto_resume: true, resume_text: '继续意外中断的任务' })
 
     // 额度用完后自动继续（T-0237）：开关、次数、发的那句话；那句话不能空
     const resume = within(set).getByRole('group', { name: '额度用完后自动继续' })

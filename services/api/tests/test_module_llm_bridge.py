@@ -8,6 +8,7 @@
 import contextlib
 import importlib
 import sys
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
@@ -597,7 +598,7 @@ async def test_grant_limits_follow_the_session_and_protections_hold(rig: Rig) ->
     notes = (await env.get("/api/v1/notifications"))["items"]
     takeover = next(n for n in notes if n["type"] == "llm_bridge.takeover_sent")
     assert "boss" in takeover["title"]
-    assert takeover["link"] == f"/llm_bridge?m={rig.bridge_id}&s={session}"
+    assert takeover["link"] == f"/llm_bridge?m={rig.bridge_id}&s={session}&t={taken['turn_id']}"
     made_note = next(n for n in notes if n["type"] == "llm_bridge.session_created")
     assert made_note["link"].startswith(f"/llm_bridge?m={rig.bridge_id}&s=bs_")
 
@@ -702,6 +703,305 @@ async def test_provenance_and_session_index(rig: Rig) -> None:
     offline = (await rig.api("GET", "/sessions", params={"sync": True})).json()
     assert offline["sync_failed"] == ["主桥"] and len(offline["sessions"]) == 2
     rig.down[0] = False
+
+
+@pytest.mark.integration
+async def test_agent_gets_woken_sized_results_and_clear_errors(rig: Rig) -> None:
+    """智能体这条链路（T-0250）：一步新建并发送、结束后叫醒、结果默认精简、错误说明能不能重试、
+    按编号读产出的文件、状态里不带账号是谁。"""
+    from sqlalchemy import select
+
+    from app.models.im import AgentWakeup
+    from app.modules.llm_bridge import watches
+
+    env = rig.env
+    agent = await rig.agent("openclaw-1", can_write=True)
+
+    async def wakeups() -> list[str]:
+        async with env.sync.sessions() as db:
+            rows = await db.scalars(select(AgentWakeup).where(AgentWakeup.source == "llm_bridge"))
+            return [w.prompt for w in rows]
+
+    # 一步完成：没给会话就先新建一个；带 notify、又没等到结果 → 回合结束后被叫醒
+    sent = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {
+                "platform": "claude",
+                "text": "sleep:0.4",
+                "request_id": "n1",
+                "wait_seconds": 0,
+                "notify": True,
+            },
+        )
+    )
+    assert sent["created_session"] is True and sent["will_notify"] is True
+    assert sent["status"] in ("queued", "running")
+    session, turn = sent["session_id"], sent["turn_id"]
+    assert await watches.watch_tick({"sync": env.sync}) == 0 and await wakeups() == []
+    done = ok(await call(env, agent, "llm_bridge_turn_get", {"turn_id": turn, "wait_seconds": 10}))
+    assert done["status"] == "completed"
+    assert await watches.watch_tick({"sync": env.sync}) == 1
+    (prompt,) = await wakeups()
+    # 提示词里只有回合编号和状态，没有模型写的内容
+    assert f"{turn}（completed）" in prompt and "sleep:0.4" not in prompt
+    assert await watches.watch_tick({"sync": env.sync}) == 0  # 不重复叫
+    # 同一个幂等号重发：还是那个会话那个回合，不会再建一个
+    again = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {"platform": "claude", "text": "sleep:0.4", "request_id": "n1", "wait_seconds": 0},
+        )
+    )
+    assert (again["session_id"], again["turn_id"]) == (session, turn)
+    # 等到了结果的不用叫
+    quick = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {"session_id": session, "text": "很快", "request_id": "n2", "notify": True},
+        )
+    )
+    assert quick["status"] == "completed" and quick["will_notify"] is False
+    # 既填会话又填新建用的参数：说清楚
+    mixed = tool_error(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {"session_id": session, "platform": "claude", "text": "x", "request_id": "n3"},
+        )
+    )
+    assert mixed["code"] == "VALIDATION_FAILED" and "platform" in mixed["message"]
+
+    # 结果默认精简：回答太长时截断，并说明怎么接着取
+    long = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_send",
+            {"session_id": session, "text": "长" * 600, "request_id": "n4", "max_chars": 200},
+        )
+    )
+    assert len(long["result"]) == 200 and long["result_next_offset"] == 200
+    assert long["result_chars"] > 600 and "result_offset=200" in long["hint"]
+    rest = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_turn_get",
+            {"turn_id": long["turn_id"], "result_offset": 200, "max_chars": 200_000},
+        )
+    )
+    assert long["result"] + rest["result"] == f"[fake-1] {'长' * 600}"
+    assert rest["result_next_offset"] is None
+    # 过程要了才给
+    assert "steps" not in rest
+    detailed = ok(
+        await call(
+            env, agent, "llm_bridge_turn_get", {"turn_id": long["turn_id"], "detail": "steps"}
+        )
+    )
+    assert isinstance(detailed["steps"], list)
+    # 读会话：默认最新的一页，带总数；每条太长会截断
+    page = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_session_get",
+            {"session_id": session, "limit": 2, "max_chars": 200},
+        )
+    )
+    assert page["total"] == 6 and page["next_offset"] == 2
+    assert [m["role"] for m in page["messages"]] == ["user", "assistant"]
+    assert (
+        page["messages"][0]["text_truncated"] is True and page["messages"][0]["text_chars"] == 600
+    )
+
+    # 错误说明能不能重试、多久以后
+    limit = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"send_per_hour": 1})
+    assert limit.status_code == 200, limit.text
+    limited = tool_error(
+        await call(
+            env, agent, "llm_bridge_send", {"session_id": session, "text": "x", "request_id": "n5"}
+        )
+    )
+    assert limited["code"] == "RATE_LIMITED" and limited["retryable"] is True
+    assert 0 < limited["retry_after_seconds"] <= 3600
+    rig.down[0] = True
+    offline = tool_error(await call(env, agent, "llm_bridge_session_list", {}))
+    assert offline["code"] == "EXTERNAL_UNAVAILABLE" and offline["retryable"] is True
+    rig.down[0] = False
+    missing = tool_error(
+        await call(env, agent, "llm_bridge_turn_get", {"turn_id": "bt_" + "0" * 20})
+    )
+    assert missing["code"] == "NOT_FOUND" and missing["retryable"] is False
+
+    # 状态里只有用得上的：不带账号是谁、怎么登录的
+    overview = ok(await call(env, agent, "llm_bridge_status", {}))
+    account = overview["accounts"]["claude"]
+    assert account["state"] == "logged_in"
+    assert not {"identity", "method", "first_login_at", "detail"} & set(account)
+
+
+@pytest.mark.integration
+async def test_records_can_be_filtered_searched_and_usage_summed(rig: Rig) -> None:
+    """管理员回溯（T-0251）：按发起人、平台、有没有失败筛选；全文搜索；用量汇总。"""
+    env = rig.env
+    agent = await rig.agent("openclaw-1", can_write=True)
+
+    async def send(session_id: str, text: str, rid: str) -> dict[str, Any]:
+        args = {"session_id": session_id, "text": text, "request_id": rid, "wait_seconds": 10}
+        return ok(await call(env, agent, "llm_bridge_send", args))
+
+    create = {"platform": "claude", "mode": "chat"}
+    good = ok(await call(env, agent, "llm_bridge_session_create", {**create, "title": "季度复盘"}))
+    await send(good["session_id"], "帮我列出三个要点", "r1")
+    bad = ok(await call(env, agent, "llm_bridge_session_create", {**create, "title": "失败的那个"}))
+    await send(bad["session_id"], "fail:invalid", "r2")
+    typed = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/chat/sessions",
+        json={**create, "title": "我自己问的", "text": "天气怎么样", "request_id": "h1"},
+    )
+    assert typed.status_code == 201, typed.text
+
+    async def listed(**params: Any) -> list[str]:
+        out = (await rig.api("GET", "/sessions", params=params)).json()
+        return sorted(s["title"] for s in out["sessions"])
+
+    assert await listed(sync=True) == ["失败的那个", "季度复盘", "我自己问的"]
+    assert await listed(owner_kind="agent") == ["失败的那个", "季度复盘"]
+    assert await listed(problem=True) == ["失败的那个"]
+    assert await listed(q="复盘") == ["季度复盘"]
+    assert await listed(platform="codex") == [] and await listed(mode="chat", status="active")
+    assert await listed(until="2000-01-01T00:00:00Z") == []
+    owners = (await rig.api("GET", "/sessions/owners")).json()["owners"]
+    by_kind = {o["owner_kind"]: o for o in owners}
+    assert by_kind["agent"]["owner"] == "openclaw-1" and by_kind["agent"]["sessions"] == 2
+    assert await listed(owner_id=by_kind["agent"]["owner_id"]) == ["失败的那个", "季度复盘"]
+    assert await listed(owner_id=by_kind["user"]["owner_id"]) == ["我自己问的"]
+
+    # 全文搜索：内容在管理器里，现问现答；结果带上索引里的会话
+    found = (await rig.api("GET", "/sessions/search", params={"q": "三个要点"})).json()
+    (hit,) = found["hits"]
+    assert hit["session_id"] == good["session_id"] and "三个要点" in hit["snippet"]
+    assert hit["session"]["title"] == "季度复盘" and hit["bridge_name"] == "主桥"
+    assert found["failed"] == []
+    assert (await rig.api("GET", "/sessions/search", params={"q": "x"})).status_code == 422
+
+    # 用量：按发起人分开，失败的也算回合
+    usage = (await rig.api("GET", "/usage", params={"days": 7})).json()
+    rows = {r["owner_kind"]: r for r in usage["rows"]}
+    assert rows["agent"]["turns"] == 2 and rows["agent"]["failed"] == 1
+    assert rows["agent"]["owner"] == "openclaw-1" and rows["agent"]["tokens"] > 0
+    assert rows["user"]["turns"] == 1 and rows["user"]["bridge_name"] == "主桥"
+    # 管理器连不上：说明哪个没取到
+    rig.down[0] = True
+    assert (await rig.api("GET", "/usage")).json()["failed"] == ["主桥"]
+    assert (await rig.api("GET", "/sessions/search", params={"q": "要点"})).json() == {
+        "hits": [],
+        "failed": ["主桥"],
+    }
+    rig.down[0] = False
+
+
+@pytest.mark.integration
+async def test_review_trail_audit_notifications_export_and_retention(rig: Rig) -> None:
+    """管理员回溯的另一半（T-0252）：智能体的写操作进审计、失败和额度暂停有通知、
+    会话能导出、保留期能设置。"""
+    env = rig.env
+    agent = await rig.agent("openclaw-1", can_write=True)
+    created = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_session_create",
+            {"platform": "claude", "mode": "chat", "title": "排查问题"},
+        )
+    )
+    session = created["session_id"]
+
+    async def send(text: str, rid: str) -> dict[str, Any]:
+        args = {"session_id": session, "text": text, "request_id": rid, "wait_seconds": 10}
+        return ok(await call(env, agent, "llm_bridge_send", args))
+
+    first = await send("先看日志", "r1")
+    # 第一次同步是补历史：不为已有的失败发通知
+    assert (await rig.api("GET", "/sessions", params={"sync": True})).status_code == 200
+
+    # 审计：智能体新建会话、发消息都有一条，带中文名，没有消息内容
+    logs = (await env.get("/api/v1/audit-logs", limit=50))["items"]
+    by_action = {entry["action"]: entry for entry in logs}
+    made = by_action["llm_bridge.agent_session_created"]
+    assert made["action_label"] == "智能体新建大模型会话"
+    assert (
+        made["metadata"]["instance"] == "openclaw-1" and made["metadata"]["session_id"] == session
+    )
+    sent = by_action["llm_bridge.agent_message_sent"]
+    assert sent["metadata"]["turn_id"] == first["turn_id"] and "先看日志" not in str(sent)
+
+    # 智能体的回合失败了：下一次同步时通知管理员，链接到那个会话；同一次失败不重复通知
+    failed = await send("fail:invalid", "r2")
+    assert failed["status"] == "failed"
+    from app.modules.llm_bridge import jobs
+
+    assert await jobs.index_tick({"sync": env.sync}) == 1
+    assert await jobs.index_tick({"sync": env.sync}) == 0
+    notes = (await env.get("/api/v1/notifications"))["items"]
+    (note,) = [n for n in notes if n["type"] == "llm_bridge.turn_failed"]
+    assert "openclaw-1" in note["title"] and "排查问题" in note["body"]
+    assert note["link"] == f"/llm_bridge?m={rig.bridge_id}&s={session}"
+
+    # 平台因额度暂停：通知一次；恢复后清掉记号，再暂停再通知
+    engine = rig.bridge_app.state.engine
+    until = time.time() + 3600
+    engine.store.set_pause("claude", until, False, "quota")
+    await jobs.index_tick({"sync": env.sync})
+    await jobs.index_tick({"sync": env.sync})
+    paused = [
+        n
+        for n in (await env.get("/api/v1/notifications"))["items"]
+        if n["type"] == "llm_bridge.quota_paused"
+    ]
+    assert len(paused) == 1 and "claude" in paused[0]["title"] and "主桥" in paused[0]["title"]
+    engine.store.clear_pause("claude")
+    await jobs.index_tick({"sync": env.sync})
+    engine.store.set_pause("claude", until + 7200, True, "quota")
+    await jobs.index_tick({"sync": env.sync})
+    paused = [
+        n
+        for n in (await env.get("/api/v1/notifications"))["items"]
+        if n["type"] == "llm_bridge.quota_paused"
+    ]
+    assert len(paused) == 2
+    engine.store.clear_pause("claude")
+
+    # 导出：一份 Markdown，提问、回答、没做完的原因都在；导出记一条审计
+    exported = await rig.api("GET", f"/bridges/{rig.bridge_id}/chat/sessions/{session}/export")
+    assert exported.status_code == 200, exported.text
+    assert exported.headers["content-type"].startswith("text/markdown")
+    assert "attachment" in exported.headers["content-disposition"]
+    text = exported.text
+    assert text.startswith("# 排查问题") and "先看日志" in text and "[fake-1] 先看日志" in text
+    assert "没做完的原因" in text
+    logs = (await env.get("/api/v1/audit-logs", limit=50))["items"]
+    assert any(e["action"] == "llm_bridge.chat_session_exported" for e in logs)
+
+    # 保留期：页面上能设置，写到管理器里；默认是一直保留
+    status = (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).json()
+    assert status["settings"]["retention_days"] == 0
+    saved = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"retention_days": 90})
+    assert saved.status_code == 200 and saved.json()["retention_days"] == 90
+    too_long = await rig.api(
+        "PUT", f"/bridges/{rig.bridge_id}/settings", json={"retention_days": 99999}
+    )
+    assert too_long.status_code == 422
 
 
 @pytest.mark.integration

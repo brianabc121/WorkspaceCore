@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RouterLink } from 'vue-router'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Columns3, Plus, RefreshCw, Search } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
@@ -14,8 +15,10 @@ const props = defineProps<{
   groups: ChatGroup[]; selectedGroup: string | null; canCompare: boolean
   filter: SessionFilter; selected: string | null; canCreate: boolean
   syncing: boolean; syncNotice: string; syncError: string
+  // 后面还有没显示的会话：load 可以再读一批；records 是已经读到上限，更早的到“会话记录”里找
+  more?: 'load' | 'records' | null
 }>()
-const emit = defineEmits<{ 'update:managerId': [id: string]; 'update:filter': [filter: SessionFilter]; select: [id: string]; create: []; sync: []; retry: []; compare: []; 'open-group': [id: string] }>()
+const emit = defineEmits<{ 'update:managerId': [id: string]; 'update:filter': [filter: SessionFilter]; select: [id: string]; create: []; sync: []; retry: []; compare: []; 'open-group': [id: string]; more: [] }>()
 
 const days = computed(() => groupByDay(props.sessions))
 const asked = computed(() => { const q = props.filter.q.toLowerCase(); return q ? props.groups.filter(g => g.title.toLowerCase().includes(q)) : props.groups })
@@ -88,6 +91,10 @@ const emptyText = computed(() => {
           </li>
         </ul>
       </section>
+      <p v-if="more && !loading && !error" class="lc-more">
+        <button v-if="more === 'load'" type="button" class="asv-link" @click="emit('more')">加载更多</button>
+        <template v-else>只显示最近 200 个：更早的到 <RouterLink class="asv-link" :to="{ path: '/llm_bridge', query: { view: 'records' } }">会话记录</RouterLink> 里找（那里还能在内容里搜索）。</template>
+      </p>
     </div>
 
     <div class="lc-side-foot">

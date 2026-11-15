@@ -932,6 +932,39 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 - 执行记录（`GET /api/v1/ai/tool-executions`）里，`llm_bridge_*` 写工具成功时 `arguments.result` 带 `bridge_id`、`session_id`、`turn_id`：能从这条记录找到会话的那一回合。
 - **会话索引**：`GET /api/v1/llm_bridge/sessions`（admin）——所有 MCP 管理器上的会话，按最后活动倒序；`bridge_id`、`owner_kind`（`agent` / `user` / `external`）筛选，`limit` / `offset` 翻页，`sync=true` 先同步再读（连不上的管理器列在 `sync_failed`）。每条有 `bridge_id` / `bridge_name`、`session_id`、平台、用法、模型、`title`、`status`、`owner_kind` / `owner_id` / `owner`、`source`、`busy`、`turns_total` / `turns_failed` / `turns_interrupted`、`tokens`、三个时间。**不含提问和回答**。数据在工作台的 `llm_bridge_sessions` 表里，后台每分钟向每个启用的管理器取一次“变更序号之后变了的会话”（管理器的 `GET /admin/index?after=`）。
 
+**聊天页的日常体验**（T-0253，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.3）：
+
+- `PUT .../chat/sessions/{session_id}/model`（admin，`{model}`）：换这个会话之后的回合用的模型，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换（每个回合起一次官方程序，模型是那一次的参数）；ChatGPT / Codex 的会话 422 `NOT_SUPPORTED`，已归档的 409。记审计 `chat_session_model_changed`。
+- 会话的标题在发出第一条消息时就定下来（之前要等第一回合做完）。
+- 其余都在页面上，没有新接口：回答按 Markdown 显示（沿用知识库的安全渲染：不允许原始 HTML、链接只允许 http / https / mailto、外部图片不自动加载、DOMPurify 消毒），代码块和整条回答可以复制；没做成的回合可以“重试”、最后一条回答可以“重新生成”（都是把那一问原样再发一次，新的回合接在后面）；草稿按会话存在浏览器里；回答到了而人不在这个页面时在标签页标题上标出来；会话列表可以“加载更多”（最多 200 个，更早的到“会话记录”里找）；Esc 停止正在回答的回合，输入框空着时按 ↑ 把自己上一条发的消息放回来。
+
+**管理员回溯：回合详情、改动补丁、审计、通知、保留期、导出**（T-0252，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.2 的 B2、B3、B6、B7、B8）：
+
+- 过程里的命令多 `output`（平台给了才有，最多 8000 个字符，超过时 `truncated`）。
+- 开发回合成功结束时，工作目录是 git 仓库且相对最新提交有改动，就把全部改动存成一份补丁，作为这一回合的产出文件（`改动（到这一回合为止）.patch`，`text/x-diff`，最大 2 MB）；和上一回合留下的一样就不再存。归档会话会删掉工作目录，补丁留着。新建但没纳入版本管理的文件只列出名字。
+- 审计：智能体的写操作也进审计日志——`llm_bridge.agent_session_created` / `agent_message_sent` / `agent_takeover_sent` / `agent_turn_cancelled` / `agent_session_archived`，`metadata` 里有 `instance`、`instance_id`、`bridge`、`session_id`、`turn_id`，没有消息内容；人下载附件（不含页面自动显示的图片缩略图）记 `chat_attachment_downloaded`，导出会话记 `chat_session_exported`。`llm_bridge.*` 的事件都有中文名（`action_label`）；审计页能从这些记录点到会话的那一回合。**读别人的会话没有记审计**（页面每隔十几秒重读一次，会刷出大量记录）。
+- 通知管理员：智能体的会话里多了失败或结果未知的回合（`llm_bridge.turn_failed`，链接到那个会话；第一次同步历史数据时不发）；平台因额度用完暂停（`llm_bridge.quota_paused`，同一次暂停只发一次）。都在每分钟同步会话索引时检查，所以最多晚一分钟。
+- 保留期：管理器的设置多 `retention_days`（0 ~ 3650，默认 0 = 一直保留）。按会话最后活动的时间算，到期只清对话内容（提问、回答、过程、事件、附件），会话、每个回合的状态和用量留着；会话多一个 `purged_at`。管理器每 6 小时清一次，清掉的找不回来。
+- `GET .../chat/sessions/{session_id}/export`（admin）：把会话导出成 Markdown（提问、回答、每回合的状态和用时、没做完的原因、附件的名字），以附件形式下载。
+
+**管理员回溯：会话记录、搜索、用量**（T-0251，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.2 的 B1、B4、B5）：
+
+- `GET /api/v1/llm_bridge/sessions` 多这些筛选：`owner_id`（具体是谁：实例的 id，或 `user:<用户 id>`）、`platform`、`mode`、`status`、`problem=true`（有失败、结果未知或中断的回合）、`since` / `until`（最后活动的时间范围）、`q`（标题里有这段文字）。
+- `GET /api/v1/llm_bridge/sessions/owners`：索引里出现过的发起人（`owner_kind`、`owner_id`、`owner`、`sessions`），页面的筛选下拉用。
+- `GET /api/v1/llm_bridge/sessions/search?q=`（admin）：在所有 MCP 管理器的提问和回答里搜索，每个会话给最新的一处：`session`（索引里的会话）、`bridge_id` / `bridge_name`、`session_id`、`turn_id`、`role`、`snippet`、`at`；没搜到的管理器列在 `failed`。内容不存进工作台，现向各个管理器问（管理器的 `GET /admin/search`，按字面匹配，不分大小写）。
+- `GET /api/v1/llm_bridge/usage?days=`（admin，1 ~ 366，默认 30）：按天（UTC）、管理器、平台、发起人汇总的 `turns`、`failed`、`interrupted`、`tokens`。token 是官方程序报的数相加，不是账单；没报的回合算 0，CodeBuddy 的积分拿不到。
+- 会话（聊天页的会话内容和列表）多 `source`：建会话时的出处。聊天页的地址多一个可选的 `t=<回合编号>`：打开会话后定位到那一回合；接手发送的通知链接带着它。
+- 页面：`/llm_bridge?view=records`（会话记录）。
+
+**智能体这条链路的改进**（T-0250，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.1）：
+
+- **结束后叫我**：`llm_bridge_send` 多 `notify`。带上它、回合又没在 `wait_seconds` 内做完时，结果里 `will_notify: true`；回合结束（完成、失败、结果未知、取消，或被打断后没有回合接着做）后工作台给这个实例排一次唤醒（`agent_wakeups.source = llm_bridge`）。提示词里只有回合编号和状态，没有模型写的内容，结果要用 `llm_bridge_turn_get` 取。被打断后有回合接着做的（插入的消息、额度恢复后的续跑）等接着做的那一回合结束才叫。至少叫一次；后台每 15 秒看一次，管理器连不上时下次再看。轮询照旧能用。
+- **一步发送**：`llm_bridge_send` 不填 `session_id` 时先新建会话再发——填 `platform`，可选 `session_mode`（`chat` 默认 / `dev`）、`model`、`environment`、`title`；结果里 `created_session: true`。同一个 `request_id` 重试得到同一个会话、同一个回合。会话建好但消息没发出去时，错误里带 `session_id`。
+- **结果默认精简**：`llm_bridge_send` / `llm_bridge_turn_get` 的 `max_chars`（默认 2 万）；回答超过时截断，带 `result_chars`、`result_next_offset` 和 `hint`，用 `llm_bridge_turn_get` 的 `result_offset` 接着取。`llm_bridge_turn_get` 的 `detail=steps` 才带过程。`llm_bridge_session_get` 默认给最新的一页（`order=newest`，默认 20 条），带 `total`；每条消息超过 `max_chars`（默认 4000）截断并标 `text_truncated`；没做完的回合带 `failure` 和 `next_turn_id`。
+- **错误说明该不该再调**：错误里多 `retryable`（`true` / `false` / `null` 结果未知）和 `retry_after_seconds`。没登录是 `NOT_LOGGED_IN`、账号不对是 `ACCOUNT_MISMATCH`（都要管理员处理，重试没用），没等到回答是 `OUTCOME_UNKNOWN`，发送限额 `RATE_LIMITED` 带多久以后能再发，管理器连不上是 `EXTERNAL_UNAVAILABLE` 且可重试。
+- **按编号读产出的文件**：新的只读工具 `llm_bridge_file_get`（`session_id`、`file_id`、`offset`、`max_chars`）——读回合结果 `outputs` 里的文字文件，没读完时给 `next_offset`；不是文字的、超过 2 MB 的读不了。
+- `llm_bridge_status` 只给用得上的：账号只有状态，不带是谁、怎么登录的；额度窗口不带套餐。
+
 **逐字输出与推送通道**（T-0249，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 3.2）：
 
 - 事件多一种 `delta`：逐字的增量，接在这一回合正在写的那一段后面；随后到的 `message` 是这一段的全文，替换掉攒起来的增量。增量只在回合进行中存在，回合结束后删掉（完整的每一段都存着）。来源是官方程序自己的增量输出，在锁定版本上核对过：Claude Code 2.1.323 和 CodeBuddy Code 2.184.0 的 `--include-partial-messages`（`stream_event` 里的 `text_delta`），Codex 0.169.0 的 `item/agentMessage/delta` 通知。管理器把增量攒成约 0.1 秒一条事件。

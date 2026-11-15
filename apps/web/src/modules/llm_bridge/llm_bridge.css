@@ -87,6 +87,15 @@
 .lb-quota { display: grid; gap: 8px; }
 .lb-quota-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .lb-quota-head h3, .lb-quota h4 { margin: 0; }
+.lb-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 14px; margin-bottom: 12px; }
+.lb-filters .form-field { min-width: 130px; margin: 0; }
+.lb-search { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lb-search input { flex: 1; min-width: 200px; }
+.lb-search button { display: inline-flex; align-items: center; gap: 6px; }
+.lb-hits, .lb-days { display: grid; gap: 10px; margin: 12px 0 0; padding: 0; list-style: none; }
+.lb-days { gap: 4px; font-weight: 400; font-size: .84rem; color: var(--muted); }
+.lb-snippet { margin: 4px 0 0; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); font-size: .86rem; overflow-wrap: anywhere; }
+.lb-trouble { color: var(--danger); }
 .lb-grant-envs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
 .lb-grant-envs-name { font-weight: 600; font-size: .85rem; }
 .lb-windows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }

@@ -33,5 +33,10 @@ MANIFEST = ModuleManifest(
             "app.modules.llm_bridge.jobs:index_tick",
             {"second": 17, "timeout": 120, "unique": True},
         ),
+        # 每 15 秒看一次智能体要“结束后叫我”的回合；没有在盯的回合时什么都不做
+        CronSpec(
+            "app.modules.llm_bridge.watches:watch_tick",
+            {"second": {5, 20, 35, 50}, "timeout": 60, "unique": True},
+        ),
     ),
 )

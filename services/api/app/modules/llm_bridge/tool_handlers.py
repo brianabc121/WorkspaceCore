@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Awaitable, Callable, Collection
 from typing import TYPE_CHECKING, Any
 
@@ -19,11 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.domain import agent_ops, notifications, secret_scan
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
+from app.domain.audit import AuditTrail
 from app.domain.connectors import ConnectorRuntime
 from app.integrations.base import ConnectorError
 from app.models import AgentInstance
 from app.models.task import Task
 from app.models.timeline import TaskRun
+from app.modules.llm_bridge import watches
 from app.modules.llm_bridge.client import BridgeCaller, BridgeCallError, BridgeClient
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeGrant
 from app.modules.llm_bridge.service import LlmBridgeService
@@ -47,8 +50,8 @@ _CODES = {
     "FORBIDDEN": "FORBIDDEN_CAPABILITY",
     "CONFLICT": "CONFLICT",
     "NOT_SUPPORTED": "NOT_SUPPORTED",
-    "NOT_LOGGED_IN": "EXTERNAL_UNAVAILABLE",
-    "ACCOUNT_MISMATCH": "EXTERNAL_UNAVAILABLE",
+    "NOT_LOGGED_IN": "NOT_LOGGED_IN",
+    "ACCOUNT_MISMATCH": "ACCOUNT_MISMATCH",
     "UNAVAILABLE": "EXTERNAL_UNAVAILABLE",
 }
 
@@ -111,14 +114,77 @@ _TIMEOUT_ADVICE = {
 }
 
 
+# 会话桥报的错里，重新调用有没有用（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 4.1 的 A3）：
+# True 过一会儿再调有意义；False 要先解决原因（让管理员登录、改参数、换会话）
+_RETRYABLE = {
+    "RATE_LIMITED": True,
+    "UNAVAILABLE": True,
+    "NOT_LOGGED_IN": False,
+    "ACCOUNT_MISMATCH": False,
+    "NOT_FOUND": False,
+    "VALIDATION_FAILED": False,
+    "FORBIDDEN": False,
+    "CONFLICT": False,
+    "NOT_SUPPORTED": False,
+}
+_ADVICE = {
+    "NOT_LOGGED_IN": "这个平台还没有登录：要管理员在“大模型客户端管理”里登录，你重试没有用",
+    "ACCOUNT_MISMATCH": "这个平台登录的账号和登记的不一样：要管理员处理，你重试没有用",
+}
+
+
 def _call_error(error: BridgeCallError | ConnectorError, tool: str = "") -> ToolCallError:
+    """把会话桥的错误说清楚：是什么问题、该不该再调、多久以后（details 里的 retryable、
+    retry_after_seconds）。没登录、账号不对各有各的错误码，不再混在“外部服务不可用”里。"""
     if isinstance(error, BridgeCallError):
         code = _CODES.get(error.code, "EXTERNAL_UNAVAILABLE")
-        return ToolCallError(code, error.message or "会话桥返回了错误")
+        details: dict[str, Any] = {"retryable": _RETRYABLE.get(error.code, True), **error.details}
+        if error.code == "UNAVAILABLE":
+            details.setdefault("retry_after_seconds", 30)
+        message = error.message or "会话桥返回了错误"
+        if error.code in _ADVICE:
+            message = f"{message}。{_ADVICE[error.code]}"
+        return ToolCallError(code, message, details)
     if error.kind == "TIMEOUT_UNKNOWN":
         advice = _TIMEOUT_ADVICE.get(tool, "稍后再试")
-        return ToolCallError("EXTERNAL_UNAVAILABLE", f"会话桥没有在时限内回答；{advice}")
-    return ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥暂时连不上")
+        # 不知道做没做：不是“能重试”，也不是“不能重试”
+        return ToolCallError(
+            "OUTCOME_UNKNOWN", f"会话桥没有在时限内回答；{advice}", {"retryable": None}
+        )
+    return ToolCallError(
+        "EXTERNAL_UNAVAILABLE",
+        "会话桥暂时连不上，过一会儿再试",
+        {"retryable": True, "retry_after_seconds": 30},
+    )
+
+
+def _trim_result(data: dict[str, Any], max_chars: int, offset: int) -> None:
+    """回答太长时只给一段：默认从头给 max_chars 个字符，并说明怎么接着取。"""
+    result = data.get("result")
+    if not isinstance(result, str):
+        return
+    total = len(result)
+    piece = result[offset : offset + max_chars]
+    data["result"] = piece
+    if offset or offset + len(piece) < total:
+        data["result_chars"] = total
+        data["result_offset"] = offset
+        more = offset + len(piece) < total
+        data["result_next_offset"] = offset + len(piece) if more else None
+        if more:
+            data["hint"] = (
+                f"回答一共 {total} 个字符，这里是第 {offset} 到 {offset + len(piece)} 个："
+                f"用 llm_bridge_turn_get 加 result_offset={offset + len(piece)} 接着取"
+            )
+
+
+def _trim_messages(data: dict[str, Any], max_chars: int) -> None:
+    for message in data.get("messages") or []:
+        text = message.get("text") if isinstance(message, dict) else None
+        if isinstance(text, str) and len(text) > max_chars:
+            message["text"] = text[:max_chars]
+            message["text_truncated"] = True
+            message["text_chars"] = len(text)
 
 
 async def _status_of_all(
@@ -169,7 +235,31 @@ async def _forward(
         raise ToolCallError("FORBIDDEN_CAPABILITY", _NO_WRITE)
     arguments = parsed.model_dump(mode="json", exclude_none=True)
     bridge_name = arguments.pop("bridge", None)
-    platform = arguments.get("platform")
+    # 这几项是工作台自己用的，不传给会话桥
+    max_chars = arguments.pop("max_chars", None)
+    result_offset = arguments.pop("result_offset", 0)
+    arguments.pop("notify", None)
+    # 发送时没给会话：先新建一个（要有平台）
+    create: dict[str, Any] | None = None
+    if tool == "llm_bridge_send":
+        new_keys = ("platform", "session_mode", "model", "environment", "title")
+        given = {key: arguments.pop(key) for key in new_keys if key in arguments}
+        if "session_id" not in arguments:
+            if "platform" not in given:
+                raise ToolCallError(
+                    "VALIDATION_FAILED",
+                    "要么填 session_id 发到已有的会话，要么填 platform 先新建一个再发",
+                )
+            create = {"mode": given.pop("session_mode", "chat"), **given}
+            create["request_id"] = f"{arguments['request_id']}.new"
+        elif given:
+            raise ToolCallError(
+                "VALIDATION_FAILED",
+                "填了 session_id 就是发到已有的会话：不要再填 "
+                + "、".join(given)
+                + "（它们只在新建会话时用）",
+            )
+    platform = (create or arguments).get("platform")
     if platform and grant.platforms and platform not in grant.platforms:
         raise ToolCallError("FORBIDDEN_CAPABILITY", f"管理员没有给你开 {platform} 这个平台")
     # 要发给第三方平台的内容先过密钥扫描：像密钥的不发、不存（例外九的“密钥拦截”）
@@ -183,8 +273,8 @@ async def _forward(
         )
     # 开发环境只能用管理员给这个实例勾选的
     environments = set(grant.environment_ids or [])
-    wanted = arguments.get("environment")
-    if tool == "llm_bridge_session_create" and wanted and wanted not in environments:
+    wanted = (create or arguments).get("environment")
+    if wanted and wanted not in environments:
         raise ToolCallError(
             "FORBIDDEN_CAPABILITY",
             "管理员没有给你开这个开发环境；能用的见 llm_bridge_environments",
@@ -209,11 +299,30 @@ async def _forward(
     bridge_label, bridge_id, client = bridge.name, str(bridge.id), await service.client(bridge)
     await db.commit()
     try:
+        if create is not None:
+            made = await client.tool(caller, "llm_session_create", create)
+            if not isinstance(made, dict) or not isinstance(made.get("session_id"), str):
+                raise ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥返回了无法识别的结果")
+            arguments["session_id"] = made["session_id"]
         data = await client.tool(caller, "llm_" + tool.removeprefix(PREFIX), arguments)
     except (BridgeCallError, ConnectorError) as error:
-        raise _call_error(error, tool) from None
+        failure = _call_error(error, "llm_bridge_session_create" if create is not None else tool)
+        if create is not None and "session_id" in arguments:
+            # 会话建好了但消息没发出去：告诉调用方会话号，重发时填它，不要再建一个
+            failure.details["session_id"] = arguments["session_id"]
+            failure.message = (
+                f"会话建好了（session_id={arguments['session_id']}），但消息没有发出去："
+                f"{failure.message}"
+            )
+        raise failure from None
     if not isinstance(data, dict):
         raise ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥返回了无法识别的结果")
+    if create is not None:
+        data["created_session"] = True
+    if tool in ("llm_bridge_send", "llm_bridge_turn_get") and max_chars:
+        _trim_result(data, int(max_chars), int(result_offset))
+    if tool == "llm_bridge_session_get" and max_chars:
+        _trim_messages(data, int(max_chars))
     if tool == "llm_bridge_environments" and isinstance(data.get("environments"), list):
         data["environments"] = [
             e for e in data["environments"] if isinstance(e, dict) and e.get("id") in environments
@@ -273,6 +382,14 @@ async def _source(db: AsyncSession, instance: AgentInstance) -> dict[str, Any]:
     }
 
 
+_AUDIT_ACTIONS = {
+    "llm_bridge_session_create": "agent_session_created",
+    "llm_bridge_send": "agent_message_sent",
+    "llm_bridge_turn_cancel": "agent_turn_cancelled",
+    "llm_bridge_session_archive": "agent_session_archived",
+}
+
+
 def _result_ref(bridge_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """执行得到的编号：执行记录里带着，回溯时能从这条记录点到会话的那一回合。"""
     ref = {"bridge_id": bridge_id}
@@ -282,11 +399,12 @@ def _result_ref(bridge_id: str, data: dict[str, Any]) -> dict[str, Any]:
     return ref
 
 
-def _session_link(bridge_id: str, session_id: Any) -> str:
-    """通知里的链接：直接到聊天页的那个会话。"""
+def _session_link(bridge_id: str, session_id: Any, turn_id: Any = None) -> str:
+    """通知里的链接：直接到聊天页的那个会话；给了回合就定位到那一回合。"""
     if not bridge_id or not isinstance(session_id, str):
         return "/llm_bridge"
-    return f"/llm_bridge?m={bridge_id}&s={session_id}"
+    turn = f"&t={turn_id}" if isinstance(turn_id, str) else ""
+    return f"/llm_bridge?m={bridge_id}&s={session_id}{turn}"
 
 
 def _summary(tool: str, output: BridgeToolOutput) -> str:
@@ -370,7 +488,19 @@ async def run(
             link=_session_link(bridge_id, data.get("session_id")),
             key=str(data.get("session_id")),
         )
-    elif spec.name == "llm_bridge_send" and output.data.get("takeover"):
+    if spec.name == "llm_bridge_send" and getattr(parsed, "notify", False):
+        # 结束后叫我：回合还没做完才用得着；已经有结果的不用叫
+        pending = output.data.get("status") in ("queued", "running")
+        if pending and isinstance(output.data.get("turn_id"), str):
+            await watches.add(
+                service.db,
+                current,
+                uuid.UUID(bridge_id),
+                str(output.data.get("session_id")),
+                output.data["turn_id"],
+            )
+        output.data["will_notify"] = pending
+    if spec.name == "llm_bridge_send" and output.data.get("takeover"):
         data = output.data
         await notifications.notify_admins(
             service.db,
@@ -379,9 +509,26 @@ async def run(
             severity="warning",
             title=f"智能体「{current.name}」向不是它建的会话发了消息",
             body=f"{data.get('platform')}.{data.get('mode')}（{output.bridge}）",
-            link=_session_link(bridge_id, data.get("session_id")),
+            link=_session_link(bridge_id, data.get("session_id"), data.get("turn_id")),
             key=str(data.get("turn_id")),
         )
+    # 智能体的写操作也进审计日志（内容不进：只有是谁、哪个会话、哪一回合）
+    action = _AUDIT_ACTIONS[spec.name]
+    if spec.name == "llm_bridge_send" and output.data.get("takeover"):
+        action = "agent_takeover_sent"
+    await AuditTrail(service.db, service.settings).record(
+        f"llm_bridge.{action}",
+        workspace_ids=[current.workspace_id],
+        actor_id=None,
+        resource_type="llm_bridge",
+        resource_id=uuid.UUID(bridge_id),
+        metadata={
+            "instance": current.name,
+            "instance_id": str(current.id),
+            "bridge": output.bridge,
+            **_result_ref(bridge_id, output.data),
+        },
+    )
     await service.record_knowledge(
         who,
         spec,

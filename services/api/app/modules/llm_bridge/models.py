@@ -55,6 +55,10 @@ class LlmBridge(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     # 会话索引同步到了管理器的哪个变更序号（llm_bridge_sessions，jobs.py）
     index_rev: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    # 已经通知过管理员的额度暂停：平台 → 暂停到什么时候（同一次暂停只通知一次）
+    pause_notified: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -319,3 +323,39 @@ class LlmBridgeDeployJob(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class LlmBridgeTurnWatch(Base):
+    """智能体发送时选了“结束后叫我”的回合（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 4.1 的 A1）。
+
+    后台任务隔十几秒问一次管理器；回合结束就给这个实例排一次唤醒，记上 done_at。
+    被打断后有回合接着做（插入的消息、额度恢复后的续跑）时，turn_id 改成接着做的那一回合。"""
+
+    __tablename__ = "llm_bridge_turn_watches"
+    __table_args__ = (
+        UniqueConstraint("bridge_id", "first_turn_id"),
+        Index(
+            "ix_llm_bridge_turn_watches_open",
+            "bridge_id",
+            postgresql_where=text("done_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    bridge_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.llm_bridge_bridges.id", ondelete="CASCADE")
+    )
+    instance_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.agent_instances.id", ondelete="CASCADE")
+    )
+    session_id: Mapped[str] = mapped_column(Text)
+    first_turn_id: Mapped[str] = mapped_column(Text)  # 智能体发出去的那一回合
+    turn_id: Mapped[str] = mapped_column(Text)  # 现在盯着的回合（可能是接着做的那一回合）
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    outcome: Mapped[str | None] = mapped_column(Text, nullable=True)

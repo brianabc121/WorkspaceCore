@@ -53,12 +53,12 @@ export function useLlmChat(scope: string) {
   const sessionAt = (bridge_id: string, session_id: string) => ({ header, path: { bridge_id, session_id } })
 
   return {
-    useSessions: (bridge: Ref<string | null>, filter: Ref<SessionFilter>) => useQuery({
-      queryKey: computed(() => key(bridge.value, 'sessions', filter.value)), enabled: computed(() => active() && !!bridge.value),
+    useSessions: (bridge: Ref<string | null>, filter: Ref<SessionFilter>, limit: Ref<number>) => useQuery({
+      queryKey: computed(() => key(bridge.value, 'sessions', filter.value, limit.value)), enabled: computed(() => active() && !!bridge.value),
       // 智能体也在用同一个管理器：隔一会儿重新读一次，列表里能看到它们新开的会话
       refetchInterval: 20000,
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions', {
-        params: { ...at(bridge.value!), query: { q: filter.value.q, status: filter.value.status, limit: 100, ...(filter.value.platform ? { platform: filter.value.platform } : {}) } }, signal,
+        params: { ...at(bridge.value!), query: { q: filter.value.q, status: filter.value.status, limit: limit.value, ...(filter.value.platform ? { platform: filter.value.platform } : {}) } }, signal,
       })),
     }),
     useConversation: (bridge: Ref<string | null>, session: Ref<string | null>) => useQuery({
@@ -163,8 +163,14 @@ export function useLlmChat(scope: string) {
       await auth.api.DELETE('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/attachments/{attachment_id}', { params: { header, path: { bridge_id: bridge, session_id: session, attachment_id: attachment } } })
     },
     // 附件的内容：要带工作空间请求头，所以不能直接当图片地址或链接用
-    async attachmentBlob(bridge: string, session: string, attachment: string, signal?: AbortSignal): Promise<Blob> {
-      const path = `/api/v1/llm_bridge/bridges/${encodeURIComponent(bridge)}/chat/sessions/${encodeURIComponent(session)}/attachments/${encodeURIComponent(attachment)}`
+    /** 把一个会话导出成 Markdown（提问、回答、每回合的状态和用时） */
+    exportBlob(bridge: string, session: string): Promise<Blob> {
+      return this.fileBlob(`/api/v1/llm_bridge/bridges/${encodeURIComponent(bridge)}/chat/sessions/${encodeURIComponent(session)}/export`)
+    },
+    attachmentBlob(bridge: string, session: string, attachment: string, signal?: AbortSignal): Promise<Blob> {
+      return this.fileBlob(`/api/v1/llm_bridge/bridges/${encodeURIComponent(bridge)}/chat/sessions/${encodeURIComponent(session)}/attachments/${encodeURIComponent(attachment)}`, signal)
+    },
+    async fileBlob(path: string, signal?: AbortSignal): Promise<Blob> {
       let response: Response
       try { response = await fetch(new Request(`${window.location.origin}${path}`, { credentials: 'same-origin', headers: header, signal })) }
       catch { throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败') }
@@ -205,6 +211,12 @@ export function useLlmChat(scope: string) {
     },
     async cancel(bridge: string, turn: string) {
       return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/turns/{turn_id}/cancel', { params: { header, path: { bridge_id: bridge, turn_id: turn } } }))
+    },
+    /** 换这个会话之后的回合用的模型（Claude / CodeBuddy 的会话） */
+    async setModel(bridge: string, session: string, model: string) {
+      const out = dataOf(await auth.api.PUT('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/model', { params: sessionAt(bridge, session), body: { model } }))
+      await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }), cache.invalidateQueries({ queryKey: key(bridge, 'session', session) })])
+      return out
     },
     async rename(bridge: string, session: string, title: string) {
       const out = dataOf(await auth.api.PATCH('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}', { params: sessionAt(bridge, session), body: { title } }))
@@ -254,13 +266,13 @@ export function ownerText(session: Pick<ChatSession, 'owner_kind' | 'owner'>): s
 export const PLATFORM_MARK: Record<string, string> = { chatgpt: 'G', codex: 'Cx', claude: 'Cl', workbuddy: 'W' }
 
 /** 把回答按三个反引号拆成普通文字和代码块：只做这一种格式，其余按纯文字显示（不渲染 HTML） */
-export function splitText(text: string): { code: boolean; text: string }[] {
-  const parts: { code: boolean; text: string }[] = []
-  const fence = /```[^\n`]*\n([\s\S]*?)(?:\n```|```|$)/g
+export function splitText(text: string): { code: boolean; text: string; lang?: string }[] {
+  const parts: { code: boolean; text: string; lang?: string }[] = []
+  const fence = /```([^\n`]*)\n([\s\S]*?)(?:\n```|```|$)/g
   let last = 0, match: RegExpExecArray | null
   while ((match = fence.exec(text))) {
     if (match.index > last) parts.push({ code: false, text: text.slice(last, match.index) })
-    parts.push({ code: true, text: match[1] ?? '' })
+    parts.push({ code: true, text: match[2] ?? '', lang: (match[1] ?? '').trim().slice(0, 30) })
     last = fence.lastIndex
     if (match[0].length === 0) break
   }

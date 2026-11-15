@@ -182,6 +182,10 @@ class SessionPatchBody(_Body):
     title: str = Field(min_length=1, max_length=200)
 
 
+class SessionModelBody(_Body):
+    model: str = Field(min_length=1, max_length=100)
+
+
 class TurnEditBody(_Body):
     text: str = Field(min_length=1)
 
@@ -370,6 +374,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise BridgeError("NOT_FOUND", "没有这个调用方")
         return {"ok": True}
 
+    @app.post("/admin/turns/status")
+    async def admin_turns_status(request: Request, _: Admin) -> dict[str, Any]:
+        """这些回合现在怎样了（不含内容）：工作台在回合结束时据此叫醒发起的智能体。"""
+        body = await request.json()
+        ids = body.get("ids") if isinstance(body, dict) else None
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise BridgeError("VALIDATION_FAILED", "ids 要是回合编号的列表")
+        return engine_of(request).turns_status(ids)
+
+    @app.get("/admin/search")
+    async def admin_search(request: Request, _: Admin, q: str, limit: int = 50) -> dict[str, Any]:
+        """全文搜索提问和回答：每个会话给最新的一处和一小段上下文。"""
+        return engine_of(request).search(q, limit)
+
+    @app.get("/admin/usage")
+    async def admin_usage(request: Request, _: Admin, days: int = 30) -> dict[str, Any]:
+        """最近若干天的用量，按天、平台、发起人汇总。"""
+        return engine_of(request).usage(days)
+
     @app.get("/admin/index")
     async def admin_index(
         request: Request, _: Admin, after: int = 0, limit: int = 200
@@ -426,6 +449,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, session_id: str, body: SessionPatchBody, _: Admin
     ) -> dict[str, Any]:
         return engine_of(request).rename_session(session_id, body.title)
+
+    @app.put("/admin/sessions/{session_id}/model")
+    async def admin_session_model(
+        request: Request, session_id: str, body: SessionModelBody, _: Admin
+    ) -> dict[str, Any]:
+        """换这个会话之后用的模型（命令行类平台；从下一回合起）。"""
+        return await engine_of(request).set_model(session_id, body.model)
 
     @app.post("/admin/sessions/{session_id}/reimport")
     async def admin_session_reimport(request: Request, session_id: str, _: Admin) -> dict[str, Any]:

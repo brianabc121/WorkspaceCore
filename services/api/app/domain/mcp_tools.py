@@ -132,9 +132,13 @@ def _state(ctx: ServerRequestContext[Any, Any]) -> Any:
     return request.app.state
 
 
-def error_result(code: str, message: str) -> types.CallToolResult:
-    """工具错误：只用文字内容（不带 structured_content，见模块说明）。"""
-    payload = {"error": {"code": code, "message": message}}
+def error_result(
+    code: str, message: str, details: dict[str, Any] | None = None
+) -> types.CallToolResult:
+    """工具错误：只用文字内容（不带 structured_content，见模块说明）。
+
+    details：补充信息（retryable、retry_after_seconds 等），和 code、message 放在一起。"""
+    payload = {"error": {**(details or {}), "code": code, "message": message}}
     return types.CallToolResult(
         content=[types.TextContent(type="text", text=json.dumps(payload, ensure_ascii=False))],
         is_error=True,
@@ -336,7 +340,7 @@ async def _dispatch(
                         requester, spec, raw, request_id=caller.request_id
                     )
             except ToolCallError as error:
-                return error_result(error.code, error.message)
+                return error_result(error.code, error.message, error.details)
             except ApiError as error:
                 await db.rollback()
                 return error_result(*_from_api_error(error))

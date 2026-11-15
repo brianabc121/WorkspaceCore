@@ -30,7 +30,7 @@ const account = (slot: string, state: string): Schema['LlmBridgeAccountOut'] => 
 const channel = (platform: string, mode: string, slot: string, over: Partial<Schema['LlmBridgeChannelOut']> = {}): Schema['LlmBridgeChannelOut'] => ({ platform, mode, slot, enabled: true, available: true, note: '', ...over })
 const status = (): Schema['LlmBridgeStatusOut'] => ({
   reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {}, quota: {},
-  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
+  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
   accounts: [account('openai', 'logged_in'), account('claude', 'logged_in'), account('workbuddy', 'logged_out')],
   channels: [channel('chatgpt', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
 })
@@ -242,7 +242,7 @@ describe('大模型聊天', () => {
     push(next.slice(0, 20)); push(next.slice(20))
     expect(await screen.findByText('从前有座山')).toBeVisible()
     push(frame('chat', event(14, 'message', { text: '从前有座山。' }), 14) + frame('chat', event(15, 'delta', { text: '山里' }), 15))
-    expect(await screen.findByText(/^从前有座山。\s+山里$/)).toBeVisible()
+    await waitFor(() => expect(messages()[3]).toHaveTextContent(/从前有座山。\s*山里/))
     expect(screen.queryByText('从前有座山')).not.toBeInTheDocument()
     // 用的是推送，没有去轮询
     expect(requests.filter(r => path(r).endsWith('/events'))).toEqual([])
@@ -268,7 +268,7 @@ describe('大模型聊天', () => {
     } } })
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     // 刷新页面时已经写出来的增量接着显示
-    expect(await screen.findByText(/^写到一\s+半的话$/)).toBeVisible()
+    await waitFor(() => expect(messages()[1]).toHaveTextContent(/写到一\s*半的话/))
     expect(within(messages()[1]!).getByRole('status')).toHaveTextContent(/已用 1 分 \d+ 秒/)
     expect(within(messages()[3]!).getByRole('status')).toHaveTextContent(/^排队中：这个平台因额度用完暂停了，预计 .+ 恢复后开始。$/)
     expect(within(messages()[5]!).getByRole('status')).toHaveTextContent('排队中：在等这个平台的名额（同时进行的会话数到上限了）。')
@@ -494,6 +494,107 @@ describe('大模型聊天', () => {
     workbuddy: { can_refresh: false, reports_quota: false, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 987, windows: [] },
   })
   const withQuota = (r: Request) => (/\/bridges\/[^/]+\/status$/.test(new URL(r.url).pathname) ? Response.json({ ...status(), quota: quotaOf() }) : undefined)
+
+  it('shows command output for review, exports the session and says when its content was purged', async () => {
+    const run: Schema['LlmChatStepOut'] = { kind: 'command', text: 'pytest -q', at: now(), truncated: false, error: false, exit_code: 1, output: '2 failed, 10 passed' }
+    const exported: string[] = []
+    setup('owner', { conversations: { [S1]: talk({ mode: 'dev', purged_at: now() - 60 }, [asked('跑一下测试'), answered('有两条没过。', T1, { steps: [run] })]) } }, r => {
+      if (path(r) !== `${chat}/sessions/${S1}/export`) return undefined
+      exported.push(r.method)
+      return new Response('# 周报怎么写\n', { headers: { 'Content-Type': 'text/markdown; charset=utf-8' } })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    // 回溯时要看命令跑出了什么：过程里有输出和退出码
+    const steps = await screen.findByText('过程（1 步）')
+    await fireEvent.click(steps)
+    expect(await screen.findByLabelText('命令的输出')).toHaveTextContent('2 failed, 10 passed')
+    expect(screen.getByText('退出码 1')).toBeInTheDocument()
+    expect(screen.getByRole('note')).toHaveTextContent(/这个会话的对话内容已经按保留期清除（.+）：只剩下每个回合的状态、用时和用量。/)
+    // 导出成一个 Markdown 文件
+    const created = vi.fn(() => 'blob:x')
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: created, revokeObjectURL: vi.fn() }))
+    await fireEvent.click(screen.getByRole('button', { name: '导出会话' }))
+    await waitFor(() => expect(created).toHaveBeenCalledTimes(1))
+    expect(exported).toEqual(['GET'])
+  })
+
+  it('renders answers as Markdown without running any HTML, and copies code and answers', async () => {
+    const text = '## 结论\n\n- 第一点\n- 第二点 **加粗**\n\n| 列 | 值 |\n|---|---|\n| a | 1 |\n\n链接 [文档](https://example.com/x) 和 <script>alert(1)</script>\n\n```python\nprint(1)\n```'
+    setup('owner', { conversations: { [S1]: talk({}, [asked('**我写的**不渲染'), answered(text)]) } })
+    const written: string[] = []
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => { written.push(value) } } })
+    const { container } = await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const [mine, reply] = await waitFor(() => { const all = messages(); expect(all).toHaveLength(2); return all as [HTMLElement, HTMLElement] })
+    // 回答：标题、列表、表格、链接；模型写的 HTML 只当文字
+    expect(within(reply).getByRole('heading', { name: '结论' })).toBeVisible()
+    expect(within(reply).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(reply).getByRole('table')).toBeInTheDocument()
+    const link = within(reply).getByRole('link', { name: '文档' })
+    expect(link).toHaveAttribute('href', 'https://example.com/x')
+    expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+    expect(container.querySelector('.lc-bubble script')).toBeNull()
+    expect(reply).toHaveTextContent('<script>alert(1)</script>')
+    // 自己发的消息照原样显示
+    expect(within(mine).getByText('**我写的**不渲染')).toBeVisible()
+    // 代码块带语言名和复制；整条回答也能复制原文
+    expect(within(reply).getByText('python')).toBeVisible()
+    await fireEvent.click(within(reply).getByRole('button', { name: '复制这段python' }))
+    await fireEvent.click(within(reply).getByRole('button', { name: '复制' }))
+    await waitFor(() => expect(written).toEqual(['print(1)', text]))
+  })
+
+  it('retries a failed turn and regenerates the last answer by sending the question again, and keeps the draft', async () => {
+    const bodies: Schema['LlmChatSendIn'][] = []
+    setup('owner', { conversations: { [S1]: talk({}, [asked('第一问'), answered('', T1, { status: 'failed', failure: { kind: 'timeout', message: '超时' } }), asked('第二问', T2), answered('好的。', T2)]) } }, async r => {
+      if (path(r) !== `${chat}/sessions/${S1}/messages` || r.method !== 'POST') return undefined
+      bodies.push(await r.json() as Schema['LlmChatSendIn'])
+      return Response.json(turn(`bt_${'9'.repeat(20)}`))
+    })
+    window.localStorage.setItem(`llm_chat_draft:${ONE}:${S1}`, '上次没写完的')
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const box = await composer()
+    // 草稿是上次留下的；有草稿时不替人覆盖
+    expect(box).toHaveValue('上次没写完的')
+    const all = await waitFor(() => { const list = messages(); expect(list).toHaveLength(4); return list })
+    await fireEvent.click(within(all[1]!).getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('输入框里还有没发的内容：先发出去或清空，再点重试。')).toBeVisible()
+    await fireEvent.update(box, '')
+    expect(window.localStorage.getItem(`llm_chat_draft:${ONE}:${S1}`)).toBeNull()
+    // 失败的回合：把那一问原样再发一次
+    await fireEvent.click(within(all[1]!).getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(bodies.map(b => b.text)).toEqual(['第一问']))
+    // 中间的回答没有“重新生成”，只有最后一条有
+    expect(within(all[1]!).queryByRole('button', { name: '重新生成' })).not.toBeInTheDocument()
+    // 输入框空着时按 ↑：把自己上一条发的放回来
+    await waitFor(() => expect(box).toHaveValue(''))
+    await fireEvent.keyDown(box, { key: 'ArrowUp' })
+    expect(box).toHaveValue('第一问')
+  })
+
+  const twoModels: Schema['LlmChatOptionsOut'] = { models: [{ id: 'sonnet', name: 'Sonnet', description: '', default: true, efforts: [] }, { id: 'opus', name: 'Opus', description: '', default: false, efforts: [] }], models_error: '', environments: [] }
+
+  it('switches the model of a Claude session from the info panel', async () => {
+    const bodies: unknown[] = []
+    setup('owner', { options: twoModels, conversations: { [S1]: talk({ platform: 'claude', model: 'sonnet' }) } }, async r => {
+      if (path(r) !== `${chat}/sessions/${S1}/model` || r.method !== 'PUT') return undefined
+      bodies.push(await r.json())
+      return Response.json(session({ model: 'opus' }))
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const info = await screen.findByRole('complementary', { name: '会话信息' })
+    const select = await within(info).findByLabelText('之后的回合用的模型')
+    expect(select).toHaveValue('sonnet')
+    await fireEvent.update(select, 'opus')
+    await waitFor(() => expect(bodies).toEqual([{ model: 'opus' }]))
+  })
+
+  it('offers no model switch for a Codex session', async () => {
+    setup('owner', { options: twoModels, conversations: { [S1]: talk({ platform: 'codex', mode: 'dev', model: 'gpt-a' }) } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const info = await screen.findByRole('complementary', { name: '会话信息' })
+    expect(await within(info).findByText('gpt-a')).toBeVisible()
+    expect(within(info).queryByLabelText('之后的回合用的模型')).not.toBeInTheDocument()
+  })
 
   it('shows the quota of the platform and when it resets in the session info', async () => {
     setup('owner', {}, withQuota)

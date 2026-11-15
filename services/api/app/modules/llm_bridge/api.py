@@ -5,6 +5,7 @@
 登录、环境、设置、会话都是转给会话桥的管理接口（services/llm-bridge 的 /admin/*）。
 """
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeGrantOut,
     LlmBridgeIn,
     LlmBridgeIndexList,
+    LlmBridgeIndexOwnerList,
     LlmBridgeList,
     LlmBridgeLocalIn,
     LlmBridgeLocalOut,
@@ -32,11 +34,14 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgePatch,
     LlmBridgeQuotaList,
     LlmBridgeResetOut,
+    LlmBridgeSearchOut,
     LlmBridgeSessionList,
     LlmBridgeSettings,
     LlmBridgeSettingsPatch,
     LlmBridgeStatusOut,
     LlmBridgeTurnList,
+    LlmBridgeUsageOut,
+    Platform,
 )
 from app.schemas.common import error_responses
 
@@ -404,6 +409,16 @@ async def llm_bridge_index(
         Literal["agent", "user", "external"] | None,
         Query(description="谁建的：智能体 / 人 / 官方程序里已有"),
     ] = None,
+    owner_id: Annotated[
+        str | None, Query(max_length=80, description="具体是谁：实例的 id，或 user:<用户 id>")
+    ] = None,
+    platform: Annotated[Platform | None, Query()] = None,
+    mode: Annotated[Literal["chat", "dev", "cloud"] | None, Query(description="用法")] = None,
+    status: Annotated[Literal["active", "archived"] | None, Query()] = None,
+    problem: Annotated[bool, Query(description="只看有失败、结果未知或中断的回合的")] = False,
+    since: Annotated[datetime | None, Query(description="最后活动不早于")] = None,
+    until: Annotated[datetime | None, Query(description="最后活动早于")] = None,
+    q: Annotated[str, Query(max_length=120, description="标题里有这段文字")] = "",
     sync: Annotated[bool, Query(description="先同步一次")] = False,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
@@ -411,9 +426,61 @@ async def llm_bridge_index(
     workspace_id = access.workspace.id
     failed = await service.sync_index(workspace_id) if sync else []
     items, next_offset = await service.index(
-        workspace_id, bridge_id=bridge_id, owner_kind=owner_kind, limit=limit, offset=offset
+        workspace_id,
+        bridge_id=bridge_id,
+        owner_kind=owner_kind,
+        owner_id=owner_id,
+        platform=platform,
+        mode=mode,
+        status=status,
+        problem=problem,
+        since=since,
+        until=until,
+        q=q,
+        limit=limit,
+        offset=offset,
     )
     return LlmBridgeIndexList(sessions=items, next_offset=next_offset, sync_failed=failed)
+
+
+@router.get(
+    "/llm_bridge/sessions/owners",
+    summary="会话索引里出现过的发起人（筛选用；admin）",
+    responses=_read_errors,
+)
+async def llm_bridge_index_owners(access: Admin, service: Service) -> LlmBridgeIndexOwnerList:
+    return LlmBridgeIndexOwnerList(owners=await service.index_owners(access.workspace.id))
+
+
+@router.get(
+    "/llm_bridge/sessions/search",
+    summary="在所有 MCP 管理器的提问和回答里搜索（admin）",
+    description="每个会话给最新的一处和前后一小段文字。内容不存进工作台：现向各个管理器问。"
+    "连不上或版本太旧的管理器列在 failed 里。",
+    responses=_read_errors,
+)
+async def llm_bridge_search(
+    access: Admin,
+    service: Service,
+    q: Annotated[str, Query(min_length=2, max_length=120)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+) -> LlmBridgeSearchOut:
+    return await service.search(access.workspace.id, q, limit)
+
+
+@router.get(
+    "/llm_bridge/usage",
+    summary="用量：按天、MCP 管理器、平台、发起人汇总（admin）",
+    description="回合数、失败和中断的数量、token。token 是官方程序报的数相加，不是账单；"
+    "CodeBuddy 的积分拿不到。日期按 UTC。",
+    responses=_read_errors,
+)
+async def llm_bridge_usage(
+    access: Admin,
+    service: Service,
+    days: Annotated[int, Query(ge=1, le=366)] = 30,
+) -> LlmBridgeUsageOut:
+    return await service.usage(access.workspace.id, days)
 
 
 # ---- 按实例的权限 ----
