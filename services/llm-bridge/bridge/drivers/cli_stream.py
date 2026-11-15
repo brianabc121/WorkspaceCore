@@ -18,7 +18,7 @@ import json
 import os
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +37,7 @@ from bridge.drivers.base import (
     SessionSpec,
     TurnOutcome,
 )
+from bridge.drivers.web_login import WebLogin
 from bridge.redact import redact
 
 _ENV_PASS = (
@@ -76,6 +77,10 @@ class CliProfile:
     models: tuple[ModelInfo, ...]
     auth_cli: bool  # 有没有 `auth status` / `auth logout` 子命令
     models_from_help: bool = False
+    # 网页登录（bridge/drivers/web_login.py）：页面上的登录方式 → 官方程序本机服务里的登录方式
+    web_login: dict[str, str] = field(default_factory=dict)
+    # 能不能用“容器里已有的登录”（要进容器操作官方程序；有网页登录的平台不再提供）
+    allow_existing: bool = True
 
 
 CLAUDE_MODELS = (
@@ -107,6 +112,9 @@ def codebuddy_profile(binary: str) -> CliProfile:
         models=(ModelInfo("auto", "自动", "由 CodeBuddy 选择模型", default=True),),
         auth_cli=False,
         models_from_help=True,
+        # 网页登录：国内站 / 国际站（官方程序本机服务里叫 internal / external）
+        web_login={"web_cn": "internal", "web_intl": "external"},
+        allow_existing=False,
     )
 
 
@@ -161,7 +169,12 @@ class CliStreamDriver(Driver):
     ) -> None:
         self.profile = profile
         self.slot = profile.slot
-        self.login_methods = (*profile.secret_envs, "existing")
+        self.login_methods = (
+            *profile.web_login,
+            *profile.secret_envs,
+            *(("existing",) if profile.allow_existing else ()),
+        )
+        self._web = WebLogin(profile.binary, profile.label) if profile.web_login else None
         self._config_dir = config_dir
         self._secret_file = secrets_dir / f"{profile.slot}.json"
         self._timeout = rpc_timeout
@@ -193,8 +206,27 @@ class CliStreamDriver(Driver):
         env.update(extra or {})
         return env
 
+    def _save_secret(self, data: dict[str, str]) -> None:
+        self._secret_file.parent.mkdir(parents=True, exist_ok=True)
+        self._secret_file.parent.chmod(0o700)
+        self._secret_file.write_text(json.dumps(data))
+        self._secret_file.chmod(0o600)
+
     async def login(self, method: str, payload: dict[str, str]) -> LoginChallenge:
-        if method == "existing":
+        if self._web is not None and method in self.profile.web_login:
+            # 网页登录：给出网址，人在自己的浏览器里登录；登录成功后才记下“已登录”
+            def done(account: str | None) -> None:
+                self._save_secret({"method": method, **({"identity": account} if account else {})})
+
+            with contextlib.suppress(FileNotFoundError):
+                self._secret_file.unlink()  # 重新登录期间不算已登录
+            env = self._env()
+            env.pop("CODEBUDDY_API_KEY", None)
+            return await self._web.begin(self.profile.web_login[method], env, done)
+        if self._web is not None:
+            await self._web.stop()
+            self._web.challenge = None
+        if method == "existing" and self.profile.allow_existing:
             data = {"method": "existing"}
         elif method in self.profile.secret_envs:
             value = (payload.get(method) or payload.get("value") or "").strip()
@@ -203,15 +235,22 @@ class CliStreamDriver(Driver):
             data = {"method": method, "value": value}
         else:
             raise DriverError("not_supported", f"{self.profile.label} 不支持登录方式 {method}")
-        self._secret_file.parent.mkdir(parents=True, exist_ok=True)
-        self._secret_file.parent.chmod(0o700)
-        self._secret_file.write_text(json.dumps(data))
-        self._secret_file.chmod(0o600)
+        self._save_secret(data)
         return LoginChallenge(state="done")
 
+    async def login_state(self) -> LoginChallenge | None:
+        return self._web.challenge if self._web is not None else None
+
+    async def stop(self) -> None:
+        if self._web is not None:
+            await self._web.stop()
+
     async def logout(self) -> None:
+        was_web = self._secret().get("method") in self.profile.web_login
         with contextlib.suppress(FileNotFoundError):
             self._secret_file.unlink()
+        if self._web is not None and (was_web or self._web.challenge is not None):
+            await self._web.logout(self._env())
         if self.profile.auth_cli:
             with contextlib.suppress(DriverError):
                 await self._run_short(["auth", "logout"])
@@ -255,6 +294,9 @@ class CliStreamDriver(Driver):
             return AccountStatus(logged_in=False, detail="官方程序报告未登录")
         if method is None:
             return AccountStatus(logged_in=False, detail="还没有配置登录方式")
+        if method in self.profile.web_login:
+            # 网页登录：账号名是登录成功时官方程序报告的
+            return AccountStatus(True, secret.get("identity") or None, method)
         detail = "这个平台没有查询登录状态的命令，发送时才能确认凭据是否有效"
         return AccountStatus(True, None, method, detail)
 

@@ -86,6 +86,9 @@ export const METHODS: Record<LoginMethod, { name: string; help: string }> = {
   api_key: { name: 'API 密钥', help: '密钥保存在会话桥的数据卷里，不保存在工作台。' },
   oauth_token: { name: '订阅令牌', help: '用官方程序生成的长期令牌登录订阅账号；令牌保存在会话桥的数据卷里，不保存在工作台。' },
   existing: { name: '容器里已有的登录', help: '使用已经在容器里完成的登录。' },
+  // WorkBuddy（CodeBuddy）的网页登录：页面给出网址，在自己的浏览器里打开并登录，不用进容器操作官方程序
+  web_cn: { name: '网页登录（国内站）', help: '页面给出一个登录网址，你在自己的浏览器里打开并登录 CodeBuddy 国内站（copilot.tencent.com）的账号，完成后这里自动更新。' },
+  web_intl: { name: '网页登录（国际站）', help: '页面给出一个登录网址，你在自己的浏览器里打开并登录 CodeBuddy 国际站（www.codebuddy.ai）的账号，完成后这里自动更新。' },
 }
 export const methodName = (id: string | null) => (id ? METHODS[id as LoginMethod]?.name ?? id : '—')
 export const SANDBOX: Record<EnvironmentBody['sandbox'], string> = { read_only: '只读', workspace_write: '可写工作区', exec: '可执行命令' }

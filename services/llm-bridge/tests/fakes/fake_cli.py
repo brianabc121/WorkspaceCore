@@ -33,6 +33,67 @@ if args[:2] == ["auth", "status"]:
 if args[:2] == ["auth", "logout"]:
     (CONFIG / "logged-in").unlink(missing_ok=True)
     sys.exit(0)
+if "--serve" in args:
+    # 仿官方程序的本机服务模式（网页登录用）：三个账号接口，要带请求头和访问口令。
+    # 记号文件：web-login-fails → 申请登录网址失败；web-login-done → 人已经在网页上登录完
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    PASSWORD = os.environ["CODEBUDDY_GATEWAY_PASSWORD"]
+    assert len(PASSWORD) >= 32
+    state = {"pending": False, "site": None}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def reply(self, code, body):
+            data = json.dumps(body).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def allowed(self):
+            if self.headers.get("x-codebuddy-request") != "1":
+                self.reply(400, {"error": "Missing required header: x-codebuddy-request"})
+                return False
+            if self.headers.get("Authorization") != f"Bearer {PASSWORD}":
+                self.reply(401, {"error": "unauthorized"})
+                return False
+            return True
+
+        def do_GET(self):
+            if not self.allowed():
+                return
+            if (CONFIG / "web-login-done").exists() and state["pending"]:
+                (CONFIG / "logged-in").touch()
+                state["pending"] = False
+            if (CONFIG / "logged-in").exists():
+                account = {"userId": "u-1", "userName": "测试账号"}
+                self.reply(200, {"data": {"authenticated": True, "account": account}})
+            else:
+                extra = {"loginPending": True} if state["pending"] else {}
+                self.reply(200, {"data": {"authenticated": False, "loginMethods": [], **extra}})
+
+        def do_POST(self):
+            if not self.allowed():
+                return
+            size = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(size) or b"{}")
+            if self.path.endswith("/logout"):
+                (CONFIG / "logged-in").unlink(missing_ok=True)
+                (CONFIG / "web-login-done").unlink(missing_ok=True)
+                self.reply(200, {"data": {"success": True}})
+            elif (CONFIG / "web-login-fails").exists():
+                self.reply(200, {"data": {"success": True, "loginError": "account.login.failed"}})
+            else:
+                state.update(pending=True, site=body.get("method"))
+                url = f"https://example.test/login?site={body.get('method')}"
+                self.reply(200, {"data": {"success": True, "authUrl": url}})
+
+    CONFIG.mkdir(parents=True, exist_ok=True)
+    HTTPServer(("127.0.0.1", int(args[args.index("--port") + 1])), Handler).serve_forever()
 if args == ["--help"]:
     print("  --model <model>  Model. Currently supported: (auto, fast-model, deep-model)")
     sys.exit(0)

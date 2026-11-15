@@ -173,6 +173,42 @@ describe('大模型客户端管理', () => {
     expect(polls).toBe(2)
   })
 
+  it('logs WorkBuddy in through a web page: a link to open, no code, no container login', { timeout: 20000 }, async () => {
+    let polls = 0, loggedIn = false
+    const wb = (over: Partial<Schema['LlmBridgeAccountOut']> = {}) => account({ slot: 'workbuddy', label: 'WorkBuddy（CodeBuddy）', login_methods: ['web_cn', 'web_intl', 'api_key'], ...over })
+    const url = 'https://copilot.tencent.com/login?state=abc'
+    const requests = setup('owner', r => {
+      if (path(r) === `${base}/status`) return Response.json(status({ accounts: [wb(loggedIn ? { state: 'logged_in', identity: '测***', method: 'web_cn' } : {})] }))
+      if (path(r) !== `${base}/accounts/workbuddy/login`) return undefined
+      if (r.method === 'POST') return Response.json({ state: 'pending', verification_url: url, user_code: null, detail: '' })
+      polls += 1
+      if (polls >= 2) loggedIn = true
+      return Response.json({ state: loggedIn ? 'done' : 'pending', detail: '' })
+    })
+    await openApp('/llm_bridge?view=manage')
+    const card = await screen.findByRole('article', { name: '账号：WorkBuddy（CodeBuddy）' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录WorkBuddy（CodeBuddy）' }))
+    const form = within(card).getByRole('form', { name: '登录WorkBuddy（CodeBuddy）' })
+    // 默认就是网页登录；没有“容器里已有的登录”，也不用填任何东西
+    expect(within(form).getByLabelText('网页登录（国内站）')).toBeChecked()
+    expect(within(form).getByLabelText('网页登录（国际站）')).toBeInTheDocument()
+    expect(within(form).queryByLabelText('容器里已有的登录')).not.toBeInTheDocument()
+    expect(within(form).queryByLabelText('API 密钥', { selector: 'input[type="password"]' })).not.toBeInTheDocument()
+    await fireEvent.click(within(form).getByRole('button', { name: '获取登录网址' }))
+
+    const panel = await screen.findByRole('region', { name: '网页登录' })
+    const link = within(panel).getByRole('link', { name: url })
+    expect(link).toHaveAttribute('href', url)
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(within(panel).queryByText(/验证码：/)).not.toBeInTheDocument()
+    expect(await writes(requests)[0]!.clone().json()).toEqual({ method: 'web_cn' })
+
+    expect(await screen.findByText('「WorkBuddy（CodeBuddy）」已登录。', {}, { timeout: 10000 })).toBeVisible()
+    expect(screen.queryByRole('region', { name: '网页登录' })).not.toBeInTheDocument()
+    expect(await within(card).findByText('网页登录（国内站）')).toBeVisible()
+  })
+
   it('stops polling when the page is left while a device login is pending', { timeout: 20000 }, async () => {
     let polls = 0
     setup('owner', r => {

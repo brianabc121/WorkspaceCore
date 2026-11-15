@@ -253,7 +253,12 @@ class LlmBridgeStatusOut(BaseModel):
 
 
 class LlmBridgeLoginIn(_In):
-    method: Literal["device_code", "api_key", "oauth_token", "existing"]
+    method: Literal["device_code", "api_key", "oauth_token", "existing", "web_cn", "web_intl"] = (
+        Field(
+            description="web_cn / web_intl：WorkBuddy（CodeBuddy）的网页登录，国内站 / 国际站——"
+            "返回 pending 和一个网址，人在自己的浏览器里打开并登录"
+        )
+    )
     api_key: str | None = Field(default=None, max_length=500)
     oauth_token: str | None = Field(default=None, max_length=2000)
 
