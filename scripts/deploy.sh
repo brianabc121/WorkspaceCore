@@ -976,7 +976,6 @@ connect_openim() {
 # 主机名默认用 SITE_DOMAIN（已经指向这台服务器）；没有公网域名时用固定的内部名字，接入包把它映射到这台服务器的 IP。
 AGENT_INTERNAL_HOST=agent-gateway.myworkspace.internal
 
-valid_ip() { "$PY" -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "$1" 2>/dev/null; }
 valid_ingress_ip() {
   "$PY" -c '
 import ipaddress, sys
@@ -1002,10 +1001,14 @@ select_ingress_address() {
   __default="$(env_get AGENT_PUBLIC_ADDRESS)"
   if [[ -z $__default && $PHASE != run ]]; then
     __candidate="$(outbound_ip)"
-    # 云主机网卡常只有私网 IP。只有可路由公网候选才作为默认值，仍由管理员确认。
-    if valid_ingress_ip "$__candidate" && "$PY" -c \
-      'import ipaddress, sys; sys.exit(not ipaddress.ip_address(sys.argv[1]).is_global)' \
-      "$__candidate" 2>/dev/null; then __default="$__candidate"; fi
+    # 无域名模式沿用出站地址默认值（可用于 LAN / Tailscale）；这不代表它是公网 IP。
+    # 域名模式只有交互确认时才提示公网候选，无人值守不能悄悄把 DNS 连接改成 IP。
+    if valid_ingress_ip "$__candidate"; then
+      if [[ $__host == "$AGENT_INTERNAL_HOST" ]] \
+        || { (( ! ASSUME_YES )) && interactive && "$PY" -c \
+          'import ipaddress, sys; sys.exit(not ipaddress.ip_address(sys.argv[1]).is_global)' \
+          "$__candidate" 2>/dev/null; }; then __default="$__candidate"; fi
+    fi
   fi
   info "智能体必须直连工作台接入入口；网站可以继续走 Cloudflare，接入不能走普通 CDN / HTTP 代理"
   info "填写工作台服务器的真实公网 IP（云控制台查看），不是智能体 IP 或 Cloudflare DNS 返回的 IP"
@@ -1035,6 +1038,17 @@ select_ingress_address() {
     __default=""
   done
   printf -v "$__out" '%s' "$__address"
+}
+
+# 旧的域名入口可能刻意按 DNS 直连。无人值守且没有地址回答时保留它，不能阻断其他组件。
+defer_existing_ingress_address() {
+  if [[ -n $(env_get AGENT_PUBLIC_URL) && $(env_get AGENT_PUBLIC_INTERNAL_CA) == true \
+    && -z $(env_get AGENT_PUBLIC_ADDRESS) && ! -v ANS[INGRESS_ADDRESS] ]] \
+    && { [[ $PHASE == run ]] || (( ASSUME_YES )) || ! interactive; }; then
+    todo_add "接入地址尚未确认，本次保持已有入口；需要更换时在交互 connect 或回答文件里指定 INGRESS_ADDRESS，其他组件继续"
+    return 0
+  fi
+  return 1
 }
 
 agent_tls_dir() {
@@ -1091,6 +1105,7 @@ connect_agent_ingress() {
   if [[ -n $url && $(env_get AGENT_PUBLIC_INTERNAL_CA) != true ]]; then
     ok "已经手动配置了外网入口（$url），保持不变"; return 0
   fi
+  defer_existing_ingress_address && return 0
   if [[ -z $url ]]; then
     decide INGRESS "配置接入入口？（内部 CA 自动签发证书、开放 TCP 9443；之后可以在网页上通过 SSH 自动部署 OpenClaw）" n \
       || { info "跳过；以后运行 deploy.sh connect"; return 0; }
@@ -1161,7 +1176,7 @@ connect_agent_ingress() {
   done
   if (( ready )); then
     state_set ingress_pending 0
-    ok "接入入口本机 TLS 检查通过（内部 CA 校验；证书主机名 $host）"
+    ok "接入入口已就绪（本机 TLS 检查通过；内部 CA 校验，证书主机名 $host）"
     info "智能体的连接目标：$target:$port；AGENT_PUBLIC_ADDRESS 已写入 .env 和后续接入包配置"
     info "外网连通性尚未验证：本机回环检查不能证明其他服务器能访问"
   else
@@ -1455,7 +1470,6 @@ plan_backup_password() {
 api_running() { command -v docker >/dev/null && compose ps --status running --services </dev/null 2>/dev/null | grep -qx api; }
 domain_ok() { valid_domain "$1"; }
 email_ok() { valid_email "$1"; }
-ip_ok() { valid_ip "$1"; }
 
 # 可选组件：OpenIM、OpenClaw 接入入口
 plan_components() {
@@ -1487,6 +1501,7 @@ plan_ingress() {
   local site="$1" url host address port
   url="$(env_get AGENT_PUBLIC_URL)"
   if [[ -n $url && $(env_get AGENT_PUBLIC_INTERNAL_CA) != true ]]; then ok "OpenClaw 接入入口：已经手动配置（$url），保持不变"; return 0; fi
+  defer_existing_ingress_address && return 0
   if [[ -z $url ]]; then
     decide INGRESS "配置 OpenClaw 接入入口？（内部 CA 自动签发证书、开放 TCP 9443；之后可以在网页上通过 SSH 自动部署 OpenClaw）" n || return 0
   fi

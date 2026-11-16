@@ -469,6 +469,8 @@ sudo bash scripts/deploy.sh connect
    脚本自动保存为 `AGENT_PUBLIC_ADDRESS`，不需要关闭网站的代理或手工改 `.env`。
    已保存的地址会作为默认值，重跑不会清空；不把网卡私网地址或 CDN 的 DNS 地址当成公网 IP。
    只有入口域名直接解析到工作台、没有代理时，才显式输入 `-` 按 DNS 连接；没有域名时不能选 `-`；
+   无域名模式保留本机出站地址作为默认值，它可用于 LAN / Tailscale 等已连通网络，不代表公网可达；
+   云主机跨公网接入时应改填云控制台显示的真实公网 IP。
 2. 用工作台的**内部 CA** 签发入口证书（2 年，剩不到 60 天时再运行一次会自动重签），写进 `infra/caddy/agent-tls/`；
    不需要买证书，也不需要 80 端口验证；
 3. 写 `.env`（`AGENT_PUBLIC_HOST`、`AGENT_PUBLIC_BIND`〔IPv4 为 `0.0.0.0`，IPv6 为 `[::]`〕、`AGENT_PUBLIC_PORT`、`AGENT_PUBLIC_URL`、
@@ -481,6 +483,7 @@ sudo bash scripts/deploy.sh connect
 **Cloudflare 与外网检查：** 普通代理不支持默认的 9443，也不能代替此双向证书入口。
 `AGENT_PUBLIC_URL` 保留域名用于证书校验，初始化与隧道用 `AGENT_PUBLIC_ADDRESS` 直连工作台。
 本机显示“TLS 检查通过”只证明本机入口正常；`ss` 看到 9443 监听也不代表云安全组放行。
+填写 IPv6 时，入口发布到 `[::]`，只接受 IPv6 连接；需要 IPv4 接入的智能体应使用工作台 IPv4 地址。
 可在**智能体服务器**运行以下命令（把 IP 替换成工作台真实公网 IP）：
 
 ```bash
@@ -500,6 +503,8 @@ INGRESS_ADDRESS=203.0.113.7
 ```
 
 示例 IP 必须替换成工作台真实公网 IP。旧回答缺少必需地址时不会在后台补问或假报就绪；补全后重新运行 `connect`。
+已有内部 CA 域名入口按 DNS 连接、而本次无人值守运行没有提供地址回答时，脚本记待办并保持入口现状，
+不阻断 OpenIM 等其他组件，也不擅自将其改为网卡出口 IP。
 
 **手动配置**（内网模式，或者想用自己的公网证书）：
 
