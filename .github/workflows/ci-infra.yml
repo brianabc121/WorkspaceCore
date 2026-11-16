@@ -363,7 +363,7 @@ jobs:
           make openim-down || true
           docker compose --profile agents down -v
 
-  # T-0089 / T-0263：SSH 自动部署用的 Docker 安装脚本，在支持的五个发行版的干净容器里真正运行一次：
+  # T-0089 / T-0265：SSH 自动部署用的 Docker 安装脚本，在支持的五个发行版的干净容器里真正运行一次：
   # 核对官方软件源的签名公钥指纹，装上锁定版本并 hold（容器里没有 init，最后按预期以 docker_not_running 结束）
   docker-pins:
     runs-on: ubuntu-latest

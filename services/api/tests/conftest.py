@@ -1,8 +1,10 @@
 """测试夹具。
 
 单元测试不需要外部服务。标记为 integration 的测试需要真实的 PostgreSQL / Redis：
-- TEST_DATABASE_URL：有建库权限的连接串，例如 postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
-- TEST_REDIS_URL：例如 redis://localhost:6379/15
+- TEST_DATABASE_URL：有建库权限的连接串，例如 postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/postgres
+- TEST_REDIS_URL：例如 redis://127.0.0.1:6379/15
+主机写数字地址：写 localhost 时 asyncio 要先在线程池里解析主机名，测试客户端的连接超时只有 1–2 秒，
+机器忙时会偶发“Timeout connecting to server”（T-0264）。
 未设置时跳过；设置 REQUIRE_INTEGRATION=1（CI 中）时改为失败，避免集成测试被悄悄跳过。
 """
 

@@ -1,4 +1,4 @@
-# 旧系统初始化使用各自可用的固定 Docker 版本（T-0263）
+# 旧系统初始化使用各自可用的固定 Docker 版本（T-0265）
 
 2026-11-16 用户报告 Debian 11 bullseye、x86_64、root、未安装 Docker 时，点击初始化服务器直接失败。
 Python 的 `SUPPORTED_OS` 与 Shell 的发行版检查都只允许 Ubuntu 22.04 / 24.04、Debian 12。

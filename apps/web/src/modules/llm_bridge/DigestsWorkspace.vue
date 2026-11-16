@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { BookOpen, ChevronDown, ExternalLink, FileText, Folder, Info, MoreHorizontal, RefreshCw, Settings, Sparkles } from '@lucide/vue'
+import { BookOpen, ChevronDown, ExternalLink, FileText, Folder, Info, MoreHorizontal, RefreshCw, Settings, Sparkles, SquareTerminal } from '@lucide/vue'
 import ManagementPage from '../../components/management/ManagementPage.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { useNote } from '../../features/kb/api'
@@ -39,8 +39,34 @@ const hasNote = (d: DigestItem | null) => !!d?.note_id && !['deleted', 'purged']
 const noteId = computed(() => (hasNote(selected.value) ? selected.value!.note_id! : null))
 const note = useNote(props.scope, noteId)
 
-// 纪要正文按“## 栏目”分开；“回合清单”再按“### 第 N 回合”分开，最新的在前
-type Turn = { title: string; status: string; link: string | null; body: string }
+// 纪要正文按“## 栏目”分开；“回合清单”再按“### 第 N 回合”分开，最新的在前。
+// 每一回合再拆出“问”“答（开头一段）”两段引用，其余（没做完的原因、改动的文件、跑过的命令）照原样排版
+type Turn = { title: string; status: string; link: string | null; body: string; question: string; answer: string; rest: string }
+const TURN_STATUS: Record<string, string> = { 完成: '已完成' }
+function splitTurn(body: string) {
+  const quotes: Record<'question' | 'answer', string[]> = { question: [], answer: [] }
+  const rest: string[] = []
+  let into: 'question' | 'answer' | null = null
+  for (const line of body.split('\n')) {
+    if (/^\*\*问\*\*/.test(line)) { into = 'question'; continue }
+    if (/^\*\*答/.test(line)) { into = 'answer'; continue }
+    if (into && /^>/.test(line)) { quotes[into].push(line.replace(/^> ?/, '')); continue }
+    if (into && !line.trim() && !quotes[into].length) continue
+    into = null
+    rest.push(line)
+  }
+  return { question: quotes.question.join('\n').trim(), answer: quotes.answer.join('\n').trim(), rest: rest.join('\n').trim() }
+}
+// “涉及的文件和命令”：每一项做成一个标签（文件 / 命令）；没有就照原文
+function fileChips(body: string) {
+  const out: { kind: 'file' | 'command'; text: string }[] = []
+  for (const line of body.split('\n')) {
+    const kind = /文件/.test(line) ? 'file' : /命令/.test(line) ? 'command' : null
+    if (!kind) continue
+    for (const found of line.matchAll(/`([^`]+)`/g)) out.push({ kind, text: found[1]! })
+  }
+  return out
+}
 const parsed = computed(() => {
   const body = note.data.value?.body ?? ''
   const parts = body.split(/^## /m).slice(1).map(part => { const nl = part.indexOf('\n'); return { title: (nl < 0 ? part : part.slice(0, nl)).trim(), body: nl < 0 ? '' : part.slice(nl + 1).trim() } })
@@ -51,7 +77,9 @@ const parsed = computed(() => {
     const link = /\[打开\]\(([^)\s]+)\)\s*$/.exec(head)?.[1] ?? null
     const plain = head.replace(/\s*\[打开\]\([^)]*\)\s*$/, '')
     const found = /^(第 \d+ 回合)（[^，）]*，?([^）]*)）/.exec(plain)
-    return { title: found?.[1] ?? plain, status: found?.[2] ?? '', link: link && link.startsWith('/') ? link : null, body: nl < 0 ? '' : block.slice(nl + 1).trim() }
+    const body = nl < 0 ? '' : block.slice(nl + 1).trim()
+    const status = found?.[2] ?? ''
+    return { title: found?.[1] ?? plain, status: TURN_STATUS[status] ?? status, link: link && link.startsWith('/') ? link : null, body, ...splitTurn(body) }
   }).reverse()
   return { sections: parts.filter(p => p !== list), turns, turnsNote: listNote?.trim() ?? '', hasTurns: !!list }
 })
@@ -59,12 +87,15 @@ const openTurn = ref<number | null>(0)
 watch(selectedId, () => { openTurn.value = 0 })
 
 const error = ref(''), notice = ref(''), busy = ref('')
-const menuOpen = ref(false), menuBox = ref<HTMLElement | null>(null)
-function outsideMenu(event: MouseEvent) { if (menuOpen.value && menuBox.value && !menuBox.value.contains(event.target as Node)) menuOpen.value = false }
+const menuOpen = ref(false), menuBox = ref<HTMLElement | null>(null), footOpen = ref(false), footBox = ref<HTMLElement | null>(null)
+function outsideMenu(event: MouseEvent) {
+  if (menuOpen.value && menuBox.value && !menuBox.value.contains(event.target as Node)) menuOpen.value = false
+  if (footOpen.value && footBox.value && !footBox.value.contains(event.target as Node)) footOpen.value = false
+}
 document.addEventListener('click', outsideMenu, true)
 onBeforeUnmount(() => document.removeEventListener('click', outsideMenu, true))
 async function act(item: DigestItem, action: 'promote' | 'delete' | 'off' | 'on' | 'write') {
-  menuOpen.value = false
+  menuOpen.value = false; footOpen.value = false
   const ask = {
     promote: `把《${item.note_title}》转成正式笔记？\n\n转成后它就是你确认过的普通笔记，放到知识库的根目录，之后不再自动更新。`,
     delete: `删除《${item.note_title}》？\n\n纪要放进知识库的回收站（30 天内可以恢复），之后不再为这个会话整理纪要。`,
@@ -92,7 +123,7 @@ const STATUS: Record<string, string> = { active: '自动更新', off: '已关闭
     <template #actions>
       <RouterLink class="secondary-button lb-head-btn" :to="{ path: '/llm_bridge', query: { view: 'manage', tab: 'settings' } }" title="在“管理器与账号 → 运行设置”里打开或关掉整个纪要功能"><Settings aria-hidden="true" />纪要设置</RouterLink>
     </template>
-    <p class="dg-banner"><Info aria-hidden="true" />纪要按记录整理，不额外调用模型；未经确认，默认不带入提问。智能体的会话放进它自己的知识库，人的放进公共知识库，关联了项目的放进项目知识库。</p>
+    <p class="dg-banner"><Info aria-hidden="true" />纪要按记录整理，不额外调用模型；未经确认，默认不带入提问。</p>
     <ActionFeedback :error="error" :notice="notice" />
 
     <div class="dg-box">
@@ -146,12 +177,12 @@ const STATUS: Record<string, string> = { active: '自动更新', off: '已关闭
           <template v-if="selected">
             <div class="dg-preview-top"><span>纪要预览</span><span>最新整理在前</span></div>
             <div class="dg-preview-title">
-              <h3>{{ selected.note_title || selected.session_title || '（没有标题）' }}</h3>
+              <h3 :title="selected.note_title || undefined">{{ selected.session_title || selected.note_title || '（没有标题）' }}</h3>
               <span v-if="badge(selected)" class="lb-badge" :class="badge(selected)!.tone">{{ badge(selected)!.text }}</span>
             </div>
             <dl class="dg-meta">
-              <dt>原会话</dt><dd><RouterLink class="asv-link" :to="{ path: '/llm_bridge', query: { m: selected.bridge_id, s: selected.session_id } }">{{ selected.session_title || selected.session_id }}</RouterLink></dd>
-              <dt>知识库</dt><dd><Folder aria-hidden="true" class="dg-inline-icon" />{{ selected.space_name || '—' }}</dd>
+              <dt>原会话</dt><dd><RouterLink class="asv-link dg-session-link" :to="{ path: '/llm_bridge', query: { m: selected.bridge_id, s: selected.session_id } }">{{ selected.session_title || selected.session_id }}<ExternalLink aria-hidden="true" /></RouterLink></dd>
+              <dt>知识库</dt><dd title="智能体的会话放进它自己的知识库，人的放进公共知识库，关联了项目的放进项目知识库"><Folder aria-hidden="true" class="dg-inline-icon" />{{ selected.space_name || '—' }}</dd>
               <dt>已整理</dt><dd>{{ selected.turns_written }} 个回合</dd>
               <dt>管理器</dt><dd>{{ selected.bridge_name }}</dd>
               <dt>整理触发</dt><dd>{{ selected.reason ? DIGEST_REASON[selected.reason] ?? selected.reason : '—' }}</dd>
@@ -164,9 +195,8 @@ const STATUS: Record<string, string> = { active: '自动更新', off: '已关闭
               <div ref="menuBox" class="lb-menu-wrap">
                 <button type="button" class="secondary-button lb-head-btn dg-dots" aria-label="更多操作" aria-haspopup="true" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen"><MoreHorizontal aria-hidden="true" /></button>
                 <div v-if="menuOpen" class="lb-menu" role="group" aria-label="更多操作">
-                  <button v-if="!['off', 'converted', 'edited', 'deleted', 'purged'].includes(selected.state)" type="button" :disabled="!!busy" @click="act(selected, 'write')">现在整理一次</button>
                   <button v-if="selected.note_id && ['active', 'off', 'edited'].includes(selected.state)" type="button" class="is-danger" :disabled="!!busy" @click="act(selected, 'delete')">删除纪要</button>
-                  <p v-if="['converted', 'deleted', 'purged'].includes(selected.state)" class="dg-menu-none">没有别的操作。</p>
+                  <p v-else class="dg-menu-none">没有别的操作。</p>
                 </div>
               </div>
             </div>
@@ -176,10 +206,13 @@ const STATUS: Record<string, string> = { active: '自动更新', off: '已关闭
               <p v-else-if="note.isPending.value" role="status" class="data-state">正在读取纪要内容…</p>
               <div v-else-if="note.error.value" class="data-state"><p role="alert">读不到纪要内容：{{ chatError(note.error.value) }}</p><button type="button" class="secondary-button" @click="note.refetch()">重试</button></div>
               <template v-else>
-                <section v-for="sec in parsed.sections" :key="sec.title" class="dg-section" :aria-label="sec.title">
+                <section v-for="sec in parsed.sections" :key="sec.title" class="dg-section" :class="{ 'is-open-items': sec.title === '没解决的问题' }" :aria-label="sec.title">
                   <h4>{{ sec.title }}</h4>
+                  <ul v-if="sec.title === '涉及的文件和命令' && fileChips(sec.body).length" class="dg-chips">
+                    <li v-for="(c, k) in fileChips(sec.body)" :key="k" :data-kind="c.kind"><component :is="c.kind === 'file' ? FileText : SquareTerminal" aria-hidden="true" /><code>{{ c.text }}</code></li>
+                  </ul>
                   <!-- eslint-disable-next-line vue/no-v-html -- answerHtml 已用 DOMPurify 消毒，不允许原始 HTML（chat/markdown.ts） -->
-                  <div class="kb-md dg-md" v-html="answerHtml(sec.body)"></div>
+                  <div v-else class="kb-md dg-md" v-html="answerHtml(sec.body)"></div>
                 </section>
                 <section v-if="parsed.hasTurns" class="dg-section" aria-label="回合清单">
                   <h4>回合清单（{{ parsed.turns.length }}）</h4>
@@ -190,8 +223,10 @@ const STATUS: Record<string, string> = { active: '自动更新', off: '已关闭
                         <ChevronDown aria-hidden="true" /><strong>{{ t.title }}</strong><span v-if="t.status" class="dg-turn-status">· {{ t.status }}</span>
                       </button>
                       <div v-if="openTurn === i" class="dg-turn-body">
+                        <p v-if="t.question" class="dg-qa"><span class="dg-qa-tag">问</span><span>{{ t.question }}</span></p>
+                        <p v-if="t.answer" class="dg-qa"><span class="dg-qa-tag is-answer">答</span><span>{{ t.answer }}</span></p>
                         <!-- eslint-disable-next-line vue/no-v-html -- 同上，已消毒 -->
-                        <div class="kb-md dg-md" v-html="answerHtml(t.body)"></div>
+                        <div v-if="t.rest || (!t.question && !t.answer)" class="kb-md dg-md" v-html="answerHtml(t.rest || t.body)"></div>
                         <RouterLink v-if="t.link" class="asv-link" :to="t.link">打开这一回合</RouterLink>
                       </div>
                     </li>
@@ -204,6 +239,12 @@ const STATUS: Record<string, string> = { active: '自动更新', off: '已关闭
               <p class="dg-foot-state"><span class="lb-dot" :data-state="selected.state === 'active' ? 'ok' : 'idle'" aria-hidden="true" />{{ selected.state === 'active' ? '自动更新中，关闭后保留已有内容。' : DIGEST_STATE[selected.state] ?? selected.state }}</p>
               <button v-if="selected.state === 'active'" type="button" class="secondary-button" :disabled="!!busy" @click="act(selected, 'off')">关闭自动更新</button>
               <button v-else-if="selected.state === 'off'" type="button" class="secondary-button" :disabled="!!busy" @click="act(selected, 'on')">重新打开自动更新</button>
+              <div v-if="selected.state === 'active'" ref="footBox" class="lb-menu-wrap dg-foot-more">
+                <button type="button" class="secondary-button lb-head-btn" aria-haspopup="true" :aria-expanded="footOpen" @click="footOpen = !footOpen">更多<ChevronDown aria-hidden="true" /></button>
+                <div v-if="footOpen" class="lb-menu dg-foot-menu" role="group" aria-label="自动更新">
+                  <button type="button" :disabled="!!busy" @click="act(selected, 'write')">现在整理一次</button>
+                </div>
+              </div>
             </div>
             <p class="dg-tip"><Info aria-hidden="true" />转为正式笔记后不再自动更新；删除后进入知识库回收站。</p>
           </template>

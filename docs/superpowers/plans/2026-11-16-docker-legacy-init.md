@@ -34,7 +34,7 @@
 - 修改 `services/api/app/agent_provisioning/files/install-docker.sh` 的按系统固定版本选择。
 - 新建 `services/api/tests/test_docker_legacy_install.py`，覆盖页面初始化、连接检查、只缺 Compose 与已有 Docker。
 - 修改 `.github/workflows/ci-infra.yml` 的 docker-pins 矩阵与按版本验证。
-- 更新部署指南、版本核验 ADR 与 T-0263 任务日志。
+- 更新部署指南、版本核验 ADR 与 T-0265 任务日志。
 
 **Interfaces:** `HostInfo.supported`、`AgentServerInstaller._docker` 与 `install-docker.sh <user>` 保持原签名。
 
