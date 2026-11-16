@@ -1,13 +1,15 @@
 ---
 id: D-0004
 title: PR 合并改由 claude 在条件满足时执行；codex 的 PR 经 claude 审查后合并
-status: accepted
+status: superseded
 date: 2026-10-29
 author: claude
 supersedes:
 ---
 
 # D-0004 PR 合并改由 claude 在条件满足时执行；codex 的 PR 经 claude 审查后合并
+
+> 当前合并调度与验证门禁由 [D-0008](D-0008-stable-pr-integration.md) 取代。以下保留历史；人类决定的例外与禁止绕过相关失败检查仍保留。
 
 ## 背景
 原规则（AGENTS.md 红线、D-0003 第 3 条）规定只有人类能合并 PR。2026-10-29 人类在对话中要求：
