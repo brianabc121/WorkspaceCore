@@ -218,6 +218,12 @@ export function useLlmChat(scope: string) {
       await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }), cache.invalidateQueries({ queryKey: key(bridge, 'session', session) })])
       return out
     },
+    /** 清空上下文：之后的消息从头开始，之前的记录保留（T-0255）。别人建的会话要 takeover */
+    async clearContext(bridge: string, session: string, takeover = false) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/clear', { params: sessionAt(bridge, session), body: { takeover } }))
+      await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }), cache.invalidateQueries({ queryKey: key(bridge, 'session', session) })])
+      return out
+    },
     async rename(bridge: string, session: string, title: string) {
       const out = dataOf(await auth.api.PATCH('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}', { params: sessionAt(bridge, session), body: { title } }))
       await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }), cache.invalidateQueries({ queryKey: key(bridge, 'session', session) })])
@@ -254,6 +260,15 @@ export function contextText(context: ChatContext | null | undefined) {
     : context.used ? `已用约 ${tokens(context.used)} token（平台没有报窗口大小）` : '还没有数据（跑过一个回合后显示）'
   const times = context.compactions ? `，压缩过 ${context.compactions} 次` : ''
   return `${used}${times}`
+}
+// 输入框里的斜杠命令：官方程序在管理器调用它的方式下不执行这些命令（T-0255）。
+// 只有 /clear 由工作台自己处理（清空上下文）；别的会原样发给模型，发之前提示一句
+export const isClearCommand = (text: string) => /^\/clear$/i.test(text.trim())
+export const slashCommand = (text: string) => /^\/[A-Za-z][\w-]*(?:\s|$)/.test(text.trim()) && !isClearCommand(text)
+/** 清空上下文之后（最后一条分隔之后）有没有发过消息：没有就不用再清空 */
+export const hasContext = (messages: { role: string }[]) => {
+  const last = messages.map(m => m.role).lastIndexOf('context_cleared')
+  return messages.slice(last + 1).some(m => m.role === 'user')
 }
 
 /** 这个管理器上能新建会话的平台：只列它控制的；带是否已登录、能用哪几种用法 */

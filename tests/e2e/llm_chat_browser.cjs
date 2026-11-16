@@ -4,7 +4,7 @@
 // 收到 hang 时会一直不回答，用来验收“停止”）。别的都是真的：会话桥、工作台接口、页面。
 //
 // 没有管理器时的说明 → 新建会话并发第一条 → 回答、过程、标题 → Enter 再发一条 → 停止 → 消息队列（排队、置顶、修改、取消）→ 额度用完（中断、暂停、现在就试）→ 图片附件与工具调用 → 插入消息 → 改标题 → 搜索 →
-// 刷新后还在 → 别的管理员建的会话要确认一次才能接着发 → member 用不了 → 归档后不能再发 →
+// 刷新后还在 → 别的管理员建的会话要确认一次才能接着发 → 清空上下文（按钮和 /clear）→ member 用不了 → 归档后不能再发 →
 // 管理器停用后只能看 → 多模型同问（同一个问题同时发给两个模型、并排看、继续问、回到单会话、别的管理员要确认、归档）→
 // 审计里没有消息内容 → 手机宽度两屏（同问一次看一栏）。
 //
@@ -398,6 +398,35 @@ async function main() {
     await thread(page).getByText(':: 再补一句').waitFor({ timeout: 60000 })
     step('别的管理员建的会话：能看；接着发消息前确认一次（接口不带确认直接拒绝），之后不再问；admin 也能聊')
 
+    // ---------------------------------------------------------------- 清空上下文（T-0255）
+    // 假程序收到 history 时报出它这个官方会话里之前有几条提问：看得出之后的消息是不是从头开始
+    await composer(page).fill('history')
+    await composer(page).press('Enter')
+    await thread(page).getByText('history=3').waitFor({ timeout: 60000 })
+    const clearRefused = await api(page, workspace, 'POST', `${chat}/sessions/${theirId}/clear`, {})
+    check(clearRefused.status === 409 && clearRefused.body?.error?.code === 'TAKEOVER_REQUIRED', `不确认就清空别人的会话应被拒绝：${JSON.stringify(clearRefused)}`)
+    let clearAsked = ''
+    page.once('dialog', (dialog) => { clearAsked = dialog.message(); void dialog.accept() })
+    await page.getByRole('button', { name: '清空上下文' }).click()
+    await thread(page).getByRole('separator', { name: /上下文已清空/ }).waitFor({ timeout: 30000 })
+    check(clearAsked.includes('建的会话：清空后对方再用这个会话时也是从头开始'), `清空别人建的会话前应写明后果：${clearAsked}`)
+    await composer(page).fill('history')
+    await composer(page).press('Enter')
+    await thread(page).getByText('history=0').waitFor({ timeout: 60000 })
+    // 输入 /clear 也是清空：不发给模型（别人建的会话同样先确认）
+    await composer(page).fill('/clear')
+    await page.getByText('发送后清空这个会话的上下文，不会发给模型').waitFor()
+    page.once('dialog', (dialog) => dialog.accept())
+    await composer(page).press('Enter')
+    check(await until(async () => (await thread(page).getByRole('separator').count()) === 2), '输入 /clear 后应再多一条分隔')
+    await page.getByText('已清空上下文：之后的消息从头开始，上面的记录还在。').waitFor()
+    check(!(await thread(page).innerText()).includes(':: /clear'), '/clear 不应发给模型')
+    check((await composer(page).inputValue()) === '', '清空后输入框清空')
+    await composer(page).fill('history')
+    await composer(page).press('Enter')
+    check(await until(async () => (await thread(page).getByText('history=0').count()) === 2, 60000), '第二次清空后又从头开始')
+    step('清空上下文：别人建的会话先确认（接口不带确认直接拒绝）；之后的消息从头开始，上面的记录还在、画了分隔线；输入 /clear 也会清空，不发给模型')
+
     // ---------------------------------------------------------------- member 用不了
     const member = await login(browser, memberEmail, problems, 'member')
     await openAs(member.page, workspace, '/')
@@ -506,7 +535,7 @@ async function main() {
     const audit = await api(page, workspace, 'GET', '/api/v1/audit-logs?limit=100&action_prefix=llm_bridge.chat_')
     check(audit.status === 200, `读不到审计：${JSON.stringify(audit)}`)
     const actions = new Set(audit.body.items.map((item) => item.action))
-    for (const action of ['chat_session_created', 'chat_message_sent', 'chat_takeover_sent', 'chat_turn_cancelled', 'chat_session_renamed', 'chat_session_archived', 'chat_group_created', 'chat_group_sent', 'chat_group_archived']) {
+    for (const action of ['chat_session_created', 'chat_message_sent', 'chat_takeover_sent', 'chat_turn_cancelled', 'chat_session_renamed', 'chat_session_archived', 'chat_takeover_context_cleared', 'chat_group_created', 'chat_group_sent', 'chat_group_archived']) {
       check(actions.has(`llm_bridge.${action}`), `审计里应有 llm_bridge.${action}：${[...actions].join('、')}`)
     }
     const auditText = JSON.stringify(audit.body.items)

@@ -168,7 +168,13 @@ TOOLS: tuple[ToolDef, ...] = (
         SessionListInput,
         True,
     ),
-    ToolDef("llm_session_get", "查看一个会话的信息和消息记录。" + _NOTE, SessionGetInput, True),
+    ToolDef(
+        "llm_session_get",
+        "查看一个会话的信息和消息记录。管理员清空过上下文的会话里有 role=status、text=context_cleared 的记录："
+        "它之前的消息模型已经不记得。" + _NOTE,
+        SessionGetInput,
+        True,
+    ),
     ToolDef(
         "llm_file_get",
         "按编号读一个回合产出的文件（回合结果的 outputs 里有编号）。只能读文字文件，"

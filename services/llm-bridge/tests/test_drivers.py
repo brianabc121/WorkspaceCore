@@ -306,6 +306,21 @@ async def test_cli_turns_resume_and_transcripts(tmp_path: Path) -> None:
     assert "perm=bypassPermissions" in (await driver.run_turn(full, "x", Sink())).text
 
 
+async def test_cli_new_native_session_starts_without_history(tmp_path: Path) -> None:
+    """清空上下文（T-0255）：换一个新的原生会话号后官方程序从头开始，旧会话的记录还在。"""
+    driver = _cli(tmp_path)
+    await driver.login("api_key", {"api_key": "sk-" + "ant-test-key"})
+    native = await driver.create(None)  # type: ignore[arg-type]
+    spec = SessionSpec(mode="chat", model="sonnet", workdir=tmp_path / "w", native_id=native)
+    await driver.run_turn(spec, "第一条", Sink())
+    assert "--resume" in driver._args(spec)
+    assert (await driver.run_turn(spec, "history", Sink())).text.endswith("history=1")
+    fresh = replace(spec, native_id=await driver.create(None))  # type: ignore[arg-type]
+    assert "--session-id" in driver._args(fresh) and "--resume" not in driver._args(fresh)
+    assert (await driver.run_turn(fresh, "history", Sink())).text.endswith("history=0")
+    assert len(await driver.read(native, None)) == 4
+
+
 async def test_cli_failures(tmp_path: Path) -> None:
     driver = _cli(tmp_path)
     await driver.login("api_key", {"api_key": "k"})

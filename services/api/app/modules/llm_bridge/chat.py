@@ -26,6 +26,7 @@ from app.integrations.base import ConnectorError
 from app.models import User
 from app.modules.llm_bridge.chat_schemas import (
     LlmChatAttachmentOut,
+    LlmChatClearedOut,
     LlmChatContextOut,
     LlmChatConversationOut,
     LlmChatCreatedOut,
@@ -243,13 +244,15 @@ class LlmChatService:
         for item in data.get("messages", []):
             is_user = item.get("role") == "user"
             compacted = item.get("role") == "context_compacted"
+            cleared = item.get("role") == "context_cleared"
             messages.append(
                 LlmChatMessageOut(
                     role=str(item.get("role")),
                     turn_id=item.get("turn_id"),
                     text=str(item.get("text") or ""),
                     at=item.get("at"),
-                    by=item.get("by") if is_user else None,
+                    by=item.get("by") if is_user or cleared else None,
+                    cleared_turns=item.get("turns") if cleared else None,
                     mine=(item.get("by_id") == me) if is_user and item.get("by_id") else None,
                     status=item.get("status"),
                     steps=item.get("steps") or [],
@@ -558,6 +561,15 @@ class LlmChatService:
                     "",
                 ]
                 continue
+            if message.role == "context_cleared":
+                who = f"，{message.by}" if message.by else ""
+                lines += [
+                    "---",
+                    "",
+                    f"*上下文已清空（{when}{who}）：之后的回答不记得上面的内容*",
+                    "",
+                ]
+                continue
             if message.role == "user":
                 lines += [f"## {message.by or '用户'}（{when}）", "", message.text, ""]
             else:
@@ -643,6 +655,44 @@ class LlmChatService:
         )
         await self.db.commit()
         return session_out(data, me)
+
+    async def clear_context(
+        self, access: WorkspaceAccess, row: LlmBridge, session_id: str, *, takeover: bool
+    ) -> LlmChatClearedOut:
+        """清空上下文（T-0255）：之后的消息从头开始，之前的记录保留。
+
+        管理器换一个新的官方会话；有消息在排队或进行中时 409。别人建的会话要先确认（takeover），
+        否则 409 TAKEOVER_REQUIRED——智能体可能还要接着用它的上下文。"""
+        self._writable(row)
+        caller, client = await self._caller(access), await self.bridges.client(row)
+        me, bridge_id, bridge_name = caller.instance_id, row.id, row.name
+        await self.db.commit()
+        body: dict[str, Any] = {"by": caller.label}
+        if not takeover:
+            body["owner"] = me
+        try:
+            data = await self._admin(client, "POST", f"/sessions/{session_id}/clear", body)
+        except ApiError as error:
+            if error.code == "NOT_OWNER":
+                raise ApiError(
+                    409,
+                    "TAKEOVER_REQUIRED",
+                    "这不是你建的会话：清空后它之后的消息都从头开始，确认后再清空",
+                ) from error
+            raise
+        if data.get("cleared"):
+            await self.bridges.audit(
+                access,
+                "chat_takeover_context_cleared" if takeover else "chat_session_context_cleared",
+                bridge_id,
+                {"bridge": bridge_name, "session": session_id},
+            )
+            await self.db.commit()
+        return LlmChatClearedOut(
+            session=session_out(data, me),
+            cleared=bool(data.get("cleared")),
+            cleared_at=data.get("cleared_at"),
+        )
 
     async def rename(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str, title: str

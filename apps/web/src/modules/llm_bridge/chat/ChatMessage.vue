@@ -116,10 +116,17 @@ const compactedText = computed(() => {
   const size = props.message.pre_tokens ? `，压缩前约 ${tokens(props.message.pre_tokens)}${props.message.post_tokens ? `、压缩后约 ${tokens(props.message.post_tokens)}` : ''}` : ''
   return `这里之前的内容被压缩成了摘要（${how}${props.message.at ? `，${seconds(props.message.at)}` : ''}${size}）：模型只记得摘要里的要点`
 })
+// 清空上下文的位置（T-0255）：之前的内容模型已经不记得
+const cleared = computed(() => props.message.role === 'context_cleared')
+const clearedText = computed(() => {
+  const by = props.message.by ? `，${props.message.by}清空的` : ''
+  return `上下文已清空${props.message.at ? `（${seconds(props.message.at)}${by}）` : by}：之后的回答不记得上面的内容`
+})
 </script>
 
 <template>
   <li v-if="compacted" class="lc-compacted" role="separator" :aria-label="compactedText"><span>{{ compactedText }}</span></li>
+  <li v-else-if="cleared" class="lc-cleared" role="separator" :aria-label="clearedText"><span>{{ clearedText }}</span></li>
   <li v-else class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine, 'is-target': target }]" :data-status="status || undefined" :data-turn="message.turn_id || undefined">
     <div class="lc-msg-head">
       <strong>{{ who }}</strong>

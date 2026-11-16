@@ -573,6 +573,78 @@ describe('大模型聊天', () => {
 
   const twoModels: Schema['LlmChatOptionsOut'] = { models: [{ id: 'sonnet', name: 'Sonnet', description: '', default: true, efforts: [] }, { id: 'opus', name: 'Opus', description: '', default: false, efforts: [] }], models_error: '', environments: [] }
 
+  it('clears the context with /clear instead of sending it, and marks where the context was cleared', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const bodies: unknown[] = []
+    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 50, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false }
+    const { requests } = setup('owner', {}, async (r, w) => {
+      if (path(r) !== `${chat}/sessions/${S1}/clear` || r.method !== 'POST') return undefined
+      bodies.push(await r.json())
+      w.conversations[S1] = talk({}, [asked('写一个周报模板'), answered('好的，模板如下。'), divider])
+      return Response.json({ session: session(), cleared: true, cleared_at: now() })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const box = await composer()
+    // 别的斜杠命令照常发给模型，先提示一句它不会执行
+    await fireEvent.update(box, '/compact')
+    expect(screen.getByText(/以 \/ 开头的命令在这里不会执行，这段文字会原样发给模型/)).toBeVisible()
+    await fireEvent.update(box, ' /clear ')
+    expect(screen.getByText(/发送后清空这个会话的上下文，不会发给模型/)).toBeVisible()
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(bodies).toEqual([{ takeover: false }]))
+    // 自己的会话里输入 /clear 就是要清空：不再确认，也不发给模型
+    expect(confirm).not.toHaveBeenCalled()
+    expect(writes(requests).map(path)).toEqual([`${chat}/sessions/${S1}/clear`])
+    await waitFor(() => expect(box).toHaveValue(''))
+    expect(await screen.findByText('已清空上下文：之后的消息从头开始，上面的记录还在。')).toBeVisible()
+    const line = await screen.findByRole('separator', { name: /上下文已清空（.*测试用户清空的）：之后的回答不记得上面的内容/ })
+    expect(line).toBeVisible()
+    expect(messages()).toHaveLength(3)
+    // 清空之后还没发过消息：不用再清
+    const again = screen.getByRole('button', { name: '清空上下文' })
+    await waitFor(() => expect(again).toBeEnabled())
+    await fireEvent.click(again)
+    expect(await screen.findByText('上次清空之后还没有发过消息，不用再清空。')).toBeVisible()
+    expect(bodies).toHaveLength(1)
+  })
+
+  it('asks before clearing from the button and for a session someone else made, and not while a turn runs', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const bodies: unknown[] = []
+    setup('owner', { conversations: { [S1]: talk({ owner: '研究员', owner_kind: 'agent', mode: 'dev' }) } }, async r => {
+      if (path(r) !== `${chat}/sessions/${S1}/clear`) return undefined
+      bodies.push(await r.json())
+      return Response.json({ session: session({ owner: '研究员', owner_kind: 'agent' }), cleared: true, cleared_at: now() })
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    await composer()
+    await fireEvent.click(screen.getByRole('button', { name: '清空上下文' }))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('智能体「研究员」建的会话：清空后对方再用这个会话时也是从头开始'))
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('开发会话工作目录里的文件不受影响'))
+    expect(bodies).toEqual([])
+    confirm.mockReturnValue(true)
+    await fireEvent.click(screen.getByRole('button', { name: '清空上下文' }))
+    await waitFor(() => expect(bodies).toEqual([{ takeover: true }]))
+  })
+
+  it('does not clear while a turn is still running', async () => {
+    const running = [asked('跑一下测试'), answered('', T1, { status: 'running' })]
+    const { requests } = setup('owner', { conversations: { [S1]: talk({ busy: true }, running) }, events: [new Promise<Events>(() => {})] })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    expect(await screen.findByText('正在回答…')).toBeVisible()
+    await fireEvent.click(screen.getByRole('button', { name: '清空上下文' }))
+    expect(await screen.findByText('还有消息在排队或进行中：等它们做完或停止后再清空。')).toBeVisible()
+    expect(writes(requests)).toEqual([])
+  })
+
+  it('offers no clearing for a session that already existed in the official program', async () => {
+    setup('owner', { conversations: { [S1]: talk({ origin: 'external', owner_kind: 'external' }) } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    await composer()
+    expect(screen.getByRole('button', { name: '重新导入' })).toBeVisible()
+    expect(screen.queryByRole('button', { name: '清空上下文' })).not.toBeInTheDocument()
+  })
+
   it('switches the model of a Claude session from the info panel', async () => {
     const bodies: unknown[] = []
     setup('owner', { options: twoModels, conversations: { [S1]: talk({ platform: 'claude', model: 'sonnet' }) } }, async r => {

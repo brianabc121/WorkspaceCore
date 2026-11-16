@@ -241,6 +241,22 @@ class Store:
             """
         )
         self._migrate_messages()
+        # 清空上下文（T-0255）：每清空一次记一行，留下清空前的原生会话号和清空的时间
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS context_resets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+                slot TEXT NOT NULL,
+                native_id TEXT,
+                turns INTEGER NOT NULL DEFAULT 0,
+                by TEXT,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS context_resets_session ON context_resets (session_id, id);
+            CREATE INDEX IF NOT EXISTS context_resets_native ON context_resets (slot, native_id);
+            """
+        )
         self._migrate_memory()
         self._db.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),)
@@ -592,8 +608,34 @@ class Store:
         )
 
     def session_by_native(self, slot: str, native_id: str) -> Row | None:
-        return self._one(
+        """用这个原生会话号的会话：现在用着的，或者清空上下文之前用过的（T-0255）。"""
+        current = self._one(
             "SELECT * FROM sessions WHERE slot = ? AND native_id = ?", (slot, native_id)
+        )
+        if current is not None:
+            return current
+        return self._one(
+            "SELECT s.* FROM sessions s JOIN context_resets r ON r.session_id = s.id "
+            "WHERE r.slot = ? AND r.native_id = ? ORDER BY r.id DESC LIMIT 1",
+            (slot, native_id),
+        )
+
+    def add_context_reset(
+        self, session_id: str, slot: str, native_id: str | None, turns: int, by: str | None
+    ) -> Row:
+        at = time.time()
+        cursor = self._exec(
+            "INSERT INTO context_resets (session_id, slot, native_id, turns, by, at) "
+            "VALUES (?,?,?,?,?,?)",
+            (session_id, slot, native_id, turns, by, at),
+        )
+        return {"id": cursor.lastrowid, "turns": turns, "by": by, "at": at}
+
+    def context_resets(self, session_id: str) -> list[Row]:
+        """这个会话清空过几次上下文：每次谁清的、什么时候、清空前那段有几个回合（按先后）。"""
+        return self._all(
+            "SELECT id, turns, by, at FROM context_resets WHERE session_id = ? ORDER BY id",
+            (session_id,),
         )
 
     def update_session(self, session_id: str, **fields: Any) -> None:

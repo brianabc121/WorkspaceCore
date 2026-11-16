@@ -881,3 +881,89 @@ async def test_chat_shows_context_usage_and_compactions(rig: Rig) -> None:  # no
     assert listed[0]["context"]["compactions"] == 1
     exported = await rig.api("GET", f"{base}/export")
     assert exported.status_code == 200 and "上下文已压缩（平台自动压缩" in exported.text
+
+
+async def test_chat_clear_context(rig: Rig) -> None:  # noqa: F811
+    """清空上下文（T-0255）：之后的消息从头开始，之前的记录和分隔线都在；别人的会话要先确认。"""
+    engine = rig.bridge_app.state.engine
+    fake = engine.drivers["claude"]
+    created = await new_chat(rig, "第一问")
+    session_id = created["session"]["session_id"]
+    base = chat(rig, f"/sessions/{session_id}")
+    await wait_idle(rig, session_id)
+    old = engine.store.get_session(session_id)["native_id"]
+
+    cleared = await rig.api("POST", f"{base}/clear", json={})
+    assert cleared.status_code == 200, cleared.text
+    body = cleared.json()
+    assert body["cleared"] is True and body["cleared_at"] > 0
+    assert body["session"]["session_id"] == session_id and body["session"]["owner_kind"] == "me"
+    new = engine.store.get_session(session_id)["native_id"]
+    assert new != old
+    # 清空之后还没发过消息：再清一次什么也不做，也不记审计
+    again = (await rig.api("POST", f"{base}/clear", json={})).json()
+    assert again["cleared"] is False
+
+    sent = await rig.api("POST", f"{base}/messages", json={"text": "第二问", "request_id": "c2"})
+    assert sent.status_code == 200, sent.text
+    await wait_idle(rig, session_id)
+    # 模型那边：新的官方会话里只有清空之后的内容
+    assert [m.text for m in fake.history[new]] == ["第二问", "[fake-1] 第二问"]
+    view = (await rig.api("GET", base)).json()
+    assert [(m["role"], m["text"]) for m in view["messages"]] == [
+        ("user", "第一问"),
+        ("assistant", "[fake-1] 第一问"),
+        ("context_cleared", ""),
+        ("user", "第二问"),
+        ("assistant", "[fake-1] 第二问"),
+    ]
+    divider = view["messages"][2]
+    assert divider["by"] == "Owner" and divider["cleared_turns"] == 1
+    # 导出的 Markdown 里也有分隔
+    exported = await rig.api("GET", f"{base}/export")
+    assert exported.status_code == 200 and "上下文已清空" in exported.text
+
+    # 有消息在进行中：不能清空
+    busy = await rig.api("POST", f"{base}/messages", json={"text": "sleep:1", "request_id": "c3"})
+    assert busy.status_code == 200
+    refused = await rig.api("POST", f"{base}/clear", json={})
+    assert refused.status_code == 409 and refused.json()["error"]["code"] == "CONFLICT"
+    await wait_idle(rig, session_id)
+
+    # 智能体的会话：不确认就 409 TAKEOVER_REQUIRED，确认后清空
+    token = await rig.agent("openclaw-1", can_write=True)
+    theirs = ok(
+        await call(
+            rig.env, token, "llm_bridge_session_create", {"platform": "claude", "mode": "chat"}
+        )
+    )["session_id"]
+    ok(
+        await call(
+            rig.env,
+            token,
+            "llm_bridge_send",
+            {"session_id": theirs, "text": "你好", "request_id": "a1", "wait_seconds": 10},
+        )
+    )
+    theirs_native = engine.store.get_session(theirs)["native_id"]
+    path = chat(rig, f"/sessions/{theirs}/clear")
+    blocked = await rig.api("POST", path, json={})
+    assert blocked.status_code == 409 and blocked.json()["error"]["code"] == "TAKEOVER_REQUIRED"
+    assert engine.store.get_session(theirs)["native_id"] == theirs_native
+    confirmed = await rig.api("POST", path, json={"takeover": True})
+    assert confirmed.status_code == 200 and confirmed.json()["cleared"] is True
+    assert confirmed.json()["session"]["owner_kind"] == "agent"
+    # 智能体读自己的会话时看得到清空的位置
+    seen = ok(await call(rig.env, token, "llm_bridge_session_get", {"session_id": theirs}))
+    assert "context_cleared" in [m["text"] for m in seen["messages"]]
+
+    assert (
+        await rig.api("POST", chat(rig, f"/sessions/{MISSING}/clear"), json={})
+    ).status_code == 404
+    assert (await rig.api("POST", f"{base}/clear", json={"extra": 1})).status_code == 422
+    actions = [e["action"] for e in (await rig.env.get("/api/v1/audit-logs", limit=50))["items"]]
+    assert actions.count("llm_bridge.chat_session_context_cleared") == 1
+    assert actions.count("llm_bridge.chat_takeover_context_cleared") == 1
+    # 归档后不能清空
+    assert (await rig.api("POST", f"{base}/archive")).status_code == 200
+    assert (await rig.api("POST", f"{base}/clear", json={})).status_code == 409

@@ -3202,6 +3202,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：清空会话的上下文（admin）
+         * @description 之后的消息从头开始：MCP 管理器给这个会话换一个新的官方会话，之前的记录、附件、开发会话工作目录里的文件都保留，会话内容里在清空的位置有一条 role=context_cleared 的分隔。有消息在排队或进行中时 409 CONFLICT；已归档 409；官方程序里已有的会话 422 NOT_SUPPORTED；不是自己建的会话要带 takeover=true，否则 409 TAKEOVER_REQUIRED；上次清空之后还没发过消息时什么也不做（cleared=false）。
+         */
+        post: operations["llm_chat_clear_context"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -12807,6 +12827,29 @@ export interface components {
             /** Size */
             size: number;
         };
+        /** LlmChatClearIn */
+        LlmChatClearIn: {
+            /**
+             * Takeover
+             * @description 清空不是自己建的会话时必须为 true（页面先让人确认）
+             * @default false
+             */
+            takeover: boolean;
+        };
+        /** LlmChatClearedOut */
+        LlmChatClearedOut: {
+            /**
+             * Cleared
+             * @description 这次清空了没有：上次清空之后还没发过消息时什么也不做，为 false
+             */
+            cleared: boolean;
+            /**
+             * Cleared At
+             * @description 清空的时间
+             */
+            cleared_at?: number | null;
+            session: components["schemas"]["LlmChatSessionOut"];
+        };
         /**
          * LlmChatContextOut
          * @description 会话的上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：官方程序报的数，没报的为空。
@@ -13116,9 +13159,14 @@ export interface components {
             attachments: components["schemas"]["LlmChatAttachmentOut"][];
             /**
              * By
-             * @description 谁发的（只有 user 消息有）
+             * @description 谁发的（user 消息）；谁清空的（context_cleared）
              */
             by?: string | null;
+            /**
+             * Cleared Turns
+             * @description context_cleared：清空的那段上下文里有几个回合
+             */
+            cleared_turns?: number | null;
             /**
              * Delivery
              * @description 提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；merged 中断上一个回合后合并重发；imported 导入的
@@ -13163,7 +13211,7 @@ export interface components {
             resume?: components["schemas"]["LlmChatResumeOut"] | null;
             /**
              * Role
-             * @description user / assistant；context_compacted：平台在这一回合压缩了上下文，它前面的内容在模型那里只剩摘要
+             * @description user / assistant；context_compacted：平台在这一回合压缩了上下文，它前面的内容在模型那里只剩摘要；context_cleared：在这里清空了上下文，它之前的内容模型已经不记得
              */
             role: string;
             /**
@@ -35279,6 +35327,92 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_clear_context: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatClearIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatClearedOut"];
+                };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
             401: {

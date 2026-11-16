@@ -112,12 +112,18 @@ class LlmChatResumeOut(BaseModel):
 class LlmChatMessageOut(BaseModel):
     role: str = Field(
         description="user / assistant；context_compacted：平台在这一回合压缩了上下文，"
-        "它前面的内容在模型那里只剩摘要"
+        "它前面的内容在模型那里只剩摘要；context_cleared：在这里清空了上下文，"
+        "它之前的内容模型已经不记得"
     )
     turn_id: str | None = None
     text: str
     at: float | None = None
-    by: str | None = Field(default=None, description="谁发的（只有 user 消息有）")
+    by: str | None = Field(
+        default=None, description="谁发的（user 消息）；谁清空的（context_cleared）"
+    )
+    cleared_turns: int | None = Field(
+        default=None, description="context_cleared：清空的那段上下文里有几个回合"
+    )
     mine: bool | None = Field(default=None, description="是不是当前用户发的（只有 user 消息有）")
     status: str | None = Field(
         default=None,
@@ -292,6 +298,20 @@ class LlmChatRenameIn(_In):
 
 class LlmChatModelIn(_In):
     model: str = Field(min_length=1, max_length=100, description="之后的回合用的模型")
+
+
+class LlmChatClearIn(_In):
+    takeover: bool = Field(
+        default=False, description="清空不是自己建的会话时必须为 true（页面先让人确认）"
+    )
+
+
+class LlmChatClearedOut(BaseModel):
+    session: LlmChatSessionOut
+    cleared: bool = Field(
+        description="这次清空了没有：上次清空之后还没发过消息时什么也不做，为 false"
+    )
+    cleared_at: float | None = Field(default=None, description="清空的时间")
 
 
 # ---- 会话的消息队列（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 4 节）----
