@@ -84,6 +84,12 @@ const turn = (id = T2, state = 'queued'): Schema['LlmChatTurnOut'] => ({ turn_id
 const event = (id: number, kind: string, over: Partial<Schema['LlmChatEventOut']> = {}): Schema['LlmChatEventOut'] => ({ id, turn_id: T2, kind, at: now(), ...over })
 const composer = () => screen.findByRole('textbox', { name: '消息内容' })
 // 只数消息本身：回答里“过程”的每一步也是列表项
+/** 对话头部“更多操作”里的一项（改标题、清空上下文、导出会话、归档会话、重新导入）；菜单里没有这一项时是 null */
+async function sessionAction(name: string) {
+  const more = await screen.findByRole('button', { name: '更多操作' })
+  if (more.getAttribute('aria-expanded') !== 'true') await fireEvent.click(more)
+  return within(screen.getByRole('group', { name: '会话操作' })).queryByRole('button', { name })
+}
 const messages = () => Array.from(screen.getByRole('list', { name: '消息' }).children) as HTMLElement[]
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -384,7 +390,7 @@ describe('大模型聊天', () => {
     await fireEvent.click(screen.getByRole('button', { name: '停止' }))
     await waitFor(() => expect(writes(requests).map(path)).toEqual([`${chat}/turns/${T1}/cancel`]))
 
-    await fireEvent.click(screen.getByRole('button', { name: '改标题' }))
+    await fireEvent.click((await sessionAction('改标题'))!)
     const rename = screen.getByRole('form', { name: '改会话标题' })
     await fireEvent.update(within(rename).getByRole('textbox', { name: '会话标题' }), '  ')
     await fireEvent.click(within(rename).getByRole('button', { name: '保存' }))
@@ -395,10 +401,10 @@ describe('大模型聊天', () => {
     expect(titles).toEqual([{ title: '跑测试' }])
     expect(await within(screen.getByRole('list', { name: '消息' })).findByText('已停止')).toBeVisible()
 
-    await fireEvent.click(screen.getByRole('button', { name: '归档会话' }))
+    await fireEvent.click((await sessionAction('归档会话'))!)
     expect(await screen.findByText('这个会话已归档，不能再发送。')).toBeVisible()
     expect(screen.queryByRole('textbox', { name: '消息内容' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '归档会话' })).not.toBeInTheDocument()
+    expect(await sessionAction('归档会话')).toBeNull()
     expect(world.conversations[S1]!.session.status).toBe('archived')
   })
 
@@ -534,7 +540,7 @@ describe('大模型聊天', () => {
     // 导出成一个 Markdown 文件
     const created = vi.fn(() => 'blob:x')
     vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: created, revokeObjectURL: vi.fn() }))
-    await fireEvent.click(screen.getByRole('button', { name: '导出会话' }))
+    await fireEvent.click((await sessionAction('导出会话'))!)
     await waitFor(() => expect(created).toHaveBeenCalledTimes(1))
     expect(exported).toEqual(['GET'])
   })
@@ -622,7 +628,7 @@ describe('大模型聊天', () => {
     expect(line).toBeVisible()
     expect(messages()).toHaveLength(3)
     // 清空之后还没发过消息：不用再清
-    const again = screen.getByRole('button', { name: '清空上下文' })
+    const again = (await sessionAction('清空上下文'))!
     await waitFor(() => expect(again).toBeEnabled())
     await fireEvent.click(again)
     expect(await screen.findByText('上次清空之后还没有发过消息，不用再清空。')).toBeVisible()
@@ -639,12 +645,12 @@ describe('大模型聊天', () => {
     })
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     await composer()
-    await fireEvent.click(screen.getByRole('button', { name: '清空上下文' }))
+    await fireEvent.click((await sessionAction('清空上下文'))!)
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('智能体「研究员」建的会话：清空后对方再用这个会话时也是从头开始'))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('开发会话工作目录里的文件不受影响'))
     expect(bodies).toEqual([])
     confirm.mockReturnValue(true)
-    await fireEvent.click(screen.getByRole('button', { name: '清空上下文' }))
+    await fireEvent.click((await sessionAction('清空上下文'))!)
     await waitFor(() => expect(bodies).toEqual([{ takeover: true }]))
   })
 
@@ -666,7 +672,7 @@ describe('大模型聊天', () => {
     })
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     const box = await composer()
-    await fireEvent.click(screen.getByRole('button', { name: '清空上下文' }))
+    await fireEvent.click((await sessionAction('清空上下文'))!)
     await waitFor(() => expect(finish).toBeDefined())
     await fireEvent.update(box, '从头问一句')
     await fireEvent.keyDown(box, { key: 'Enter' })
@@ -681,20 +687,47 @@ describe('大模型聊天', () => {
     const { requests } = setup('owner', { conversations: { [S1]: talk({ busy: true }, running) }, events: [new Promise<Events>(() => {})] })
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     expect(await screen.findByText('正在回答…')).toBeVisible()
-    await fireEvent.click(screen.getByRole('button', { name: '清空上下文' }))
+    await fireEvent.click((await sessionAction('清空上下文'))!)
     expect(await screen.findByText('还有消息在排队或进行中：等它们做完或停止后再清空。')).toBeVisible()
     expect(writes(requests)).toEqual([])
+  })
+
+  it('searches inside the session and jumps between the hits; the header keeps only three icons', async () => {
+    setup('owner', { conversations: { [S1]: talk({}, [asked('部署前要做什么'), answered('先备份数据库，再部署。'), asked('回滚怎么做', T2), answered('从备份恢复数据库。', T2)]) } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    await composer()
+    const head = screen.getByRole('heading', { level: 2, name: '周报怎么写' }).closest('header')!
+    expect(within(head).getAllByRole('button').map(b => b.getAttribute('aria-label'))).toEqual(['在会话里搜索', '更多操作', '会话信息'])
+    await fireEvent.click(within(head).getByRole('button', { name: '在会话里搜索' }))
+    const bar = screen.getByRole('search', { name: '在这个会话里搜索' })
+    const input = within(bar).getByRole('searchbox', { name: '要找的文字' })
+    expect(input).toHaveFocus()
+    await fireEvent.update(input, '数据库')
+    expect(within(bar).getByRole('status')).toHaveTextContent('第 1 处 / 共 2 处')
+    const list = messages()
+    expect(list[1]).toHaveClass('is-hit-now')
+    expect(list[3]).toHaveClass('is-hit')
+    await fireEvent.keyDown(input, { key: 'Enter' })
+    expect(within(bar).getByRole('status')).toHaveTextContent('第 2 处 / 共 2 处')
+    expect(messages()[3]).toHaveClass('is-hit-now')
+    await fireEvent.click(within(bar).getByRole('button', { name: '下一处' }))
+    expect(within(bar).getByRole('status')).toHaveTextContent('第 1 处 / 共 2 处')
+    await fireEvent.update(input, '没有这几个字')
+    expect(within(bar).getByRole('status')).toHaveTextContent('没有找到')
+    await fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByRole('search', { name: '在这个会话里搜索' })).not.toBeInTheDocument()
+    expect(messages().some(li => li.classList.contains('is-hit'))).toBe(false)
   })
 
   it('offers no clearing for a session that already existed in the official program', async () => {
     setup('owner', { conversations: { [S1]: talk({ origin: 'external', owner_kind: 'external' }) } })
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     await composer()
-    expect(screen.getByRole('button', { name: '重新导入' })).toBeVisible()
-    expect(screen.queryByRole('button', { name: '清空上下文' })).not.toBeInTheDocument()
+    expect(await sessionAction('重新导入')).toBeVisible()
+    expect(await sessionAction('清空上下文')).toBeNull()
   })
 
-  it('switches the model of a Claude session from the info panel', async () => {
+  it('switches the model of a Claude session from the model tag in the header', async () => {
     const bodies: unknown[] = []
     setup('owner', { options: twoModels, conversations: { [S1]: talk({ platform: 'claude', model: 'sonnet' }) } }, async r => {
       if (path(r) !== `${chat}/sessions/${S1}/model` || r.method !== 'PUT') return undefined
@@ -702,9 +735,11 @@ describe('大模型聊天', () => {
       return Response.json(session({ model: 'opus' }))
     })
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
-    const info = await screen.findByRole('complementary', { name: '会话信息' })
-    const select = await within(info).findByLabelText('之后的回合用的模型')
+    const chips = await screen.findByRole('list', { name: '会话的平台、模型与用法' })
+    const select = await within(chips).findByLabelText('之后的回合用的模型')
     expect(select).toHaveValue('sonnet')
+    // 会话详情里只显示现在的模型
+    expect(within(screen.getByRole('complementary', { name: '会话信息' })).queryByLabelText('之后的回合用的模型')).not.toBeInTheDocument()
     await fireEvent.update(select, 'opus')
     await waitFor(() => expect(bodies).toEqual([{ model: 'opus' }]))
   })
@@ -714,7 +749,7 @@ describe('大模型聊天', () => {
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     const info = await screen.findByRole('complementary', { name: '会话信息' })
     expect(await within(info).findByText('gpt-a')).toBeVisible()
-    expect(within(info).queryByLabelText('之后的回合用的模型')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('之后的回合用的模型')).not.toBeInTheDocument()
   })
 
   it('shows the quota of the platform and when it resets in the session info', async () => {
@@ -852,7 +887,8 @@ describe('大模型聊天', () => {
     expect(first).toHaveTextContent('openclaw-1 · 主账号')
     expect(first).toHaveTextContent('4 个回合')
     const preview = screen.getByRole('region', { name: '纪要预览' })
-    expect(within(preview).getByRole('heading', { name: '会话纪要：周报怎么写' })).toBeVisible()
+    expect(within(preview).getByRole('heading', { name: '周报怎么写' })).toBeVisible()
+    expect(within(preview).getByRole('link', { name: '周报怎么写' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S1}`)
     expect(within(preview).getByRole('link', { name: '查看原会话' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S1}`)
     expect(within(preview).getByRole('link', { name: '知识库中打开' })).toHaveAttribute('href', '/knowledge/notes/n1')
     expect(within(preview).getByText('24 小时没有新回合')).toBeVisible()
@@ -861,13 +897,18 @@ describe('大模型聊天', () => {
     expect(within(preview).getByRole('region', { name: '涉及的文件和命令' }).querySelector('code')).toHaveTextContent('src/a.py')
     const turns = within(preview).getByRole('region', { name: '回合清单' })
     const heads = within(turns).getAllByRole('button')
-    expect(heads.map(b => b.textContent)).toEqual(['第 2 回合· 失败', '第 1 回合· 完成'])
+    expect(heads.map(b => b.textContent)).toEqual(['第 2 回合· 失败', '第 1 回合· 已完成'])
     expect(heads[0]).toHaveAttribute('aria-expanded', 'true')
     expect(within(turns).getByText('再写一份')).toBeVisible()
     await fireEvent.click(heads[1]!)
     expect(within(turns).getByText('写一个周报模板')).toBeVisible()
     expect(within(turns).getByRole('link', { name: '打开这一回合' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S1}&t=${T1}`)
     expect(within(preview).getByRole('button', { name: '关闭自动更新' })).toBeVisible()
+    // “现在整理一次”在底部的“更多”里，删除在标题下的“⋯”里
+    await fireEvent.click(within(preview).getByRole('button', { name: '更多' }))
+    expect(within(screen.getByRole('group', { name: '自动更新' })).getByRole('button', { name: '现在整理一次' })).toBeVisible()
+    await fireEvent.click(within(preview).getByRole('button', { name: '更多操作' }))
+    expect(within(screen.getByRole('group', { name: '更多操作' })).getByRole('button', { name: '删除纪要' })).toBeVisible()
     // 删掉的那篇：没有正文可预览
     await fireEvent.click(within(list).getByRole('button', { name: /旧的会话/ }))
     expect(await within(preview).findByText(/没有可以预览的内容/)).toBeVisible()
@@ -1025,7 +1066,7 @@ describe('大模型聊天', () => {
     await waitFor(() => expect(screen.queryByRole('list', { name: '要带上的附件' })).not.toBeInTheDocument())
 
     // 重新导入：确认后重新读，内容换成新的
-    await fireEvent.click(screen.getByRole('button', { name: '重新导入' }))
+    await fireEvent.click((await sessionAction('重新导入'))!)
     expect(await screen.findByText('重新导入后的内容')).toBeVisible()
     expect(writes(requests).some(r => path(r).endsWith('/reimport'))).toBe(true)
   })

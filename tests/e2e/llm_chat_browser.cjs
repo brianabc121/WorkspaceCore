@@ -102,6 +102,12 @@ const thread = (page) => page.getByRole('list', { name: '消息' })
 const composer = (page) => page.getByRole('textbox', { name: '消息内容' })
 // 消息列表里直接的那几条（回答里“过程”的每一步也是列表项，不算）
 const countMessages = (page) => thread(page).locator(':scope > li').count()
+// 对话头部的“更多操作”菜单：改标题、清空上下文、导出、归档、重新导入都在里面
+async function sessionAction(page, name) {
+  const more = page.getByRole('button', { name: '更多操作', exact: true })
+  if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click()
+  await page.getByRole('group', { name: '会话操作' }).getByRole('button', { name, exact: true }).click()
+}
 const requestId = () => `e2e-${randomBytes(8).toString('hex')}`
 
 async function main() {
@@ -342,7 +348,7 @@ async function main() {
     step('插入消息：会话在跑时选“插入”，平台收不下就中断上一回合、合并重发；被打断的回合不算失败，页面写明实际怎么送出去的')
 
     // ---------------------------------------------------------------- 改标题、搜索、刷新
-    await page.getByRole('button', { name: '改标题' }).click()
+    await sessionAction(page, '改标题')
     const rename = page.getByRole('form', { name: '改会话标题' })
     await rename.getByRole('textbox', { name: '会话标题' }).fill(TITLE)
     await rename.getByRole('button', { name: '保存' }).click()
@@ -407,7 +413,7 @@ async function main() {
     check(clearRefused.status === 409 && clearRefused.body?.error?.code === 'TAKEOVER_REQUIRED', `不确认就清空别人的会话应被拒绝：${JSON.stringify(clearRefused)}`)
     let clearAsked = ''
     page.once('dialog', (dialog) => { clearAsked = dialog.message(); void dialog.accept() })
-    await page.getByRole('button', { name: '清空上下文' }).click()
+    await sessionAction(page, '清空上下文')
     await thread(page).getByRole('separator', { name: /上下文已清空/ }).waitFor({ timeout: 30000 })
     // 提示出来时清空已经做完、输入框已放开（之前在这之前按 Enter 会偶尔被吞掉）
     await page.getByText('已清空上下文：之后的消息从头开始，上面的记录还在。').waitFor()
@@ -443,7 +449,7 @@ async function main() {
     await page.goto(`${base}/llm_bridge?m=${bridgeId}&s=${firstId}`)
     await page.getByRole('heading', { level: 2, name: TITLE }).waitFor()
     page.once('dialog', (dialog) => dialog.accept())
-    await page.getByRole('button', { name: '归档会话' }).click()
+    await sessionAction(page, '归档会话')
     await page.getByText('这个会话已归档，不能再发送。').waitFor()
     check((await composer(page).count()) === 0, '归档后没有输入框')
     await side(page).getByRole('button', { name: new RegExp(TITLE) }).waitFor({ state: 'detached' })
