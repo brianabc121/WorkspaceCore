@@ -45,6 +45,30 @@ if [ "${#packages[@]}" -gt 0 ]; then
     amd64 | arm64) ;;
     *) echo "unsupported_arch ${arch}" >&2; exit 3 ;;
   esac
+  # Debian 11 的安全更新包已迁到官方归档；旧入口仍能返回索引，但下载包会 404。
+  # 只迁移 bullseye-security 的两个官方入口，保留自定义镜像、其他套件与签名检查。
+  if [ "${ID}:${VERSION_ID}" = debian:11 ]; then
+    for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
+      [ -f "$source" ] || continue
+      migrated="$(mktemp)"
+      if [[ "$source" == *.sources ]]; then
+        awk 'BEGIN { RS=""; ORS="\n\n" }
+          /(^|\n)Suites:[ \t]*bullseye-security[ \t]*(\n|$)/ {
+            gsub(/\/\/(deb|security)\.debian\.org\/debian-security/, "//archive.debian.org/debian-security")
+          }
+          { print }' "$source" >"$migrated"
+      else
+        sed -E 's#^([[:space:]]*deb(-src)?[[:space:]]+(\[[^]]*\][[:space:]]+)?https?://)(deb|security)\.debian\.org/debian-security(/?[[:space:]]+bullseye-security([[:space:]]|$))#\1archive.debian.org/debian-security\5#' \
+          "$source" >"$migrated"
+      fi
+      if ! cmp -s "$source" "$migrated"; then
+        [ -e "${source}.myworkspace-before-archive" ] || cp -p "$source" "${source}.myworkspace-before-archive"
+        cat "$migrated" >"$source"
+        echo "Debian 11 安全更新源已迁移到官方 archive.debian.org（保留原文件备份）"
+      fi
+      rm -f "$migrated"
+    done
+  fi
   apt-get update -qq
   apt-get install -y -qq --no-install-recommends ca-certificates curl gnupg >/dev/null
   install -m 0755 -d /etc/apt/keyrings

@@ -1,9 +1,12 @@
 """旧系统通过页面初始化的回归：不只放开检查，还实际经过 SSH 安装与重新登录。"""
 
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from app import agent_provisioning as prov
 from app.domain import agent_ssh_install
 from tests import test_agent_ssh_install as base
 from tests.test_agent_server_credentials import _confirmed, _test
@@ -79,3 +82,101 @@ def test_unsupported_hosts_still_require_manual_install(
         f"os_id={os_id}\nos_version={os_version}\narch={arch}\nuid=0\ngid=0\nhome=/root\n"
     )
     assert not info.supported
+
+
+def _apt_preflight(root: Path, os_id: str = "debian", version: str = "11") -> None:
+    """执行真实安装脚本；仅把系统文件映射到临时目录，在第一次 apt 调用前退出。"""
+    release = root / "os-release"
+    release.write_text(f"ID={os_id}\nVERSION_ID={version}\nVERSION_CODENAME=bullseye\n")
+    bin_dir = root / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name, body in {
+        "dpkg": "echo amd64",
+        "docker": "exit 1",  # 固定模拟缺 Compose，不调用 CI 宿主上真实的 Docker。
+        "apt-get": "exit 73",
+    }.items():
+        command = bin_dir / name
+        command.write_text(f"#!/bin/sh\n{body}\n")
+        command.chmod(0o755)
+    script = prov.script("install-docker.sh").replace("/etc/os-release", str(release))
+    script = script.replace("/etc/apt", str(root / "apt"))
+    result = subprocess.run(  # noqa: S603
+        ["/bin/bash", "-c", script],
+        env={**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 73, result.stderr
+
+
+def test_debian11_migrates_only_official_security_list_and_keeps_backup(tmp_path: Path) -> None:
+    apt = tmp_path / "apt"
+    apt.mkdir()
+    source = apt / "sources.list"
+    original = (
+        "deb http://deb.debian.org/debian bullseye main\n"
+        "deb http://deb.debian.org/debian-security bullseye-security main\n"
+        "deb-src https://security.debian.org/debian-security bullseye-security main\n"
+        "deb https://deb.debian.org/debian-security bookworm-security main\n"
+        "deb https://mirror.example.org/debian-security bullseye-security main\n"
+        "deb https://deb.debian.org/debian-security bookworm-security main"
+        " # was bullseye-security\n"
+        "deb [arch=amd64 signed-by=/key.gpg] https://deb.debian.org/debian-security/"
+        " bullseye-security main\n"
+        "deb https://mirror.example.org/debian-security bullseye-security main # http://deb.debian.org/debian-security\n"
+        "# deb http://deb.debian.org/debian-security bullseye-security main\n"
+    )
+    source.write_text(original)
+    _apt_preflight(tmp_path)
+    expected = (
+        "deb http://deb.debian.org/debian bullseye main\n"
+        "deb http://archive.debian.org/debian-security bullseye-security main\n"
+        "deb-src https://archive.debian.org/debian-security bullseye-security main\n"
+        "deb https://deb.debian.org/debian-security bookworm-security main\n"
+        "deb https://mirror.example.org/debian-security bullseye-security main\n"
+        "deb https://deb.debian.org/debian-security bookworm-security main"
+        " # was bullseye-security\n"
+        "deb [arch=amd64 signed-by=/key.gpg] https://archive.debian.org/debian-security/"
+        " bullseye-security main\n"
+        "deb https://mirror.example.org/debian-security bullseye-security main # http://deb.debian.org/debian-security\n"
+        "# deb http://deb.debian.org/debian-security bullseye-security main\n"
+    )
+    assert source.read_text() == expected
+    backup = apt / "sources.list.myworkspace-before-archive"
+    assert backup.read_text() == original
+    _apt_preflight(tmp_path)
+    assert source.read_text() == expected
+    assert backup.read_text() == original
+
+
+def test_debian11_migrates_only_bullseye_security_deb822_stanza(tmp_path: Path) -> None:
+    apt = tmp_path / "apt" / "sources.list.d"
+    apt.mkdir(parents=True)
+    source = apt / "debian.sources"
+    source.write_text(
+        "Types: deb\nURIs: https://deb.debian.org/debian-security\n"
+        "Suites: bullseye-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian.gpg\n\n"
+        "Types: deb\nURIs: https://deb.debian.org/debian-security\n"
+        "Suites: bookworm-security\nComponents: main\n\n"
+    )
+    _apt_preflight(tmp_path)
+    assert source.read_text() == (
+        "Types: deb\nURIs: https://archive.debian.org/debian-security\n"
+        "Suites: bullseye-security\nComponents: main\nSigned-By: /usr/share/keyrings/debian.gpg\n\n"
+        "Types: deb\nURIs: https://deb.debian.org/debian-security\n"
+        "Suites: bookworm-security\nComponents: main\n\n"
+    )
+
+
+@pytest.mark.parametrize(("os_id", "version"), [("debian", "12"), ("ubuntu", "22.04")])
+def test_other_systems_do_not_migrate_apt_sources(tmp_path: Path, os_id: str, version: str) -> None:
+    apt = tmp_path / "apt"
+    apt.mkdir()
+    source = apt / "sources.list"
+    original = "deb http://deb.debian.org/debian-security bullseye-security main\n"
+    source.write_text(original)
+    _apt_preflight(tmp_path, os_id, version)
+    assert source.read_text() == original
+    assert not (apt / "sources.list.myworkspace-before-archive").exists()

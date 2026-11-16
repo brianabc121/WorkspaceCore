@@ -17,6 +17,7 @@
 - Debian 11: Docker 29.8.0、containerd 2.3.4-2、Compose 5.5.1；Ubuntu 20.04: Docker 28.1.1、containerd 1.7.27-1、Compose 2.35.1。
 - Ubuntu 22.04 / 24.04、Debian 12 保留原有版本；新系统不自动选 latest。
 - 官方签名公钥指纹校验与 apt-mark hold 保留。
+- Debian 11 的官方 bullseye-security 旧入口迁移至官方归档，保留协议、签名配置和原文件备份，不改自定义镜像与其他套件。
 
 ## Review Focus
 
@@ -40,5 +41,6 @@
 - [x] 写回归测试：Debian 11 / Ubuntu 20.04、x86_64 / aarch64、root 无 sudo 初始化成功；未知系统失败；已有 Docker 不重装。
 - [x] 运行测试，确认新支持系统在修复前以 unsupported_os 失败。
 - [x] 安装脚本按系统选择固定版本，扩展两处系统检查和提示。
+- [x] 合并前 CI 复现 Debian 11 安全源归档 404；补充 `.list` / deb822 的迁移回归与传统源、其他系统不受影响的测试，确认新测试在旧代码失败后再验证修复。
 - [x] 运行回归与相关测试、ruff/mypy、真实干净容器安装；记录可运行与受环境限制部分。
 - [x] 更新 CI 矩阵、部署说明与 ADR，执行协作校验，审查 diff，提交专属分支并创建 PR。
