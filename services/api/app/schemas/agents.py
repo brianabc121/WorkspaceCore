@@ -855,6 +855,11 @@ class ServerSshOut(BaseModel):
         "credentials_required 还没有保存密码（旧服务器要补录）"
     )
     last_connection_at: datetime | None = Field(description="最近一次显式连接检测完成的时间")
+    connection_latency_ms: float | None = Field(
+        default=None,
+        description="最近一次登录成功时这条 SSH 连接的往返延迟（毫秒，内核 TCP_INFO 的平滑 RTT）；"
+        "没测过、登录失败、换过地址或密码、读不到时为 null",
+    )
     legacy_key_cleanup_state: LegacyKeyCleanupState = Field(
         description="旧专用公钥的退役：not_needed 没有旧公钥；pending 等补录密码后清理；"
         "done 已清理；manual_required 需要在服务器上手动删除那一行"
@@ -870,6 +875,52 @@ class ServerSshOut(BaseModel):
     prepared_at: datetime | None = Field(description="最近一次初始化成功（Docker 可用）的时间")
 
 
+class ServerDiskOut(BaseModel):
+    """服务器上一个挂载的本地硬盘（df -PkTl，按设备去重；字节）。"""
+
+    mount: str = Field(description="挂载点")
+    device: str = Field(description="设备，例如 /dev/vda1")
+    fs_type: str = Field(description="文件系统类型，例如 ext4")
+    total: int = Field(ge=0)
+    used: int = Field(ge=0)
+    available: int = Field(ge=0, description="普通用户可用（不含文件系统保留空间）")
+
+
+class ServerResourceSample(BaseModel):
+    """平台最近一次成功的 SSH 资源采样（只读命令，不依赖智能体上报）。"""
+
+    sampled_at: datetime
+    cores: int = Field(description="在线 CPU 核数")
+    cpu_percent: float = Field(description="整机 CPU 使用率（1 秒采样，0–100）")
+    load1: float = Field(description="1 分钟平均负载")
+    mem_total: int
+    mem_used: int = Field(description="已用 = 总量 - 可用")
+    mem_available: int
+    disks: list[ServerDiskOut] = Field(
+        description="挂载的本地硬盘（/dev 设备，排除 squashfs 等只读镜像，最多 16 个）；"
+        "旧采样或读不到时为空"
+    )
+    storage_total: int = Field(
+        description="硬盘总量：各挂载硬盘之和；没有列表时用 Docker 数据目录分区"
+    )
+    storage_used: int
+    storage_available: int
+
+
+class ServerResourcesOut(BaseModel):
+    """SSH 服务器的资源采样状态：worker 约每分钟采样一次，也可以手动刷新。"""
+
+    sample: ServerResourceSample | None = Field(
+        description="最近一次成功的采样；还没有成功过时为 null"
+    )
+    stale: bool = Field(description="最近一次成功的采样超过 3 分钟（或者没有）")
+    attempted_at: datetime | None = Field(description="最近一次尝试采样的时间")
+    error: Literal["unavailable", "physical_host_conflict"] | None = Field(
+        description="最近一次采样失败的原因：unavailable 连不上 / 登录失败 / 命令失败；"
+        "physical_host_conflict 同一台机器已在别处登记。成功后为 null"
+    )
+
+
 class AgentServerOut(BaseModel):
     id: UUID
     name: str
@@ -879,6 +930,11 @@ class AgentServerOut(BaseModel):
     ssh: ServerSshOut | None
     resource_snapshot: dict[str, Any] | None = Field(
         default=None, description="独立受信 SSH 资源快照；与实例上报分离"
+    )
+    resources: ServerResourcesOut | None = Field(
+        default=None,
+        description="resource_snapshot 的展示视图（CPU、内存、硬盘与挂载盘）；"
+        "自动识别的服务器、还没采样过时为 null",
     )
     reported_at: datetime | None = Field(description="最近一次有实例上报整机数据的时间")
     stale: bool = Field(description="超过 3 分钟没有任何实例上报")

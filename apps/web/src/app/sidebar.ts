@@ -15,6 +15,7 @@ export const BUILTIN_SECTIONS: readonly { key: string; title: string }[] = [
   { key: 'workspace', title: '工作空间' },
   { key: 'apps', title: '应用' },
   { key: 'tools', title: '连接与工具' },
+  { key: 'servers', title: '服务器' },
   { key: 'admin', title: '管理' },
 ]
 const BUILTIN_KEY = new Map(BUILTIN_SECTIONS.map((section) => [section.title, section.key]))
@@ -33,12 +34,21 @@ export function allSections(layout: Pick<NavigationLayout, 'sections'> | null | 
   return [...BUILTIN_SECTIONS, ...(layout?.sections ?? []).map((section) => ({ key: customKey(section.id), title: section.title }))]
 }
 
-/** 分组顺序：section_order 里列出的在前；没列出的按默认顺序（工作空间、应用、连接与工具、自定义分组、管理）排在后面 */
+// 后加的内置分组（servers，T-0273）：保存过的布局里还没有它时，紧跟在默认顺序里它前面的那个分组后面，不掉到最后
+const FOLLOWS: Record<string, string> = { servers: 'tools' }
+
+/** 分组顺序：section_order 里列出的在前；没列出的按默认顺序（工作空间、应用、连接与工具、服务器、自定义分组、管理）排在后面 */
 export function sectionOrder(layout: Pick<NavigationLayout, 'sections' | 'section_order'> | null | undefined): string[] {
   const custom = (layout?.sections ?? []).map((section) => customKey(section.id))
-  const defaults = ['workspace', 'apps', 'tools', ...custom, 'admin']
+  const defaults = ['workspace', 'apps', 'tools', 'servers', ...custom, 'admin']
   const listed = [...new Set((layout?.section_order ?? []).filter((key) => defaults.includes(key)))]
-  return [...listed, ...defaults.filter((key) => !listed.includes(key))]
+  const order = [...listed]
+  for (const key of defaults.filter((key) => !listed.includes(key))) {
+    const anchor = FOLLOWS[key] ? order.indexOf(FOLLOWS[key]) : -1
+    if (anchor >= 0) order.splice(anchor + 1, 0, key)
+    else order.push(key)
+  }
+  return order
 }
 
 /** 零代码页面在侧栏里指向哪里：外部链接用 href（新窗口），其余是站内地址 */

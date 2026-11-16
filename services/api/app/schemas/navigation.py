@@ -1,7 +1,7 @@
 """侧栏布局（T-0161）：自定义分组、页面挪分组、零代码页面。
 
-分组用 key 引用：内置分组 workspace（工作空间）、tools（连接与工具）、admin（管理）、apps（应用），
-自定义分组 custom-<id>。零代码页面五种：
+分组用 key 引用：内置分组 workspace（工作空间）、tools（连接与工具）、admin（管理）、apps（应用）、
+servers（服务器：智能体服务器与容器服务器，T-0273 加），自定义分组 custom-<id>。零代码页面五种：
 - link：外部链接（只允许 http(s)，新窗口打开）；
 - page：站内页面（以 / 开头的站内路径，例如某个项目页）；
 - note：知识库笔记（note_id）；
@@ -17,12 +17,15 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_vali
 
 from app.schemas.workspaces import Role
 
-BUILTIN_SECTIONS = ("workspace", "tools", "admin", "apps")
+BUILTIN_SECTIONS = ("workspace", "tools", "admin", "apps", "servers")
 _PATH = re.compile(r"/(?!/)[A-Za-z0-9\-._~/%?=&#:@+]*")
 
 ItemId = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,39}$")]
 SectionKey = Annotated[
-    str, StringConstraints(pattern=r"^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$")
+    str,
+    StringConstraints(
+        pattern=r"^(workspace|tools|admin|apps|servers|custom-[a-z0-9][a-z0-9-]{0,39})$"
+    ),
 ]
 Title = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20)]
 PageKind = Literal["link", "page", "note", "dashboard", "embed"]

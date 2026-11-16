@@ -625,13 +625,14 @@ def test_deploy_pulls_before_starting() -> None:
     for target, start in (
         ("pull", "make up"),
         ("openim-pull", "make -s openim-up"),
+        ("monitoring-pull", "make -s monitoring-up"),
     ):
         assert f"pull_images {target} " in DEPLOY, target
         assert DEPLOY.index(f"pull_images {target} ") < DEPLOY.index(
             start, DEPLOY.index(f"pull_images {target} ")
         ), target
     makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
-    for target in ("pull", "openim-pull"):
+    for target in ("pull", "openim-pull", "monitoring-pull", "monitoring-up"):
         assert re.search(rf"^{target}: env ##", makefile, re.MULTILINE), target
     assert "grep -vx openim-server" in makefile
 
@@ -723,7 +724,8 @@ def test_questions_are_asked_up_front_and_never_in_the_background(tmp_path: Path
     assert "没有事先回答「地域」，按默认：test-region" in run.stderr
 
 
-def test_plan_components_records_every_choice(tmp_path: Path) -> None:
+def test_plan_components_only_asks_about_the_ingress(tmp_path: Path) -> None:
+    """OpenIM、新闻早报、监控不再询问（T-0274）：前台只问 OpenClaw 接入入口。"""
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "docker").write_text("#!/bin/sh\nexit 1\n")
@@ -732,25 +734,26 @@ def test_plan_components_records_every_choice(tmp_path: Path) -> None:
     (tmp_path / "root/infra/openim/compose.yaml").write_text(
         "    image: my-workspace/openim-server:test\n"
     )
-    out = _shell(
+    result = _shell(
         tmp_path,
         "interactive() { return 0; }\napi_running() { return 1; }\nPHASE=plan ACTION=install\n"
         "DOMAIN=ws.example.com EMAIL=ops@example.com\n"
         "plan_components\n"
         'for k in $(printf "%s\\n" "${!ANS[@]}" | sort); do\n'
         '  printf "%s=%s\\n" "$k" "${ANS[$k]}"\ndone\n',
-        # OpenIM：否；接入入口：是、没有域名、IP；新闻早报：是
-        stdin="n\ny\n-\n203.0.113.9\ny\n",
+        # 接入入口：是、没有域名、IP（其余组件不问）
+        stdin="y\n-\n203.0.113.9\n",
         env={"PATH": f"{bin_dir}:{os.environ['PATH']}"},
-    ).stdout
-    answers = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
-    assert answers == {
-        "OPENIM": "n",
-        "INGRESS": "y",
-        "INGRESS_HOST": "-",
-        "INGRESS_ADDRESS": "203.0.113.9",
-        "NEWS": "y",
-    }
+    )
+    answers = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    assert answers == {"INGRESS": "y", "INGRESS_HOST": "-", "INGRESS_ADDRESS": "203.0.113.9"}
+    for component in (
+        "OpenIM：后台直接部署",
+        "新闻早报（TrendRadar）：后台直接部署",
+        "监控（Prometheus + Grafana）：后台直接部署",
+    ):
+        assert component in result.stderr, component
+    assert "部署 OpenIM？" not in result.stderr and "部署新闻早报" not in result.stderr
 
 
 def test_ingress_in_the_background_uses_the_recorded_answers(tmp_path: Path) -> None:
@@ -1309,3 +1312,122 @@ def test_upgrade_leaves_an_undeployed_agent_gateway_alone(tmp_path: Path) -> Non
 def test_upgrade_calls_the_agent_gateway_step() -> None:
     body = DEPLOY.split("do_upgrade() {", 1)[1].split("\n}\n", 1)[0]
     assert "  upgrade_agent_gateway\n" in body
+
+
+# ---------------------------------------------------------------- 组件直接部署，不再询问（T-0274）
+
+COMPONENT_STUBS = """
+confirm() { echo "ASKED $1" >> "$LOG"; return 1; }
+ask() { echo "ASKED $1" >> "$LOG"; }
+compose() { echo "compose $*" >> "$LOG"; case " $* " in *" ps "*) printf "%s" "$RUNNING" ;; esac; }
+build_openim() { echo "build_openim" >> "$LOG"; }
+openim_env() { echo "openim_env" >> "$LOG"; }
+news_env() { echo "news_env" >> "$LOG"; }
+news_enable() { echo "news_enable" >> "$LOG"; }
+connect_status() { echo openim=ok; }
+"""
+FAKE_MAKE_OK = '#!/usr/bin/env bash\necho "make $*" >> "$LOG"\n'
+
+
+def _components(
+    tmp_path: Path, script: str, *, env_file: str = "", running: str = ""
+) -> tuple[str, list[str], str]:
+    """加载 deploy.sh 的函数，换掉 make / docker / compose 等真正部署的部分，运行 script。
+    返回（输出、调用记录、运行后的 .env）。"""
+    root, bin_dir = tmp_path / "root", tmp_path / "bin"
+    for path in (root, bin_dir):
+        path.mkdir(parents=True, exist_ok=True)
+    (root / ".env").write_text(env_file, encoding="utf-8")
+    (bin_dir / "make").write_text(FAKE_MAKE_OK, encoding="utf-8")
+    (bin_dir / "docker").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    for name in ("make", "docker"):
+        (bin_dir / name).chmod(0o755)
+    log = tmp_path / "calls.log"
+    log.touch()
+    result = subprocess.run(  # noqa: S603 - 运行仓库里的脚本
+        [
+            "/bin/bash",
+            "-c",
+            FUNCTIONS + '\nPY=python3\nROOT="$1"\nPULL_PAUSE=0\n' + COMPONENT_STUBS + script,
+            "deploy",
+            str(root),
+        ],
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "LOG": str(log),
+            "RUNNING": running,
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
+    calls = log.read_text(encoding="utf-8").splitlines()
+    return result.stdout + result.stderr, calls, (root / ".env").read_text(encoding="utf-8")
+
+
+def test_openim_and_news_are_deployed_without_asking_even_if_once_declined(
+    tmp_path: Path,
+) -> None:
+    # 以前的回答文件里写着“不部署”：现在不再看这两个回答，也不提问，前台、后台都直接部署
+    for phase in ("plan", "run"):
+        out, calls, _ = _components(
+            tmp_path / phase,
+            f"PHASE={phase}\nANS[OPENIM]=n\nANS[NEWS]=n\n"
+            "news_running() { return 1; }\nconnect_openim missing\nconnect_news\n",
+        )
+        assert not [c for c in calls if c.startswith("ASKED")], calls
+        assert "build_openim" in calls and "make -s openim-up" in calls, calls
+        assert "make -s trendradar-up" in calls and "news_env" in calls, calls
+        assert "OpenIM 已部署" in out and "新闻早报已部署" in out
+
+
+def test_monitoring_is_deployed_and_wired_into_the_env(tmp_path: Path) -> None:
+    env_file = (
+        "PROMETHEUS_URL=\nGRAFANA_URL=\nGRAFANA_DASHBOARD_URL=\n"
+        "GRAFANA_PUBLIC_URL=http://localhost:3300\nGRAFANA_PORT=3300\n"
+    )
+    out, calls, env = _components(tmp_path, "PHASE=run\nconnect_monitoring\n", env_file=env_file)
+    assert not [c for c in calls if c.startswith("ASKED")], calls
+    makes = [c for c in calls if c.startswith("make ")]
+    # 先拉镜像再启动，填好地址后重启 api、worker
+    assert makes == ["make -s monitoring-pull", "make -s monitoring-up", "make -s up"]
+    assert "PROMETHEUS_URL=http://prometheus:9090" in env
+    assert "GRAFANA_URL=http://grafana:3000" in env
+    assert "GRAFANA_DASHBOARD_URL=http://localhost:3300/d/workspace-overview/my-workspace" in env
+    assert "监控已部署" in out and "ssh -L 3300:127.0.0.1:3300" in out
+
+
+def test_monitoring_keeps_hand_set_addresses_and_skips_a_running_stack(tmp_path: Path) -> None:
+    custom = "https://grafana.example.com/d/abc"
+    env_file = f"PROMETHEUS_URL=\nGRAFANA_URL=\nGRAFANA_DASHBOARD_URL={custom}\n"
+    _, calls, env = _components(tmp_path / "a", "connect_monitoring\n", env_file=env_file)
+    assert f"GRAFANA_DASHBOARD_URL={custom}" in env  # 手动改过的不覆盖
+    assert "make -s up" in calls  # 另外两个地址是新填的，仍要重启 api、worker
+    # 已经在运行、地址也都有：什么都不做
+    wired = "PROMETHEUS_URL=http://prometheus:9090\nGRAFANA_URL=http://grafana:3000\n"
+    out, calls, _ = _components(
+        tmp_path / "b", "connect_monitoring\n", env_file=wired, running="api\ngrafana\n"
+    )
+    assert not [c for c in calls if c.startswith("make ")], calls
+    assert "已部署" in out
+
+
+def test_upgrade_rebuilds_only_a_running_monitoring_stack(tmp_path: Path) -> None:
+    _, calls, _ = _components(tmp_path / "on", "upgrade_monitoring\n", running="api\ngrafana\n")
+    assert [c for c in calls if c.startswith("make ")] == [
+        "make -s monitoring-pull",
+        "make -s monitoring-up",
+    ]
+    out, calls, _ = _components(tmp_path / "off", "upgrade_monitoring\n", running="api\ncaddy\n")
+    assert not [c for c in calls if c.startswith("make ")] and out == ""
+
+
+def test_install_connect_and_upgrade_include_monitoring() -> None:
+    connect = DEPLOY.split("connect_components() {", 1)[1].split("\n}\n", 1)[0]
+    assert "  connect_monitoring\n" in connect
+    upgrade = DEPLOY.split("do_upgrade() {", 1)[1].split("\n}\n", 1)[0]
+    assert "  upgrade_monitoring\n" in upgrade
+    plan = DEPLOY.split("plan_components() {", 1)[1].split("\n}\n", 1)[0]
+    assert "decide" not in plan and "plan_monitoring" in plan

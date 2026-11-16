@@ -174,6 +174,29 @@ async def test_layout_shape_is_validated(env: Env, overrides: dict[str, Any]) ->
     await env.put(layout(**overrides), expect=422)
 
 
+async def test_servers_is_a_builtin_section(env: Env) -> None:
+    """内置分组“服务器”（servers，T-0273）：页面、挪分组、分组顺序都能引用；未知 key 仍拒绝。"""
+    saved = await env.put(
+        layout(
+            pages=[
+                {
+                    "id": "rack",
+                    "title": "机房看板",
+                    "section": "servers",
+                    "kind": "link",
+                    "url": "https://rack.example.com",
+                }
+            ],
+            placements={"/agents": "servers"},
+            section_order=["workspace", "servers", "tools", "admin"],
+        )
+    )
+    assert saved["placements"] == {"/agents": "servers"}
+    assert saved["section_order"] == ["workspace", "servers", "tools", "admin"]
+    assert [p["section"] for p in saved["pages"]] == ["servers"]
+    await env.put(layout(version=1, placements={"/agents": "hosts"}), expect=422)
+
+
 async def test_dashboard_page_must_belong_to_the_workspace(env: Env) -> None:
     dashboards = await env.client.get("/api/v1/dashboards", headers=env.headers())
     dashboard_id = dashboards.json()["items"][0]["id"]

@@ -81,7 +81,7 @@ describe('sidebar layout', () => {
   })
 
   it('adds the new agent servers page to its default group without losing a saved layout (T-0181)', async () => {
-    // 保存布局时还没有“智能体服务器”：它按默认分组补进来；用户挪过的“OpenClaw 智能体”（原 OpenClaw 实例）仍在用户的分组里
+    // 保存布局时还没有“智能体服务器”：它按默认分组（后来改成“服务器”）补进来；用户挪过的“OpenClaw 智能体”（原 OpenClaw 实例）仍在用户的分组里
     setup('owner', { ...layout, placements: { ...layout.placements, '/agents': 'custom-fav' } })
     await openApp('/')
     const nav = screen.getByRole('navigation', { name: '主导航' })
@@ -89,10 +89,24 @@ describe('sidebar layout', () => {
     const fav = sectionOf(nav, '常用')
     expect(within(fav).getByRole('link', { name: 'OpenClaw 智能体' })).toHaveAttribute('href', '/agents')
     expect(within(fav).getByRole('link', { name: /Grafana/ })).toBeInTheDocument()
+    const servers = sectionOf(nav, '服务器')
+    expect(within(servers).getByRole('link', { name: '智能体服务器' })).toHaveAttribute('href', '/agent-servers')
+    expect(within(servers).getByRole('link', { name: '容器服务器' })).toHaveAttribute('href', '/runner')
     const tools = sectionOf(nav, '连接与工具')
-    expect(within(tools).getByRole('link', { name: '智能体服务器' })).toHaveAttribute('href', '/agent-servers')
-    expect(within(tools).getByRole('link', { name: '容器服务器' })).toHaveAttribute('href', '/runner')
+    expect(within(tools).queryByRole('link', { name: '智能体服务器' })).not.toBeInTheDocument()
     expect(within(tools).getByRole('link', { name: '运营看板' })).toHaveAttribute('href', '/p/board')
+  })
+
+  it('puts the new 服务器 group right after 连接与工具 in a layout saved before it existed, and keeps pages moved out of it', async () => {
+    // 设置页保存时会写全部分组的顺序；那时还没有“服务器”：它排在“连接与工具”后面，不掉到“管理”后面
+    setup('owner', { ...layout, section_order: ['custom-fav', 'admin', 'workspace', 'apps', 'tools'], placements: { '/runner': 'custom-fav' } })
+    await openApp('/')
+    const nav = screen.getByRole('navigation', { name: '主导航' })
+    await vi.waitFor(() => expect(groupNames(nav)[0]).toBe('常用'))
+    expect(groupNames(nav)).toEqual(['常用', '管理', '工作空间', '应用', '连接与工具', '服务器'])
+    // 用户自己挪过的页面仍在用户的分组里
+    expect(within(sectionOf(nav, '常用')).getByRole('link', { name: '容器服务器' })).toHaveAttribute('href', '/runner')
+    expect(within(sectionOf(nav, '服务器')).getAllByRole('link').map(a => a.textContent?.trim())).toEqual(['智能体服务器'])
     expect(within(nav).queryByRole('link', { name: 'OpenClaw 实例' })).not.toBeInTheDocument()
   })
 
@@ -109,8 +123,8 @@ describe('sidebar layout', () => {
     await openApp('/')
     const nav = screen.getByRole('navigation', { name: '主导航' })
     expect(sectionOf(nav, '工作空间').querySelector('a[href="/tasks"]')).toHaveTextContent('任务')
-    // 默认侧栏：owner 能看到“应用”分组里的大模型客户端（模块 llm_bridge，minRole admin）
-    expect(groupNames(nav)).toEqual(['工作空间', '应用', '连接与工具', '管理'])
+    // 默认侧栏：owner 能看到“应用”分组里的大模型客户端（模块 llm_bridge，minRole admin），以及“服务器”分组
+    expect(groupNames(nav)).toEqual(['工作空间', '应用', '连接与工具', '服务器', '管理'])
     broken = false
     Stream.last!.dispatchEvent(new MessageEvent('invalidate', { data: JSON.stringify({ workspace_id: 'workspace-a', topics: ['navigation'], at }) }))
     await vi.waitFor(() => expect(groupNames(nav)[0]).toBe('常用'))
@@ -180,8 +194,8 @@ describe('设置 → 侧栏与页面', () => {
     await fireEvent.update(within(groups).getByLabelText('新分组名称'), ' 常用 ')
     await fireEvent.click(within(groups).getByRole('button', { name: '添加分组' }))
     const fav = within(groups).getByRole('listitem', { name: '分组：常用' })
-    for (let i = 0; i < 3; i++) await fireEvent.click(within(fav).getByRole('button', { name: '上移' }))
-    expect(within(groups).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['分组：常用', '分组：工作空间', '分组：应用', '分组：连接与工具', '分组：管理'])
+    for (let i = 0; i < 4; i++) await fireEvent.click(within(fav).getByRole('button', { name: '上移' }))
+    expect(within(groups).getAllByRole('listitem').map(li => li.getAttribute('aria-label'))).toEqual(['分组：常用', '分组：工作空间', '分组：应用', '分组：连接与工具', '分组：服务器', '分组：管理'])
 
     const places = screen.getByRole('region', { name: '页面位置' })
     // 新的独立页面也能挪到别的分组（T-0181）
@@ -212,7 +226,7 @@ describe('设置 → 侧栏与页面', () => {
     const body = await put.clone().json() as Schema['NavigationIn']
     const id = key.slice('custom-'.length)
     expect(body).toEqual({
-      version: 0, sections: [{ id, title: '常用' }], placements: { '/tasks': key }, section_order: [key, 'workspace', 'apps', 'tools', 'admin'],
+      version: 0, sections: [{ id, title: '常用' }], placements: { '/tasks': key }, section_order: [key, 'workspace', 'apps', 'tools', 'servers', 'admin'],
       pages: [{ id: body.pages![0]!.id, title: 'Grafana', section: key, kind: 'link', min_role: 'viewer', url: 'https://grafana.example.com', path: null, target_id: null }],
     })
     expect(body.pages![0]!.id).toMatch(/^[a-z0-9][a-z0-9-]{0,39}$/)

@@ -244,6 +244,10 @@ async def test_unconfirmed_host_never_receives_password(owner: Owner, tmp_path: 
     detail = tested.json()
     info = detail["server"]["ssh"]
     assert info["connection_status"] == "connected" and info["last_connection_at"]
+    # 延迟：同一条连接上内核测得的 TCP 往返时间（回环很小），也记在库里
+    assert 0 < info["connection_latency_ms"] < 1000
+    row = await _target_row(owner, detail["server"]["id"])
+    assert row["last_connection_latency_ms"] == info["connection_latency_ms"]
     assert detail["warning"] is None
     # 一次密码登录，没有尝试公钥
     assert host.logins == ["password"]
@@ -273,6 +277,7 @@ async def test_connection_failures_are_reported_in_the_status(owner: Owner, tmp_
         assert tested.status_code == 200, tested.text
         out = tested.json()["server"]
         assert out["ssh"]["connection_status"] == "auth_failed"
+        assert out["ssh"]["connection_latency_ms"] is None
         assert out["deployable"] is False and out["deploy_block_reason"] == "auth_failed"
         assert "password-denied" in host.logins
         assert not [login for login in host.logins if login.startswith("publickey")]
@@ -283,6 +288,7 @@ async def test_connection_failures_are_reported_in_the_status(owner: Owner, tmp_
         server = fixed.json()["server"]
         tested = await _test(owner, server)
         assert tested.json()["server"]["ssh"]["connection_status"] == "connected"
+        assert tested.json()["server"]["ssh"]["connection_latency_ms"] > 0
     logins = len(host.logins)
 
     # 同一个端口换了一把主机公钥（可能被冒充）：不登录、不发送密码
@@ -291,12 +297,15 @@ async def test_connection_failures_are_reported_in_the_status(owner: Owner, tmp_
     assert tested.status_code == 200, tested.text
     out = tested.json()["server"]
     assert out["ssh"]["connection_status"] == "host_key_changed"
+    assert out["ssh"]["connection_latency_ms"] is None
     assert out["deploy_block_reason"] == "host_key_changed"
     assert len(host.logins) == logins
 
     # 服务器关了
     tested = await _test(owner, server)
     assert tested.json()["server"]["ssh"]["connection_status"] == "unreachable"
+    assert tested.json()["server"]["ssh"]["connection_latency_ms"] is None
+    assert (await _target_row(owner, server["id"]))["last_connection_latency_ms"] is None
     results = await _audit(owner, "agents.server.connection_tested")
     assert [r["text"].split('"result": "')[1].split('"')[0] for r in results] == [
         "auth_failed",
@@ -357,6 +366,7 @@ async def test_set_credentials_keeps_initialization_and_checks_version_and_busy(
         server = await _confirmed(owner, port)
         tested = await _test(owner, server)
         assert tested.json()["server"]["ssh"]["connection_status"] == "connected"
+        assert tested.json()["server"]["ssh"]["connection_latency_ms"] > 0
     # 模拟已经初始化、部署了一个实例
     instance_id = await owner.instance()
     await run_sql(
@@ -415,10 +425,13 @@ async def test_set_credentials_keeps_initialization_and_checks_version_and_busy(
     assert out["ssh"]["credential_revision"] == 2
     assert out["ssh"]["connection_status"] == "unknown"
     assert out["ssh"]["last_connection_at"] is None
+    # 延迟属于旧密码那次登录：换密码后清空
+    assert out["ssh"]["connection_latency_ms"] is None
     assert out["ssh"]["prepared_at"] == current["ssh"]["prepared_at"]
     assert out["initialization_status"] == "ready" and out["managed_deployments"] == 1
     after = await _target_row(owner, server["id"])
     assert after["login_password_ref"] != before["login_password_ref"]
+    assert before["last_connection_latency_ms"] > 0 and after["last_connection_latency_ms"] is None
     assert (
         _box(owner)
         .resolve(after["login_password_ref"], context=agent_server_password_context(after["id"]))

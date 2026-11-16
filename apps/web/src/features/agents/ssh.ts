@@ -75,6 +75,8 @@ export function sshError(error: unknown): string {
     AGENT_SERVER_LEGACY_KEY_PENDING: '这台服务器上还留有旧方案的专用公钥：先在服务器详情里完成“旧公钥退役”，再移除服务器。',
     AGENT_SERVER_NO_LEGACY_KEY: '这台服务器没有要清理的旧公钥。',
     AGENT_OPS_RUNNING: '这台服务器正在执行运维动作，结束后再操作。',
+    METRICS_STALE: '这次没有采到资源（连不上服务器、登录失败或命令出错）：上面的数值没有更新，稍后再试。',
+    PHYSICAL_HOST_CONFLICT: '这台机器已经在别处登记过（例如容器服务器）：平台不重复采样它的资源。',
     AGENT_SERVER_EXISTS: '这台服务器（同一个地址、端口和账号）已经添加过了。',
     AGENT_SERVER_HAS_DEPLOYMENTS: '这台服务器上还有经平台部署的智能体：先卸载它们，再更换地址或移除服务器（不会把原来的智能体挂到新机器上）。',
     AGENT_SERVER_NOT_SSH: '这台服务器是按上报自动识别的，不能经工作台部署：先用 IP、账号和密码添加一台服务器。',
