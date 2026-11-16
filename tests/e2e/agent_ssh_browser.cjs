@@ -49,19 +49,24 @@ async function noHorizontalScroll(page) {
   return !(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth))
 }
 
-// 跟着一次 SSH 任务（SshJob：初始化服务器 / 部署 / 卸载）直到结束，返回每一步的“文字=状态”
+// 跟着一次 SSH 任务（SshJob：初始化服务器 / 部署 / 卸载）直到结束，返回每一步的“步骤名 说明=状态”。
+// 进度区块的 data-status 是任务状态（T-0269 起标题与状态分开显示；成功后步骤收起，但仍在页面里）
 async function follow(page, region, kind, timeout) {
   const end = Date.now() + timeout
-  const finished = region.getByText(new RegExp(`^${kind}：(成功|失败|已中断)$`))
+  const finished = async () => /^(succeeded|failed|interrupted)$/.test(await region.getAttribute('data-status', { timeout: 1000 }).catch(() => '') ?? '')
+  check(await region.getByRole('heading', { name: kind }).count() === 1, `进度区块的标题应是“${kind}”`)
   let last = ''
   while (Date.now() < end) {
-    if (await finished.count()) break
-    const current = await region.locator('li[data-status="running"]').first().textContent({ timeout: 1000 }).catch(() => '')
+    if (await finished()) break
+    const current = await region.locator('li[data-status="running"] .ssh-step-title').first().textContent({ timeout: 1000 }).catch(() => '')
     if (current && current !== last) { console.log(`  … ${current.trim()}`); last = current }
     await page.waitForTimeout(3000)
   }
-  check(await finished.count(), `${kind}没有在 ${timeout / 60000} 分钟内结束`)
-  return region.locator('li').evaluateAll((items) => items.map((li) => `${li.textContent.trim()}=${li.dataset.status}`))
+  check(await finished(), `${kind}没有在 ${timeout / 60000} 分钟内结束`)
+  return region.locator('li').evaluateAll((items) => items.map((li) => {
+    const text = (selector) => li.querySelector(selector)?.textContent.trim() ?? ''
+    return `${[text('.ssh-step-title'), text('.ssh-step-detail')].filter(Boolean).join(' ')}=${li.dataset.status}`
+  }))
 }
 
 async function main() {
@@ -158,7 +163,7 @@ async function main() {
   check(await until(page, async () => /连接正常/.test(await row.textContent()) && /待初始化/.test(await row.textContent()), 60000),
     `列表里这台服务器应是“待初始化 / 连接正常”：${await row.textContent()}`)
   const panel = page.getByRole('region', { name: '连接与初始化' })
-  check(/密码 · 已加密保存/.test(await panel.textContent()), '登录方式应显示“密码 · 已加密保存”')
+  check(/登录密码已加密保存第 \d+ 版/.test(await panel.getByRole('region', { name: '登录前提' }).textContent()), '登录前提应显示“登录密码 已加密保存 第 N 版”')
   check(await panel.getByRole('button', { name: /专用密钥|吊销/ }).count() === 0, '不应再有专用密钥 / 吊销的按钮')
   step(`服务器名称默认是 ${serverName}；列表与详情显示连接正常、待初始化，登录方式是加密保存的密码`)
 
