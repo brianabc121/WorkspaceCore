@@ -377,6 +377,11 @@ class AgentSshTarget(Base):
             f"legacy_key_cleanup_state IN {LEGACY_KEY_CLEANUP_STATES}",
             name="legacy_key_cleanup_state",
         ),
+        CheckConstraint(
+            "last_connection_latency_ms IS NULL OR "
+            "(last_connection_latency_ms >= 0 AND last_connection_latency_ms < 60000)",
+            name="last_connection_latency_ms",
+        ),
         UniqueConstraint("server_id"),
     )
 
@@ -408,6 +413,9 @@ class AgentSshTarget(Base):
     credential_revision: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     last_connection_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_connection_reason: Mapped[str | None] = mapped_column(Text)
+    # 最近一次登录成功时，内核在这条 SSH 连接上测得的 TCP 往返时间（毫秒；T-0271，迁移 0076）。
+    # 只有显式测试连接 / 旧公钥退役登录成功时写入；登录失败、换地址、换密码时清空
+    last_connection_latency_ms: Mapped[float | None] = mapped_column(Float)
     legacy_key_cleanup_state: Mapped[str] = mapped_column(Text, server_default=text("'not_needed'"))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(

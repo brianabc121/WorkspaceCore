@@ -104,6 +104,9 @@ from app.schemas.agents import (
     RunningTaskRef,
     ServerAgentRow,
     ServerAgentState,
+    ServerDiskOut,
+    ServerResourceSample,
+    ServerResourcesOut,
     ServerSshOut,
     UnassignedInstance,
 )
@@ -142,6 +145,7 @@ def _connection_status(target: AgentSshTarget, readable: bool) -> ConnectionStat
 
 
 def _ssh_out(target: AgentSshTarget, readable: bool) -> ServerSshOut:
+    status = _connection_status(target, readable)
     return ServerSshOut(
         host=target.host,
         address=target.address,
@@ -153,13 +157,76 @@ def _ssh_out(target: AgentSshTarget, readable: bool) -> ServerSshOut:
         host_key_confirmed_at=target.host_key_confirmed_at,
         password_set=target.login_password_ref is not None,
         credential_revision=target.credential_revision,
-        connection_status=_connection_status(target, readable),
+        connection_status=status,
         last_connection_at=target.last_connection_at,
+        connection_latency_ms=target.last_connection_latency_ms if status == "connected" else None,
         legacy_key_cleanup_state=target.legacy_key_cleanup_state,
         # 迁移兼容（已弃用）：旧方案的专用公钥还在不在；不参与是否可以部署的判断
         client_key_installed=target.client_key_ref is not None,
         client_key_fingerprint=_client_fingerprint(target.client_public_key),
         prepared_at=target.prepared_at,
+    )
+
+
+def _snapshot_time(value: object) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+def _resource_sample(snap: dict[str, Any]) -> ServerResourceSample | None:
+    """最近一次成功采样的展示视图；快照不完整（只有失败记录、旧格式）时为 null。"""
+    sampled_at = _snapshot_time(snap.get("sampled_at"))
+    if sampled_at is None or snap.get("source") != "trusted_ssh":
+        return None
+    try:
+        mem_total, mem_available = int(snap["mem_total"]), int(snap["mem_available"])
+        disks = [
+            ServerDiskOut(**disk)
+            for disk in agent_server_resources.parse_mounts(snap.get("mounts", []))
+        ]
+        if disks:
+            total = sum(d.total for d in disks)
+            used = sum(d.used for d in disks)
+            available = sum(d.available for d in disks)
+        else:
+            # 旧采样没有挂载盘列表：退回 Docker 数据目录所在分区
+            total, available = int(snap["root_total"]), int(snap["root_free"])
+            used = max(0, total - available)
+        return ServerResourceSample(
+            sampled_at=sampled_at,
+            cores=int(snap["cores"]),
+            cpu_percent=float(snap["cpu_percent"]),
+            load1=float(snap["load1"]),
+            mem_total=mem_total,
+            mem_used=max(0, mem_total - mem_available),
+            mem_available=mem_available,
+            disks=disks,
+            storage_total=total,
+            storage_used=used,
+            storage_available=available,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _resources_out(server: AgentServer, now: datetime) -> ServerResourcesOut | None:
+    """平台 SSH 资源采样（resource_snapshot）的展示视图：只给 SSH 服务器，没采样过为 null。"""
+    snap = server.resource_snapshot or {}
+    if server.kind != "ssh" or not snap:
+        return None
+    sample = _resource_sample(snap)
+    error = snap.get("probe_error")
+    return ServerResourcesOut(
+        sample=sample,
+        stale=sample is None or now - sample.sampled_at > STALE_AFTER,
+        attempted_at=_snapshot_time(snap.get("probe_attempted_at")),
+        error=None
+        if not error
+        else "physical_host_conflict"
+        if error == "PHYSICAL_HOST_CONFLICT"
+        else "unavailable",
     )
 
 
@@ -266,6 +333,7 @@ def _server_out(
         kind="ssh" if server.kind == "ssh" else "auto",
         ssh=_ssh_out(target, readable) if target is not None else None,
         resource_snapshot=server.resource_snapshot or None,
+        resources=_resources_out(server, now),
         reported_at=server.reported_at,
         stale=server.reported_at is None or now - server.reported_at > STALE_AFTER,
         cores=latest.get("cores"),
@@ -1162,6 +1230,7 @@ class AgentServerService:
         target.credential_revision += 1
         target.last_connection_at = None
         target.last_connection_reason = None
+        target.last_connection_latency_ms = None
         left = target.client_public_key if _legacy_key_present(target) else None
         left_fingerprint = _client_fingerprint(left)
         if _legacy_key_present(target):
@@ -1237,6 +1306,7 @@ class AgentServerService:
         target.credential_revision += 1
         target.last_connection_at = None
         target.last_connection_reason = None
+        target.last_connection_latency_ms = None
         target.version += 1
         server.version += 1
         await self.audit.record(
@@ -1295,6 +1365,9 @@ class AgentServerService:
             raise _version_conflict(server.version)
         target.last_connection_at = _now()
         target.last_connection_reason = check.reason
+        target.last_connection_latency_ms = (
+            check.latency_ms if check.reason == "connected" else None
+        )
         await self.audit.record(
             "agents.server.connection_tested",
             workspace_ids=[server.workspace_id],
@@ -1530,12 +1603,14 @@ class AgentServerService:
         revision = target.credential_revision
         failure: ssh.SshError | None = None
         reached = False
+        latency: float | None = None
         try:
             async with asyncio.timeout(LEGACY_CLEANUP_TIMEOUT):
                 conn = await agent_server_ssh.connect_agent_server(
                     target, box, expected_revision=revision
                 )
                 reached = True
+                latency = agent_server_ssh.connection_latency_ms(conn)
                 try:
                     result = await ssh.run(conn, prov.revoke_key_command(public), seconds=30)
                 finally:
@@ -1558,6 +1633,7 @@ class AgentServerService:
             if failure is None or reached
             else agent_server_ssh.connection_reason(failure)
         )
+        target.last_connection_latency_ms = latency if reached else None
         warning: str | None = None
         metadata: dict[str, object] = {
             "client_key_fingerprint": fingerprint,

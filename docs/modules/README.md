@@ -79,7 +79,7 @@ apps/web/tests/<key>*.test.ts
 `apps/web/src/modules/<key>/index.ts` 调用 `defineModule()`（类型在 `apps/web/src/modules/types.ts`，说明见
 `apps/web/src/modules/README.md`）：
 
-- `nav`：侧栏条目。`section` 用现有分组（工作空间、连接与工具、管理）或“应用”（新模块默认放这里）；
+- `nav`：侧栏条目。`section` 用现有分组（工作空间、连接与工具、服务器、管理）或“应用”（新模块默认放这里）；
   `after` 写排在哪一项后面；`minRole: 'admin' | 'owner'` 限制谁能看到和打开；`icon` 用 `@lucide/vue` 的图标；
   模块停用时宿主自动隐藏。owner 还可以在“侧栏与页面”里把它挪到别的分组。
 - `routes`：路由，组件必须写成 `() => import('./XxxPage.vue')`（模块不启用就不下载它的代码）。

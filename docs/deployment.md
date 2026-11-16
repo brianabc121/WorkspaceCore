@@ -356,7 +356,8 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 
 ### 12.1 启用监控（Prometheus + Grafana）
 
-监控是 `compose.yaml` 里的可选 profile（规范第 11.1 节），配置文件在 `infra/monitoring/`：
+监控是 `compose.yaml` 里的可选 profile（规范第 11.1 节），配置文件在 `infra/monitoring/`。一键部署脚本 `deploy.sh`
+直接部署它（install / connect，不再询问；升级时按新版本重建），下面是手动步骤：
 
 1. `make env`：会补上新变量，并随机生成 `GRAFANA_ADMIN_PASSWORD`（没有它 Grafana 拒绝启动，避免默认密码 `admin`）。
 2. 在 `.env` 里填上三个地址，让工作台知道监控已部署：
@@ -372,7 +373,7 @@ V1 只支持 github.com，不注册 GitHub Webhook。核验结论见上面同一
 3. 启动：
 
    ```bash
-   docker compose --profile monitoring up -d --wait
+   make monitoring-up
    ```
 
 4. 检查：运维页（`/operations`）里 Prometheus、Grafana 显示为正常；Grafana 用 `admin` 和 `.env` 里的密码登录，
@@ -671,7 +672,7 @@ python3 tests/e2e/agent_ingress_acceptance.py --server-ca <签发入口证书的
 
 ### 17.2 部署步骤
 
-一键部署脚本会做完下面的第 1 ~ 5 步：`sudo bash scripts/deploy.sh connect`，问到「部署 OpenIM？」时回答 `y`（T-0081；
+一键部署脚本会做完下面的第 1 ~ 5 步：`sudo bash scripts/deploy.sh connect`（T-0081；2026-11-16 起不再询问，直接部署；
 镜像已经构建过就跳过构建，`.env` 里两个地址已经有值时保持不变）。手动步骤：
 
 1. `make env`：在 `.env` 里随机生成 `OPENIM_SECRET`、`OPENIM_CALLBACK_PATH_TOKEN` 和 OpenIM 各组件的密码（已有的值不改）；
@@ -982,7 +983,7 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
 
 ### 23.2 部署步骤
 
-一键部署脚本 `deploy.sh` 的可选组件“新闻早报”会自动做这些（包括第 4 步的默认打开）；手动部署时：
+一键部署脚本 `deploy.sh` 直接部署“新闻早报”（不再询问），自动做这些（包括第 4 步的默认打开）；手动部署时：
 
 1. `make up`（创建 `news` 网络与配置卷）。
 2. `make trendradar-pull`，再 `make trendradar-up`：下载提示词；配置文件还没有时先让 api 写一份“不抓取、不推送”的配置；启动两个容器并等健康。

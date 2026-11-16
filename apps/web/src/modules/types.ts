@@ -8,7 +8,7 @@ import type { Schema } from '../services/api'
 // 侧栏、路由、首页小组件、实时事件、服务器页面上的区块都从注册表读；模块停用时宿主自动隐藏入口、页面显示“功能未启用”。
 
 /** 侧栏分组：工作台原有的三个，加上新模块默认放的“应用” */
-export type NavSection = '工作空间' | '应用' | '连接与工具' | '管理'
+export type NavSection = '工作空间' | '应用' | '连接与工具' | '服务器' | '管理'
 /** 能看到入口、打开页面的最低角色：admin = owner 与 admin，owner = 只有 owner；不写 = 所有成员（含只读） */
 export type MinRole = 'admin' | 'owner'
 /** 实时事件主题（后端 InvalidateEvent.topics） */

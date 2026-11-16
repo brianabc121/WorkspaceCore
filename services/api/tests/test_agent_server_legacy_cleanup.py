@@ -120,6 +120,8 @@ async def test_cleanup_removes_only_this_records_key(
         assert ssh_info["client_key_installed"] is False
         assert ssh_info["client_key_fingerprint"] is None
         assert ssh_info["connection_status"] == "connected"
+        # 用密码登录成功：顺带记下这次登录的延迟
+        assert ssh_info["connection_latency_ms"] > 0
         assert host.authorized() == [someone, runner, "# 用户自己的注释"]
 
         # 已经退役：没有可退役的了

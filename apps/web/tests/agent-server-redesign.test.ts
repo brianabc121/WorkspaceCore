@@ -22,7 +22,7 @@ const json = async (requests: Request[], method: string, p: string) => {
 afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); localStorage.clear() })
 
 describe('agent servers page: navigation and old links', () => {
-  it('has its own sidebar entry next to OpenClaw 智能体, and the runner page stays separate', async () => {
+  it('sits with the runner page in the 服务器 group, separate from OpenClaw 智能体', async () => {
     setup(r => path(r) === '/api/v1/agents/servers' ? Response.json(serverList([])) : undefined)
     await openApp('/agent-servers')
     expect(await screen.findByRole('heading', { level: 1, name: '智能体服务器' })).toBeVisible()
@@ -31,7 +31,12 @@ describe('agent servers page: navigation and old links', () => {
     expect(within(nav).getByRole('link', { name: '智能体服务器' })).toHaveAttribute('href', '/agent-servers')
     expect(within(nav).getByRole('link', { name: 'OpenClaw 智能体' })).toHaveAttribute('href', '/agents')
     expect(within(nav).getByRole('link', { name: '容器服务器' })).toHaveAttribute('href', '/runner')
-    expect(links.indexOf('智能体服务器')).toBe(links.indexOf('OpenClaw 智能体') - 1)
+    // 一级分类“服务器”：智能体服务器、容器服务器两项，排在“连接与工具”后面（人类 2026-11-16 要求）
+    const group = (name: string) => document.getElementById(within(nav).getByRole('button', { name }).getAttribute('aria-controls')!)!
+    expect(within(group('服务器')).getAllByRole('link').map(a => a.textContent?.trim())).toEqual(['智能体服务器', '容器服务器'])
+    expect(within(group('连接与工具')).getByRole('link', { name: 'OpenClaw 智能体' })).toBeInTheDocument()
+    const groups = within(nav).getAllByRole('button').map(b => b.textContent?.trim())
+    expect(groups.indexOf('服务器')).toBe(groups.indexOf('连接与工具') + 1)
     expect(links).not.toContain('OpenClaw 实例')
   })
 
@@ -338,7 +343,7 @@ describe('agent servers page: connection and initialization', () => {
     expect(document.body.innerHTML).not.toContain('old-server-pw')
   })
 
-  it('shows real CPU and memory or “暂无上报”, and lists the deployed OpenClaw with links to each agent', async () => {
+  it('shows real CPU, memory and disk or why there is none, and lists the deployed OpenClaw with links to each agent', async () => {
     const s = readyServer({ managed_deployments: 2, successful_deployments: 1, allocated_cpus: null, allocated_mem_limit_mb: null, has_unlimited_limits: true, instances_total: 3 })
     const agents = [
       row('inst-a', '开发助手', { deployment_state: 'deployed', cpus: 2, mem_limit_mb: 4096, latest_job: job('install', 'succeeded') }),
@@ -352,10 +357,10 @@ describe('agent servers page: connection and initialization', () => {
     })
     const first = await openApp('/agent-servers?server=srv-1')
     const head = await screen.findByRole('region', { name: '服务器：香港节点 A' })
-    // 页头一行五格：连接、服务器环境、CPU、内存、部署智能体（T-0269）；没有上报写“暂无上报”，不画 0
+    // 页头一行：连接、服务器环境、CPU、内存、硬盘、部署智能体（T-0269，后加硬盘）；初始化了但还没有采样也没有上报：写“等待采样”，不画 0
     const meters = within(head).getByRole('list', { name: '服务器概览' })
-    expect(within(meters).getAllByRole('listitem').map(li => li.querySelector('.asv-stat-label')?.textContent)).toEqual(['连接', '服务器环境', 'CPU', '内存', '部署智能体'])
-    expect(within(meters).getAllByText('暂无上报')).toHaveLength(2)
+    expect(within(meters).getAllByRole('listitem').map(li => li.querySelector('.asv-stat-label')?.textContent)).toEqual(['连接', '服务器环境', 'CPU', '内存', '硬盘', '部署智能体'])
+    expect(within(meters).getAllByText('等待采样')).toHaveLength(3)
     expect(meters).not.toHaveTextContent('0%')
     expect(meters).toHaveTextContent('连接连接正常')
     expect(meters).toHaveTextContent('服务器环境已就绪')
@@ -381,8 +386,10 @@ describe('agent servers page: connection and initialization', () => {
     reported = true
     await openApp('/agent-servers?server=srv-1')
     const live = await screen.findByRole('list', { name: '服务器概览' })
+    // 没有平台采样时退回智能体上报
     await vi.waitFor(() => expect(live).toHaveTextContent('CPU60%'))
     expect(live).toHaveTextContent('内存12.0 GB / 16.0 GB')
+    expect(live).toHaveTextContent('硬盘50.0 GB / 100 GB')
   })
 })
 

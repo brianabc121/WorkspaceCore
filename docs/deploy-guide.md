@@ -49,7 +49,9 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 所以部署、升级、接入组件都分两段：
 
 1. **前台（大约一分钟）**：先检查系统、域名解析、80 / 443 端口，然后把**所有**要你回答的问题一次问完——三个参数（见下表）、
-   要不要部署 OpenIM / OpenClaw 接入入口和它们的参数、防火墙要不要放行等，最后显示汇总让你确认。
+   要不要配置 OpenClaw 接入入口和它的参数、防火墙要不要放行等，最后显示汇总让你确认。
+   **OpenIM（消息）、新闻早报（TrendRadar）、监控（Prometheus + Grafana）不再询问，后台直接部署**；内存或磁盘偏小时只提示，
+   OpenIM 镜像构建失败时跳过、不影响其他步骤，以后重新运行 `deploy.sh connect` 即可。
    回答保存在 `/srv/my-workspace/.deploy/answers.env`（权限 600，**不含任何密码**）。
 2. **后台**：确认后，脚本作为系统服务在后台运行（`systemd-run`，服务名 `my-workspace-deploy`；没有 systemd 时用 `setsid nohup`），
    **一个问题都不再问**，输出写进 `/srv/my-workspace/.deploy/deploy.log`。终端接着显示日志：
@@ -132,7 +134,8 @@ sudo bash scripts/deploy.sh install --domain workspace.example.com --email you@e
 
 清空在无人值守时还必须加 `--confirm my-workspace`；连代码目录一起删除再加 `--delete-dir`。全部选项见 `sudo bash scripts/deploy.sh --help`。
 
-脚本部署工作台本身，并可以部署 OpenIM（上一节）；GitHub 在网页上接入（第 8.2 节）；监控、OpenClaw（AI 运维助手，第 8.6 节）等其他可选组件以及异地备份，仍按第 8、9 步配置。
+脚本部署工作台本身，并直接部署 OpenIM、新闻早报与监控（Prometheus + Grafana，第 8.4 节）；GitHub 在网页上接入（第 8.2 节）；
+OpenClaw（AI 运维助手，第 8.6 节）等其他组件以及异地备份，仍按第 8、9 步配置。
 脚本跑完后，下面第 1 ~ 7 步都已完成。想了解每一步做了什么、或者手动部署，就按下面的步骤来。
 
 ---
@@ -387,7 +390,8 @@ make setup-token
 
 ### 8.4 监控（Prometheus + Grafana）
 
-在 `.env` 里填上（`GRAFANA_ADMIN_PASSWORD` 已由 `make env` 生成）：
+**一键脚本已经直接部署好**（`make monitoring-pull`、`make monitoring-up`，再把下面三个地址写进 `.env` 并重启 api、worker；
+`.env` 里已经填过的地址保持不变），升级时按新版本重建。手动部署时，在 `.env` 里填上（`GRAFANA_ADMIN_PASSWORD` 已由 `make env` 生成）：
 
 ```dotenv
 PROMETHEUS_URL=http://prometheus:9090
@@ -396,7 +400,7 @@ GRAFANA_DASHBOARD_URL=http://localhost:3000/d/workspace-overview/my-workspace
 ```
 
 ```bash
-docker compose --profile monitoring up -d --wait
+make monitoring-up
 ```
 
 ```bash
@@ -559,7 +563,7 @@ INGRESS_ADDRESS=203.0.113.7
 #### ③+ 自动部署到服务器（外网模式，推荐）
 
 工作台用 SSH 登录 OpenClaw 服务器，自动完成第 ③ ~ ④ 步的全部操作，不用登记实例、下载或上传接入包。分两个页面做
-（侧栏「连接与工具」，只有 owner 能看到）：**「智能体服务器」**添加、初始化服务器；**「OpenClaw 智能体」**选一台已初始化的服务器部署智能体。
+（只有 owner 能看到）：侧栏「服务器 → 智能体服务器」添加、初始化服务器；「连接与工具 → OpenClaw 智能体」选一台已初始化的服务器部署智能体。
 **一台服务器可以部署多个智能体。** 服务器的登录密码**加密保存**在工作台，之后初始化、部署、卸载、运维都用它登录，不用再输；
 工作台不再生成、安装或使用 SSH 密钥登录 OpenClaw 服务器（T-0179，`docs/decisions/2026-11-09-agent-server-password-auth.md`）。**前提**：
 
@@ -803,7 +807,7 @@ OpenClaw 不再用宿主网络：工作台的内网地址要从容器里访问�
 要求：Ubuntu 22.04 / 24.04 或 Debian 12，x86_64，内核 5.6 以上（gVisor 的要求）；专用机器，不放其他业务数据，不和工作台、OpenClaw 共用；能访问工作台的接入入口。
 需要安卓模拟器一类时，服务器要开启硬件虚拟化（有 `/dev/kvm`），否则智能体选 `kvm` 时会收到“没有 /dev/kvm”的原因。
 
-1. 工作台网页（owner / admin）：**连接与工具 → 容器服务器 → 服务器设置**里添加，选内网或外网入口；
+1. 工作台网页（owner / admin）：**服务器 → 容器服务器 → 服务器设置**里添加，选内网或外网入口；
 2. 部署（二选一）：
    - **通过 SSH 部署**（推荐，owner）：在同一页的“通过 SSH 部署”里填服务器地址与账号（root，或能用 sudo 的账号），核对主机指纹后确认，输入一次登录密码，
      工作台装好 Docker 29.9.1、gVisor release-20261019.0（核对 sha512）和 runner-agent，换成自己的专用密钥（密码不保存）；
