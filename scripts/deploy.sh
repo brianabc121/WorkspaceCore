@@ -977,12 +977,66 @@ connect_openim() {
 AGENT_INTERNAL_HOST=agent-gateway.myworkspace.internal
 
 valid_ip() { "$PY" -c 'import ipaddress, sys; ipaddress.ip_address(sys.argv[1])' "$1" 2>/dev/null; }
+valid_ingress_ip() {
+  "$PY" -c '
+import ipaddress, sys
+ip = ipaddress.ip_address(sys.argv[1])
+if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+    ip = ip.ipv4_mapped
+sys.exit(ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_multicast
+         or str(ip) == "255.255.255.255")
+' "$1" 2>/dev/null
+}
 outbound_ip() {
   local addr=""
   command -v ip >/dev/null && addr="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
   [[ -n $addr ]] || addr="$(hostname -I 2>/dev/null | awk '{print $1}')"
   printf '%s\n' "$addr"
 }
+
+# 域名用于证书身份，连接地址可独立指定。Cloudflare 普通代理不支持默认的 9443，
+# 也不能代替这个双向证书入口；不能把网站域名的 DNS 结果当成源站 IP。
+# 前台与直接执行共用这段提问；后台只用已记录的回答 / 现有配置，不追加问题。
+select_ingress_address() {
+  local __out="$1" __host="$2" __default __candidate __address __prompt
+  __default="$(env_get AGENT_PUBLIC_ADDRESS)"
+  if [[ -z $__default && $PHASE != run ]]; then
+    __candidate="$(outbound_ip)"
+    # 云主机网卡常只有私网 IP。只有可路由公网候选才作为默认值，仍由管理员确认。
+    if valid_ingress_ip "$__candidate" && "$PY" -c \
+      'import ipaddress, sys; sys.exit(not ipaddress.ip_address(sys.argv[1]).is_global)' \
+      "$__candidate" 2>/dev/null; then __default="$__candidate"; fi
+  fi
+  info "智能体必须直连工作台接入入口；网站可以继续走 Cloudflare，接入不能走普通 CDN / HTTP 代理"
+  info "填写工作台服务器的真实公网 IP（云控制台查看），不是智能体 IP 或 Cloudflare DNS 返回的 IP"
+  __prompt="智能体访问工作台用的 IP"
+  if [[ $__host != "$AGENT_INTERNAL_HOST" ]]; then
+    __prompt+="（仅域名直接指向源站时可输入 - 使用 DNS）"
+  fi
+  while :; do
+    if [[ ! -v ANS[INGRESS_ADDRESS] && -z $__default ]] \
+      && { [[ $PHASE == run ]] || (( ASSUME_YES )) || ! interactive; }; then
+      todo_add "未填写工作台直连 IP：在回答文件设置 INGRESS_ADDRESS（域名直连可显式填 -），再运行 bash $ROOT/scripts/deploy.sh connect"
+      return 1
+    fi
+    choose __address INGRESS_ADDRESS "$__prompt" "$__default"
+    if [[ $__address == - && $__host != "$AGENT_INTERNAL_HOST" ]]; then
+      warn "已选择按 DNS 连接 $__host：必须直接解析到工作台，不能启用 Cloudflare 普通代理"
+      __address=""
+      break
+    fi
+    if valid_ingress_ip "$__address"; then break; fi
+    warn "「$__address」不是 IP 地址或不能作为接入地址（不能用回环、未指定、链路本地或组播地址）"
+    unset 'ANS[INGRESS_ADDRESS]'
+    if [[ $PHASE == run ]] || (( ASSUME_YES )) || ! interactive; then
+      todo_add "接入地址无效：修正 INGRESS_ADDRESS 后重新运行 bash $ROOT/scripts/deploy.sh connect"
+      return 1
+    fi
+    __default=""
+  done
+  printf -v "$__out" '%s' "$__address"
+}
+
 agent_tls_dir() {
   local dir; dir="$(env_get AGENT_TLS_DIR)"; dir="${dir:-./infra/caddy/agent-tls}"
   [[ $dir == /* ]] && printf '%s\n' "$dir" || printf '%s\n' "$ROOT/${dir#./}"
@@ -1023,14 +1077,15 @@ check_agent_ingress() {
   "$PY" -c '
 import socket, ssl, sys
 host, port, ca = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+loopback = sys.argv[4] if len(sys.argv) > 4 else "127.0.0.1"
 ctx = ssl.create_default_context(cafile=ca)
-with socket.create_connection(("127.0.0.1", port), timeout=5) as raw, ctx.wrap_socket(raw, server_hostname=host):
+with socket.create_connection((loopback, port), timeout=5) as raw, ctx.wrap_socket(raw, server_hostname=host):
     pass
-' "$1" "$2" "$3" 2>/dev/null
+' "$@" 2>/dev/null
 }
 
 connect_agent_ingress() {
-  local url host site address port dir cert key status expiry ca changed=0
+  local url host site address port dir cert key status expiry ca changed=0 bind="0.0.0.0" loopback=127.0.0.1
   step "OpenClaw 接入入口（让其他服务器上的 OpenClaw 连回工作台，可选）"
   url="$(env_get AGENT_PUBLIC_URL)"
   if [[ -n $url && $(env_get AGENT_PUBLIC_INTERNAL_CA) != true ]]; then
@@ -1045,16 +1100,15 @@ connect_agent_ingress() {
   [[ -n $host && $host != public.invalid ]] || host="$site"
   choose host INGRESS_HOST "OpenClaw 服务器访问工作台用的域名（没有公网域名时输入 -，改用 IP）" "${host:--}"
   host="$(printf '%s' "$host" | tr '[:upper:]' '[:lower:]')"
-  address=""
   if [[ $host == - || $host == "$AGENT_INTERNAL_HOST" ]]; then
     host="$AGENT_INTERNAL_HOST"
-    address="$(env_get AGENT_PUBLIC_ADDRESS)"; address="${address:-$(outbound_ip)}"
-    info "云服务器上本机看到的常是内网地址：这里要填 OpenClaw 服务器能访问到的地址（通常是公网 IP）"
-    choose address INGRESS_ADDRESS "OpenClaw 服务器访问这台服务器用的 IP" "$address"
-    valid_ip "$address" || { warn "「$address」不是 IP 地址，跳过"; return 0; }
   elif ! valid_domain "$host"; then
     warn "「$host」不是有效的域名，跳过"; return 0
   fi
+  select_ingress_address address "$host" || return 0
+  if [[ $address == *:* ]]; then bind="[::]"; loopback=::1; fi
+  # 配置和证书先落盘，容器之后才应用。保留未完成标记，失败或进程中断后重跑仍会应用。
+  [[ $(state_get ingress_pending) == 1 ]] && changed=1
   port="$(env_get AGENT_PUBLIC_PORT)"; [[ $port =~ ^[0-9]+$ ]] || port=9443
   dir="$(agent_tls_dir)"; cert="$dir/public.crt"; key="$dir/public.key"
   status=renew
@@ -1064,40 +1118,55 @@ connect_agent_ingress() {
   if [[ $status == ok ]]; then
     ok "入口证书仍然有效（$host）"
   else
-    expiry="$(issue_agent_cert "$host" "$dir/public")" || { warn "入口证书签发失败（见上面的输出），跳过"; return 0; }
-    ok "已用内部 CA 签发入口证书：$host，有效期到 $expiry"; changed=1
+    deploy_dir_init; state_set ingress_pending 1; changed=1
+    expiry="$(issue_agent_cert "$host" "$dir/public")" || { todo_add "入口证书签发失败（见上面的输出），修复后重新运行 deploy.sh connect"; return 0; }
+    ok "已用内部 CA 签发入口证书：$host，有效期到 $expiry"
   fi
   # 内网入口与外网入口在同一个 Caddy 里，没有内网证书时 Caddy 起不来：签一张占位证书（内网入口默认只监听 127.0.0.1）
   if [[ ! -s $dir/intranet.crt || ! -s $dir/intranet.key ]]; then
     local intranet; intranet="$(env_get AGENT_INTRANET_HOST)"
+    deploy_dir_init; state_set ingress_pending 1; changed=1
     issue_agent_cert "${intranet:-intranet.invalid}" "$dir/intranet" >/dev/null \
-      || { warn "内网入口的占位证书签发失败（见上面的输出），跳过"; return 0; }
-    changed=1
+      || { todo_add "内网入口的占位证书签发失败（见上面的输出），修复后重新运行 deploy.sh connect"; return 0; }
   fi
   local key_name want
   for key_name in AGENT_PUBLIC_HOST AGENT_PUBLIC_BIND AGENT_PUBLIC_PORT AGENT_PUBLIC_URL AGENT_PUBLIC_ADDRESS AGENT_PUBLIC_INTERNAL_CA; do
     case $key_name in
       AGENT_PUBLIC_HOST) want="$host" ;;
-      AGENT_PUBLIC_BIND) want=0.0.0.0 ;;
+      AGENT_PUBLIC_BIND) want="$bind" ;;
       AGENT_PUBLIC_PORT) want="$port" ;;
       AGENT_PUBLIC_URL) want="https://$host:$port" ;;
       AGENT_PUBLIC_ADDRESS) want="$address" ;;
       AGENT_PUBLIC_INTERNAL_CA) want=true ;;
     esac
-    [[ $(env_get "$key_name") == "$want" ]] || { env_set "$key_name" "$want"; changed=1; }
+    if [[ $(env_get "$key_name") != "$want" ]]; then
+      if (( ! changed )); then deploy_dir_init; state_set ingress_pending 1; fi
+      env_set "$key_name" "$want"; changed=1
+    fi
   done
   if (( changed )); then
-    compose up -d api worker </dev/null >/dev/null || { warn "api、worker 没有重启成功（见上面的输出）"; return 0; }
+    compose up -d api worker </dev/null >/dev/null || { todo_add "api、worker 没有应用接入配置（见上面的输出），重新运行 deploy.sh connect 会重试"; return 0; }
   fi
-  (cd "$ROOT" && make -s agents-up </dev/null >/dev/null) || { warn "接入入口没有启动成功：运行 docker compose --profile agents logs agent-gateway 查看"; return 0; }
-  (( changed )) && compose --profile agents restart agent-gateway </dev/null >/dev/null 2>&1
+  (cd "$ROOT" && make -s agents-up </dev/null >/dev/null) || { todo_add "接入入口没有启动成功：在 $ROOT 运行 docker compose --profile agents logs agent-gateway 查看"; return 0; }
+  if (( changed )) && ! compose --profile agents restart agent-gateway </dev/null >/dev/null 2>&1; then
+    todo_add "接入入口重启失败：在 $ROOT 运行 docker compose --profile agents logs agent-gateway 查看"
+    return 0
+  fi
   ca="$ROOT/infra/caddy/agent-ca/agent-ca.pem"
-  local i
+  local i ready=0 target="${address:-$host}"
+  [[ $target == *:* ]] && target="[$target]"
   for i in 1 2 3 4 5; do
-    if check_agent_ingress "$host" "$port" "$ca"; then ok "接入入口已就绪：https://$host:$port（内部 CA 签发的证书）"; break; fi
-    (( i == 5 )) && warn "入口还没有响应：运行 docker compose --profile agents logs agent-gateway 查看"
-    sleep 2
+    if check_agent_ingress "$host" "$port" "$ca" "$loopback"; then ready=1; break; fi
+    (( i == 5 )) || sleep 2
   done
+  if (( ready )); then
+    state_set ingress_pending 0
+    ok "接入入口本机 TLS 检查通过（内部 CA 校验；证书主机名 $host）"
+    info "智能体的连接目标：$target:$port；AGENT_PUBLIC_ADDRESS 已写入 .env 和后续接入包配置"
+    info "外网连通性尚未验证：本机回环检查不能证明其他服务器能访问"
+  else
+    todo_add "接入入口本机 TLS 检查失败：在 $ROOT 运行 docker compose --profile agents logs agent-gateway 查看，修复后再运行 deploy.sh connect"
+  fi
   if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
     if ! ufw status 2>/dev/null | grep -qE "^$port(/tcp)?[[:space:]]+ALLOW"; then
       if decide UFW_AGENT "防火墙（ufw）还没有放行 TCP $port，现在放行？" y; then
@@ -1105,7 +1174,8 @@ connect_agent_ingress() {
       fi
     fi
   fi
-  info "云服务器的安全组 / 防火墙也要放行 TCP $port（OpenClaw 服务器只需要能访问这个端口）"
+  info "工作台云安全组 / 主机防火墙须允许智能体服务器访问 TCP $port；智能体服务器须允许出站连接"
+  info "可在智能体服务器运行：timeout 10 bash -c 'exec 3<>\"/dev/tcp/\$1/\$2\"' ingress-check '${address:-$host}' '$port' && echo TCP已连通"
   return 0
 }
 
@@ -1432,11 +1502,8 @@ plan_ingress() {
     unset "ANS[INGRESS_HOST]"; host=""
     if (( ASSUME_YES )) || ! interactive; then die "OpenClaw 接入入口的域名无效"; fi
   done
-  if [[ $host == - || $host == "$AGENT_INTERNAL_HOST" ]]; then
-    address="$(env_get AGENT_PUBLIC_ADDRESS)"; address="${address:-$(outbound_ip)}"
-    info "云服务器上本机看到的常是内网地址：这里要填 OpenClaw 服务器能访问到的地址（通常是公网 IP）"
-    plan_value address INGRESS_ADDRESS "OpenClaw 服务器访问这台服务器用的 IP" "$address" ip_ok
-  fi
+  [[ $host == - ]] && host="$AGENT_INTERNAL_HOST"
+  select_ingress_address address "$host" || die "接入地址未确认：请填写工作台直连 IP，或取消配置接入入口"
   port="$(env_get AGENT_PUBLIC_PORT)"; [[ $port =~ ^[0-9]+$ ]] || port=9443
   if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active" \
     && ! ufw status 2>/dev/null | grep -qE "^$port(/tcp)?[[:space:]]+ALLOW"; then
@@ -1498,7 +1565,7 @@ answer_label() {
     OPENIM) echo "部署 OpenIM" ;;
     INGRESS) echo "配置 OpenClaw 接入入口" ;;
     INGRESS_HOST) echo "接入入口的域名（- 表示用 IP）" ;;
-    INGRESS_ADDRESS) echo "接入入口的 IP" ;;
+    INGRESS_ADDRESS) echo "接入入口直连 IP（- 表示按 DNS）" ;;
     UFW_AGENT) echo "防火墙放行接入入口端口" ;;
     UPGRADE) echo "升级" ;;
     UPGRADE_TO) echo "升级到" ;;

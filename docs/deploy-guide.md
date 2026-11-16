@@ -105,6 +105,7 @@ sudo bash scripts/deploy.sh connect
 | 组件 | 脚本自动做的事 | 需要你做的 |
 |---|---|---|
 | OpenIM（「消息」页） | 构建打过补丁的 openim-server 镜像（第一次约 5 ~ 15 分钟，临时占用约 8 GB 磁盘；Docker Hub 限流时自动改用 `mirror.gcr.io` 再试）→ `make openim-up` → 在 `.env` 里填好 `OPENIM_API_URL`、`OPENIM_OBJECT_URL` 并重启 api、worker → 确认工作台连得上 | 内存少于 4 GB 时默认不装（另外占用约 1 GB）；OpenClaw 本身（接入入口与实例）按第 8.6 节配置 |
+| OpenClaw 接入入口 | 内部 CA 签发证书，保存入口域名和直连 IP，启动 `agent-gateway` 并校验本机 TLS | 要在网页初始化智能体服务器时选“是”；填写工作台真实公网 IP，云安全组放行 TCP 9443。不是填写智能体服务器 IP；网站仍可使用 Cloudflare |
 | 新闻早报（TrendRadar） | 拉取锁定版本的 TrendRadar 镜像 → 下载并校验 AI 提示词 → `make trendradar-up` → 在 `.env` 里填好 `TRENDRADAR_MCP_URL` 并重启 api、worker → 默认打开管理员工作空间的“启用新闻早报”（按默认设置先抓取热榜；网页上保存过的设置不改） | 部署后在网页「设置 → 新闻早报」里选平台、写兴趣关键词、填大模型 Key 和推送渠道（飞书、钉钉、企业微信、Telegram、邮件、ntfy、Bark、Slack、通用 Webhook），点“发一条测试推送”。另外占用约 300 MB 内存；详见手册第 23 节 |
 | 知识库图片存储 | 不再问：部署完成后在网页的“设置 → 图片存储”里选本地 / Cloudflare R2 / 阿里云 OSS（可以再选一个做副本），填桶名与密钥，保存前自动自检 | 先在 R2 / OSS 建一个**私有**桶和只能读写这个桶的密钥；不配就存本地（卷 `kb-files`，随备份）。详见手册第 19 节 |
 
@@ -462,17 +463,43 @@ sudo bash scripts/deploy.sh connect
 
 问到「配置接入入口？」时回答 `y`，脚本会：
 
-1. 确定入口的主机名：工作台配置了域名（`SITE_DOMAIN`）就用它，端口 9443（管理员页面仍在 443，DNS 不用改）；
+1. 确定入口的主机名：工作台配置了域名（`SITE_DOMAIN`）就用它作为证书身份，端口 9443（管理员页面仍在 443）；
    没有域名（只用 IP 部署）时回答 `-`，改用固定的内部名字 `agent-gateway.myworkspace.internal`，
-   再填 OpenClaw 服务器访问这台服务器用的 IP（默认是本机的出站地址；云服务器上一般要改成**公网 IP**）；
+   再填写工作台服务器的真实 IP。**有域名时也会询问这个 IP**，网站经 Cloudflare / CDN 时必须填写工作台真实公网 IP，
+   脚本自动保存为 `AGENT_PUBLIC_ADDRESS`，不需要关闭网站的代理或手工改 `.env`。
+   已保存的地址会作为默认值，重跑不会清空；不把网卡私网地址或 CDN 的 DNS 地址当成公网 IP。
+   只有入口域名直接解析到工作台、没有代理时，才显式输入 `-` 按 DNS 连接；没有域名时不能选 `-`；
 2. 用工作台的**内部 CA** 签发入口证书（2 年，剩不到 60 天时再运行一次会自动重签），写进 `infra/caddy/agent-tls/`；
    不需要买证书，也不需要 80 端口验证；
-3. 写 `.env`（`AGENT_PUBLIC_HOST`、`AGENT_PUBLIC_BIND=0.0.0.0`、`AGENT_PUBLIC_PORT`、`AGENT_PUBLIC_URL`、
-   `AGENT_PUBLIC_ADDRESS`、`AGENT_PUBLIC_INTERNAL_CA=true`），重启 api、worker，`make agents-up` 启动入口，并检查入口能握手；
+3. 写 `.env`（`AGENT_PUBLIC_HOST`、`AGENT_PUBLIC_BIND`〔IPv4 为 `0.0.0.0`，IPv6 为 `[::]`〕、`AGENT_PUBLIC_PORT`、`AGENT_PUBLIC_URL`、
+   `AGENT_PUBLIC_ADDRESS`、`AGENT_PUBLIC_INTERNAL_CA=true`），重启 api、worker，`make agents-up` 启动入口，并检查本机 TLS 握手；
 4. 检测到 ufw 时询问是否放行 TCP 9443。**云服务器的安全组也要放行 TCP 9443**（脚本改不了安全组）。
 
 这样生成的外网接入包自带内部 CA 证书（`tls/ca.pem`）和地址映射，OpenClaw 服务器上不用再改任何配置。
 已经手动配置过外网入口（下面的做法）的，脚本保持不变。
+
+**Cloudflare 与外网检查：** 普通代理不支持默认的 9443，也不能代替此双向证书入口。
+`AGENT_PUBLIC_URL` 保留域名用于证书校验，初始化与隧道用 `AGENT_PUBLIC_ADDRESS` 直连工作台。
+本机显示“TLS 检查通过”只证明本机入口正常；`ss` 看到 9443 监听也不代表云安全组放行。
+可在**智能体服务器**运行以下命令（把 IP 替换成工作台真实公网 IP）：
+
+```bash
+timeout 10 bash -c 'exec 3<>"/dev/tcp/$1/$2"' ingress-check 工作台真实公网IP 9443 && echo TCP已连通
+```
+
+这只验证 TCP，不验证证书或应用。连接失败时核对工作台安全组 / 主机防火墙、智能体出站网络和 IP。
+握手或入口启动失败会记录为部署待办，可用 `bash scripts/deploy.sh status` 查看。
+证书签发、API 应用配置或入口检查失败时保留未完成标记；重新运行 `connect` 会重试应用，成功前不会仅因 `.env` 已写好而跳过。
+
+无人值守使用现有 `--answers` 文件，例如：
+
+```dotenv
+INGRESS=y
+INGRESS_HOST=workspace.example.com
+INGRESS_ADDRESS=203.0.113.7
+```
+
+示例 IP 必须替换成工作台真实公网 IP。旧回答缺少必需地址时不会在后台补问或假报就绪；补全后重新运行 `connect`。
 
 **手动配置**（内网模式，或者想用自己的公网证书）：
 
