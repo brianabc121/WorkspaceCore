@@ -74,7 +74,14 @@ REFLECTION_WAIT = 10
 # 启动时把上次没跑完的任务标为中断，最多等这么久（不拖慢 API 启动）
 RECOVER_TIMEOUT = 5.0
 # 自动安装 Docker 支持的发行版与架构（uname -m）；ADR 第 5.3 节
-SUPPORTED_OS = {("ubuntu", "22.04"), ("ubuntu", "24.04"), ("debian", "12")}
+SUPPORTED_OS = {
+    ("ubuntu", "20.04"),
+    ("ubuntu", "22.04"),
+    ("ubuntu", "24.04"),
+    ("debian", "11"),
+    ("debian", "12"),
+}
+SUPPORTED_OS_LABEL = "Ubuntu 20.04 / 22.04 / 24.04、Debian 11 / 12"
 SUPPORTED_ARCH = {"x86_64", "aarch64"}
 
 _PEM = re.compile(
@@ -83,7 +90,7 @@ _PEM = re.compile(
 _TOKEN = re.compile(r"mwa_[A-Za-z0-9_\-]+")
 # 远端脚本失败时打印在标准错误里的原因（files/*.sh）
 _SCRIPT_REASONS = {
-    "unsupported_os": "发行版不在自动安装 Docker 的支持范围内（Ubuntu 22.04 / 24.04、Debian 12）",
+    "unsupported_os": f"发行版不在自动安装 Docker 的支持范围内（{SUPPORTED_OS_LABEL}）",
     "unsupported_arch": "架构不在自动安装 Docker 的支持范围内（amd64、arm64）",
     "bad_key_fingerprint": "Docker 软件源的签名公钥指纹不对，已停止安装",
     "docker_not_running": "Docker 装好了但守护进程没有启动",
@@ -668,7 +675,7 @@ class AgentServerInstaller(Installer):
         if (not info.docker or not info.compose) and not info.supported:
             raise InstallFailed(
                 "unsupported_os",
-                "自动安装 Docker 只支持 Ubuntu 22.04 / 24.04、Debian 12（amd64、arm64）；"
+                f"自动安装 Docker 只支持 {SUPPORTED_OS_LABEL}（amd64、arm64）；"
                 "请先手动安装 Docker 与 Compose 插件，再重新初始化",
             )
         secret: str | None = None
