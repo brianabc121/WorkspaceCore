@@ -8,7 +8,7 @@ branch: codex/T-0224-two-server-acceptance
 paths: services/api,apps/web,infra,tests/e2e,docs/superpowers,docs/decisions,docs/verification,.collab/tasks,.collab/handoffs,.env.example,compose.yaml,.github/workflows,docs/tailscale-development-guide.md,README.md,services/runtime-helper
 depends_on:
 created: 2026-11-11
-updated: 2026-11-15
+updated: 2026-11-16
 ---
 
 # T-0224 按人类确认设计落实双服务器池调度、容器配额审批与跨节点网络
@@ -91,3 +91,4 @@ updated: 2026-11-15
 - 2026-11-15 14:37 UTC · codex · 实机补修：kubectl get -o json 将Pod/VolumeAttachment列表扁平化为List并清空resourceVersion，root审计正确拒绝而阻塞清理。已记录实际typed/raw输出，仅改固定原始API查询，保留kind/非空RV/无continue完整性检查与有界读取；RED1后109项、Ruff、strict mypy3文件通过，独立复审spec/quality PASS，父级109项再验通过。B新物理1GiB卷UID1000实测写入1003778048字节后ENOSPC，底层仍预分配1073745920字节；只删自有填充文件后哨兵SHA55381381...保持。A恢复在格式化前因旧审计停住，原allocated数据保留，待新版本实机验证。
 - 2026-11-15 14:38 UTC · codex · Task3D纯IP私网控制中继完成：已审查renderer固定Caddy摘要、只读非特权Pod、ClusterIP、精确来源/上游策略；实际分配IP后签IP SAN，B健康/ready200、有效无凭据poll401、其他路由404、错误SAN及不受信CA均拒绝，现有隔离租户连接被拒，中继UID稳定且0重启。实机Cilium来源为节点内部路由IP，核验CiliumNode后仅补两条/32；未放开整个Pod网段、Tailscale ACL或生产开关。源文件SHA63f878...保持独立审查版本；父级64项含真实固定Docker校验、Ruff/mypy2文件通过。证据docs/verification/2026-11-15-runtime-completion/，不含密钥/令牌；短期证书到期2026-11-16 11:26:47台北需后续验收复核。
 - 2026-11-15 19:55 UTC · codex · 提交前独立性检查又捕获3B测试/验证器调用未提交2C helper_image producer的耦合，尚未推送有此问题的中间head。已提取共享固定HelperLayout、独立golden fixture和不发送请求的root Unix peer可用性probe；真实HEAD旧runner RED98/1→103通过，精确待提交遥测快照与旧runner组合103通过，严格mypy5文件/Ruff通过并独立复审PASS。父级再跑精确快照103项通过；2C公共安装/attestation方法继续留工作区单独审查。前端在原超时设置下完整复跑83文件856项全部通过503.47秒，先前三项高负载超时仍保留证据；浏览器与完整控制器实机验收未完成。
+- 2026-11-16 03:54 UTC · codex · 继续完成：18e73d6 已推送，精确索引隔离验证 Ruff/format603文件、strict mypy599文件和277项测试通过；Node22完整前端856项通过。3F原生Python3.12离线安装基础在Debian11/12实测，修复归档链接/uv配置3项P2后独立spec+quality复审通过，新增infra工具即将提交，尚未激活控制器。核心44文件已冻结哈希并交独立审查。Task3G双节点真实gVisor/helper/身份围栏/EROFS/64MiB ENOSPC通过，emptyDir根属主导致可选restore部分写入失败，未重放，全部4Pod+4NP按UID清理。最新远端API CI卡在OpenAPI产物不一致，继续定位；不标完成或合并。
