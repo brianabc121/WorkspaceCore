@@ -80598,6 +80598,16 @@
             },
             "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
           "422": {
             "content": {
               "application/json": {

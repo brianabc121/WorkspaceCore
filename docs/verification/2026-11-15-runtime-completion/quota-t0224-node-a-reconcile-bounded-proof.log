@@ -1,0 +1,3 @@
+{"node": "t0224-node-a", "volume_id": "9a6be6cf-45aa-5120-bf41-d7e7ae0dfbb5", "reconciled_exact_blank_test": true, "phase": "ready", "complete_read_only_proof_attempt": 3, "allocated_bytes": 1073745920, "usable_bytes": 1020702720}
+{"read_only_proof_attempt": 1, "result": "refused", "reason": "incomplete host namespace/reference proof"}
+{"read_only_proof_attempt": 2, "result": "refused", "reason": "host process inventory changed during reference audit"}
