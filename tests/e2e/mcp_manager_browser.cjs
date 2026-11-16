@@ -117,7 +117,14 @@ async function main() {
     await form.getByRole('button', { name: '开始部署' }).click()
     const progress = page.getByRole('region', { name: `部署「${name}」的进度` })
     await progress.waitFor({ timeout: 30000 })
-    check(await until(async () => !/进行中/.test(await progress.locator('strong').first().textContent()), TIMEOUT), '部署没有在限定时间内结束')
+    // T-0272：部署进行中刷新页面，进度还在（页面从任务列表找回进行中的任务）
+    if (await progress.getAttribute('data-status') === 'running') {
+      await page.reload()
+      await progress.waitFor({ timeout: 30000 })
+      step('部署进行中刷新页面：进度还在，接着显示')
+    } else console.log('  … 部署在刷新前就结束了，跳过“刷新后找回进度”这一步')
+    // 进度区块的 data-status 是任务状态（T-0272 起标题和状态分开显示，与智能体服务器初始化同一套样式）
+    check(await until(async () => await progress.getAttribute('data-status') !== 'running', TIMEOUT), '部署没有在限定时间内结束')
     const done = await progress.textContent()
     check(/部署完成，已经登记到工作台/.test(done), `部署应成功：${done.slice(0, 600)}`)
     for (const label of ['连接', '检查', '上传', '构建', '启动', '登记']) check(done.includes(label), `进度里应有“${label}”一步：${done.slice(0, 400)}`)
@@ -167,7 +174,7 @@ async function main() {
       await dialog.locator('button[type=submit]').click()
       const region = page.getByRole('region', { name: `${action}「${name}」的进度` })
       await region.waitFor({ timeout: 30000 })
-      check(await until(async () => !/进行中/.test(await region.locator('strong').first().textContent()), TIMEOUT), `${action}没有在限定时间内结束`)
+      check(await until(async () => await region.getAttribute('data-status') !== 'running', TIMEOUT), `${action}没有在限定时间内结束`)
       check(new RegExp(expected).test(await region.textContent()), `${action}应成功：${(await region.textContent()).slice(0, 600)}`)
     }
     await operate('重启', '重启', '重启完成')

@@ -173,9 +173,13 @@ describe('一键部署 MCP 管理器', () => {
     // 进度：每一步的状态和说明
     const progress = await screen.findByRole('region', { name: '部署「2 号」的进度' })
     expect(bodies).toEqual([{ target_kind: 'agent_server', target_id: SERVER, name: '2 号', platforms: ['claude', 'workbuddy'], request_id: requestId }])
-    expect(within(progress).getByText('部署「2 号」：进行中')).toBeVisible()
+    // 和智能体服务器初始化同一套样式（T-0272）：标题和状态分开、步骤名和说明分两行
+    expect(within(progress).getByRole('heading', { name: '部署「2 号」' })).toBeVisible()
+    expect(progress).toHaveAttribute('data-status', 'running')
+    expect(progress).toHaveTextContent('进行中')
     expect(progress).toHaveTextContent('智能体服务器「机房一号」')
-    expect(within(progress).getByText('登录服务器：已登录 deploy@10.0.0.5')).toBeVisible()
+    const login = within(progress).getByText('登录服务器').closest('li')!
+    expect(within(login).getByText('已登录 deploy@10.0.0.5')).toBeVisible()
     expect(within(progress).getByText('检查服务器').closest('li')).toHaveAttribute('data-status', 'running')
     expect(within(progress).getByText('安装转发密钥').closest('li')).toHaveAttribute('data-status', 'pending')
 
@@ -306,8 +310,11 @@ describe('一键部署 MCP 管理器', () => {
     await fireEvent.update(within(form).getByLabelText('名字'), '2 号')
     await start(form)
     const progress = await screen.findByRole('region', { name: '部署「2 号」的进度' })
-    expect(within(progress).getByRole('alert')).toHaveTextContent('容器启动了，但工作台连不上它：这台服务器的 sshd 不允许端口转发。（verify_failed）')
-    expect(within(progress).getByText('工作台连接管理器：工作台连不上它').closest('li')).toHaveAttribute('data-status', 'failed')
+    // 失败原因挂在失败的那一步下面，错误码单独显示
+    const failedStep = within(progress).getByText('工作台连接管理器').closest('li')!
+    expect(failedStep).toHaveAttribute('data-status', 'failed')
+    expect(within(failedStep).getByText('工作台连不上它')).toBeVisible()
+    expect(within(failedStep).getByRole('alert')).toHaveTextContent('失败原因容器启动了，但工作台连不上它：这台服务器的 sshd 不允许端口转发。verify_failed')
     expect(within(progress).getByText(/BRIDGE_ADMIN_TOKEN=\*\*\*/)).toBeInTheDocument()
     // 改一下再部署：回到表单，填过的还在
     await fireEvent.click(screen.getByRole('button', { name: '改一下再部署' }))
@@ -434,7 +441,7 @@ describe('工作台部署的 MCP 管理器', () => {
     await fireEvent.click(within(restart).getByRole('button', { name: '重启' }))
     expect(await screen.findByText('刚才没有成功：登录密码不对，或者这个账号不能使用 sudo。重新填写登录密码后再试。', {}, { timeout: 5000 })).toBeVisible()
     const retry = screen.getByRole('form', { name: '重启2 号' })
-    expect(screen.getByRole('region', { name: '重启「2 号」的进度' })).toHaveTextContent('这个账号不能使用 sudo（或密码不对）（sudo_denied）')
+    expect(screen.getByRole('region', { name: '重启「2 号」的进度' })).toHaveTextContent('这个账号不能使用 sudo（或密码不对）sudo_denied')
     expect(within(retry).getByLabelText('登录密码')).toHaveValue('')
     await fireEvent.update(within(retry).getByLabelText('登录密码'), PASSWORD)
     await fireEvent.click(within(retry).getByRole('button', { name: '重启' }))
@@ -486,7 +493,9 @@ describe('工作台部署的 MCP 管理器', () => {
     expect(writes(requests)).toEqual([])
     await fireEvent.click(within(form).getByRole('button', { name: '只删除登记' }))
     const progress = await screen.findByRole('region', { name: '卸载「3 号」的进度' })
-    expect(within(progress).getByText(`从工作台去掉登记：${left('旧机房')}`)).toBeVisible()
+    // 只删除登记：那一步一直显示（说明里写着服务器上还留着什么），不收进成功条
+    const only = within(progress).getByText('从工作台去掉登记').closest('li')!
+    expect(within(only).getByText(left('旧机房'))).toBeVisible()
     expect(within(progress).getByText(/只删除了工作台里的登记，没有连服务器：上面写的那些还留在服务器上/)).toBeVisible()
     await waitFor(() => expect(screen.queryByRole('article', { name: 'MCP 管理器：3 号' })).not.toBeInTheDocument())
 
@@ -499,7 +508,7 @@ describe('工作台部署的 MCP 管理器', () => {
     expect(within(second).getByLabelText(/^同时删除数据卷/)).toBeDisabled()
     expect(within(second).queryByLabelText('登录密码')).not.toBeInTheDocument()
     await fireEvent.click(within(second).getByRole('button', { name: '只删除登记' }))
-    expect(await screen.findByText(`从工作台去掉登记：${left('机房一号')}`)).toBeVisible()
+    expect(await screen.findByText(left('机房一号'))).toBeVisible()
     await waitFor(() => expect(screen.queryByRole('article', { name: 'MCP 管理器：2 号' })).not.toBeInTheDocument())
     expect(bodies).toEqual([
       ['uninstall', BRIDGE, { request_id: requestId, remove_data: false, force: true }],
@@ -536,5 +545,50 @@ describe('工作台部署的 MCP 管理器', () => {
     expect(await card('二号')).toHaveAttribute('aria-current', 'true')
     await fireEvent.click(screen.getByRole('button', { name: '查看 MCP 管理器：1 号' }))
     expect(screen.getByRole('article', { name: 'MCP 管理器：1 号' })).toHaveAttribute('aria-current', 'true')
+  })
+})
+
+// T-0272：部署 / 重新部署 / 重启 / 卸载进行中刷新页面（或离开再回来）：从任务列表找回进行中的任务，接着显示进度
+describe('刷新页面后接着显示进行中的任务', () => {
+  it('brings back a deployment that is still running, then selects the new manager when it finishes', async () => {
+    const { world } = setup('owner', { jobs: { [JOB]: job({ log: '$ 构建镜像\nStep 3/9 : RUN npm ci\n' }) } })
+    await openApp('/llm_bridge?view=manage')
+    const progress = await screen.findByRole('region', { name: '部署「2 号」的进度' })
+    expect(progress).toHaveAttribute('data-status', 'running')
+    expect(within(progress).getByText('检查服务器').closest('li')).toHaveAttribute('data-status', 'running')
+    // 进行中那一步下面显示最新输出
+    expect(within(progress).getByLabelText('最新输出')).toHaveTextContent('Step 3/9 : RUN npm ci')
+    // 不重新打开表单，进行中也不能关掉
+    expect(screen.queryByRole('form', { name: '一键部署 MCP 管理器' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '关闭' })).not.toBeInTheDocument()
+
+    world.bridges = [bridge(), managed()]
+    world.jobs[JOB] = job({ status: 'succeeded', bridge_id: NEW, mode: 'tunnel', finished_at: at, steps: done(STEPS) })
+    expect(await screen.findByText(/已部署并添加「2 号」。/, {}, { timeout: 5000 })).toBeVisible()
+    expect(await card('2 号')).toHaveAttribute('aria-current', 'true')
+    const finished = screen.getByRole('region', { name: '部署「2 号」的进度' })
+    expect(within(finished).getByRole('status')).toHaveTextContent('部署完成，已经登记到工作台。')
+    // 成功后步骤收起，可以展开
+    expect(within(finished).queryAllByRole('listitem')).toHaveLength(0)
+    await fireEvent.click(within(finished).getByRole('button', { name: '查看每一步（8 / 8 步完成）' }))
+    expect(within(finished).getAllByRole('listitem')).toHaveLength(8)
+    await fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('region', { name: '部署「2 号」的进度' })).not.toBeInTheDocument()
+  })
+
+  it('brings back only the running tasks, not the finished ones', async () => {
+    const restart = job({ id: JOB3, kind: 'restart', bridge_id: NEW, name: '2 号', mode: 'tunnel', steps: [step('connect', 'done'), step('restart', 'running'), step('verify', 'pending')] })
+    const { world } = setup('owner', {
+      bridges: [bridge(), managed()],
+      jobs: { [JOB2]: job({ id: JOB2, kind: 'redeploy', status: 'succeeded', bridge_id: NEW, mode: 'tunnel', finished_at: at, steps: done(STEPS) }), [JOB3]: restart },
+    })
+    await openApp('/llm_bridge?view=manage')
+    const progress = await screen.findByRole('region', { name: '重启「2 号」的进度' })
+    expect(progress).toHaveTextContent('正在执行第 2 / 3 步')
+    expect(progress).toHaveTextContent('智能体服务器「机房一号」 · 经 SSH 通道')
+    expect(screen.queryByRole('region', { name: '重新部署「2 号」的进度' })).not.toBeInTheDocument()
+    world.jobs[JOB3] = { ...restart, status: 'succeeded', finished_at: at, steps: done(restart.steps as Step[]) }
+    expect(await screen.findByText('重启完成：工作台已经重新连上它。', {}, { timeout: 5000 })).toBeVisible()
+    expect(screen.getByRole('button', { name: '关闭' })).toBeVisible()
   })
 })
