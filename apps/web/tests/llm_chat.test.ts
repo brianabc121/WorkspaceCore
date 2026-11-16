@@ -248,11 +248,11 @@ describe('大模型聊天', () => {
     expect(requests.filter(r => path(r).endsWith('/events'))).toEqual([])
 
     // 回合结束：以服务器给的整段会话为准；回答下面有用时和 token
-    world.conversations[S1] = talk({ turns: 2 }, [asked('写一个周报模板'), answered('好的，模板如下。'), asked('讲个故事', T2), answered('从前有座山。\n\n山里有座庙。', T2, { timing: { ran_seconds: 75 }, usage: { input_tokens: 1200, output_tokens: 34 } })], 16)
+    world.conversations[S1] = talk({ turns: 2 }, [asked('写一个周报模板'), answered('好的，模板如下。'), asked('讲个故事', T2), answered('从前有座山。\n\n山里有座庙。', T2, { timing: { ran_seconds: 75 }, usage: { input_tokens: 1200, output_tokens: 34, credits: 2.5, credit_status: 'known' } })], 16)
     push(frame('chat', event(16, 'completed'), 16) + frame('end', { busy: false, last_id: 16 }, 16))
     close()
     expect(await screen.findByText(/山里有座庙。/)).toBeVisible()
-    expect(within(messages()[3]!).getByText('用时 1 分 15 秒 · 1,234 token')).toBeVisible()
+    expect(within(messages()[3]!).getByText('用时 1 分 15 秒 · 1,234 token · 消耗 2.5 积分')).toBeVisible()
     await waitFor(() => expect(screen.queryByRole('button', { name: '停止' })).not.toBeInTheDocument())
   })
 
@@ -491,7 +491,7 @@ describe('大模型聊天', () => {
     claude: { can_refresh: false, reports_quota: true, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 4321, windows: [
       { kind: 'five_hour', used_percent: 62, resets_at: 1794531600, reset_passed: false, status: 'ok', plan: null, observed_at: 1794528000 },
     ] },
-    workbuddy: { can_refresh: false, reports_quota: false, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 987, windows: [] },
+    workbuddy: { can_refresh: false, reports_quota: false, paused_until: null, pause_estimated: false, waiting_resume: 0, tokens_5h: 987, credits_5h: 12.75, windows: [] },
   })
   const withQuota = (r: Request) => (/\/bridges\/[^/]+\/status$/.test(new URL(r.url).pathname) ? Response.json({ ...status(), quota: quotaOf() }) : undefined)
 
@@ -610,9 +610,9 @@ describe('大模型聊天', () => {
     setup('owner', { conversations: { [S1]: talk({ platform: 'workbuddy' }) } }, withQuota)
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     const buddy = await screen.findByRole('region', { name: '额度：CodeBuddy' })
-    expect(within(buddy).getByText(/官方程序不提供剩余额度和重置时间/)).toBeVisible()
+    expect(within(buddy).getByText(/官方程序不提供剩余积分和重置时间/)).toBeVisible()
     expect(within(buddy).queryByText(/跑过一个回合后会显示/)).not.toBeInTheDocument()
-    expect(within(buddy).getByText(/用掉 987 个 token/)).toBeVisible()
+    expect(within(buddy).getByText(/用掉 987 个 token、消耗 12.75 积分/)).toBeVisible()
   })
 
   it('shows a turn the quota interrupted, when it continues, and lets it be retried now or left alone', async () => {

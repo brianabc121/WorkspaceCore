@@ -19,6 +19,12 @@
 
 - **三家给的都是“已用百分比 + 重置时间”，没有“剩余多少 token”这个数。** 页面如实显示“已用 62%，14:30 重置”；另外用管理器自己记的用量显示“最近 5 小时经这个管理器用了多少 token”作参考。
 - **CodeBuddy 不给额度。** 页面照实写“官方程序不提供剩余额度和重置时间”，只显示经管理器用掉的 token（接口里 `reports_quota=false`）。
+- **CodeBuddy 给每回合消耗的积分，不给剩余积分**（2026-11-16，T-0254，在 2.184.0 的程序文件和它自带的文档 `stream-json-turn-usage` 上核对）：
+  - 回合结果的 `_meta["codebuddy.ai/turnUsage"].total` 里有这一回合的 token（`usage`）和消耗的积分（`credits`，带 `creditStatus`：`known` / `partial` / `unknown`）。管理器把它记进回合的用量（`usage.credits`、`usage.credit_status`），没报就不写，不拿 token 折算。
+  - `result.usage` 是**整个会话累计**的 token，不是这一回合的。之前页面上“这一回合的 token”用的是它，同一个会话里越往后越大，最近 5 小时的合计也因此重复计算；现在有 `turnUsage` 就用它。
+  - 扩展钩子（mods）拿不到更多：类型定义是照 Claude Code 的接口抄的，运行时里 `session.usage()` 的 `rateLimits` 写死为空，整个程序里没有 `percentUsed`。所以没有写钩子。
+  - 剩余积分、重置时间：程序里没有任何对外的口子，仍然显示不了。
+  - 没有用真实账号验证：2.184.0 实际会不会带 `turnUsage`、积分的数对不对，要在真实账号上跑一个回合看。
 - **只有 Codex 能随时查。** Claude 的额度只在跑回合时由官方程序顺带报出来，所以页面上是“上一次回合时看到的”，带着时间；很久没跑回合时会标成“可能已过期”。
 
 ## 2. 查看额度

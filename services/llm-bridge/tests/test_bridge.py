@@ -557,6 +557,24 @@ async def test_search_finds_text_in_questions_and_answers_and_usage_adds_up(brid
     assert by_owner["user:u1"]["turns"] == 2 and by_owner["user:u1"]["failed"] == 1
     assert by_owner["agent-1"]["tokens"] > 0 and by_owner["agent-1"]["platform"] == "fake"
     assert by_owner["agent-1"]["day"] == time.strftime("%Y-%m-%d", time.gmtime())
+    # 没有报积分的平台：积分是空的，不是 0
+    assert by_owner["agent-1"]["credits"] is None
+    quota = (await bridge.admin("GET", "/admin/quota")).json()["platforms"]["fake"]
+    assert quota["credits_5h"] is None
+
+
+async def test_reported_credits_show_on_the_turn_and_add_up(bridge: Bridge) -> None:
+    """官方程序报了这一回合消耗的积分（CodeBuddy）：回合上带着，用量和最近 5 小时里相加。"""
+    a = await _session(bridge, "agent-1")
+    first = await _send(bridge, "agent-1", a, "credits:2.5 第一问", "r1")
+    assert first["usage"]["credits"] == 2.5 and first["usage"]["credit_status"] == "known"
+    await _send(bridge, "agent-1", a, "credits:0.75 第二问", "r2")
+    await _send(bridge, "agent-1", a, "没有报积分的一问", "r3")
+
+    (row,) = (await bridge.admin("GET", "/admin/usage")).json()["rows"]
+    assert row["turns"] == 3 and row["credits"] == 3.25
+    quota = (await bridge.admin("GET", "/admin/quota")).json()["platforms"]["fake"]
+    assert quota["credits_5h"] == 3.25
 
 
 def _init_repo(workdir: Path) -> None:

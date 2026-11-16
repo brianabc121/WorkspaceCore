@@ -80,7 +80,7 @@ class SessionSpec:
 class TurnOutcome:
     text: str
     native_turn_id: str | None = None
-    usage: dict[str, int] = field(default_factory=dict)
+    usage: dict[str, Any] = field(default_factory=dict)
     commands: list[str] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
 

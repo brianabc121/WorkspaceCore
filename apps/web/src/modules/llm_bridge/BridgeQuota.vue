@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { RefreshCw } from '@lucide/vue'
-import { NO_QUOTA, bridgeError, platformName, quotaKind, quotaUsage, seconds, type Bridge, type BridgeStatus, type LlmBridgeApi, type QuotaWindow } from './api'
+import { NO_QUOTA, bridgeError, platformName, quotaKind, quotaUsage, recentUse, seconds, type Bridge, type BridgeStatus, type LlmBridgeApi, type QuotaWindow } from './api'
 
 // 每个平台的额度（T-0237）：每个窗口已用多少、什么时候重置；因为额度用完暂停到什么时候、有几个会话在等自动续跑。
 // 平台给的是已用百分比和重置时间，不是剩余 token 数；Claude 只在跑回合时顺带报出来，
@@ -50,7 +50,7 @@ const percent = (w: QuotaWindow) => (w.reset_passed || w.used_percent == null ? 
             </dl>
           </li>
         </ul>
-        <p class="form-help">最近 5 小时经这个管理器用掉 {{ r.quota.tokens_5h.toLocaleString() }} 个 token（管理器自己记的，不含别处用的）。</p>
+        <p class="form-help">{{ recentUse(r.quota) }}</p>
       </article>
     </div>
   </section>

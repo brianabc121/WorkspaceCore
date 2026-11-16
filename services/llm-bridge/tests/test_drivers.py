@@ -17,6 +17,7 @@ from bridge.drivers.base import DriverError, SessionSpec
 from bridge.drivers.cli_stream import (
     CHAT_NOTICE,
     CliStreamDriver,
+    _turn_usage,
     claude_profile,
     codebuddy_profile,
     parse_transcript_line,
@@ -437,3 +438,39 @@ def test_transcript_formats() -> None:
     assert (
         parse_transcript_line({"type": "user", "isMeta": True, "message": {"content": "x"}}) is None
     )
+
+
+def test_turn_usage_prefers_the_turn_total_and_reads_credits() -> None:
+    """CodeBuddy 的 result.usage 是会话累计的；这一回合的 token 和积分在 turnUsage.total 里。"""
+    result = {
+        "usage": {"input_tokens": 900, "output_tokens": 90},
+        "_meta": {
+            "codebuddy.ai/turnUsage": {
+                "kind": "snapshot",
+                "total": {
+                    "usage": {"input_tokens": 100, "output_tokens": 10},
+                    "credits": 2.504,
+                    "creditStatus": "known",
+                },
+            }
+        },
+    }
+    assert _turn_usage(result) == {
+        "credits": 2.5,
+        "credit_status": "known",
+        "input_tokens": 100,
+        "output_tokens": 10,
+    }
+    # 没报积分：不写成 0；状态照实带着
+    unknown = {"_meta": {"codebuddy.ai/turnUsage": {"total": {"creditStatus": "unknown"}}}}
+    assert _turn_usage(unknown) == {
+        "credit_status": "unknown",
+        "input_tokens": 0,
+        "output_tokens": 0,
+    }
+    # 不是数的积分不要；没有 turnUsage（Claude Code、旧版本）用 result.usage
+    bad = {"_meta": {"codebuddy.ai/turnUsage": {"total": {"credits": "3", "creditStatus": "x"}}}}
+    assert _turn_usage(bad) == {"input_tokens": 0, "output_tokens": 0}
+    plain = {"usage": {"input_tokens": 5, "output_tokens": 6}}
+    assert _turn_usage(plain) == {"input_tokens": 5, "output_tokens": 6}
+    assert _turn_usage({"usage": None, "_meta": "x"}) == {"input_tokens": 0, "output_tokens": 0}

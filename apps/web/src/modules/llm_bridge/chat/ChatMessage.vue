@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { CHAT_NO_TOOLS, duration, seconds } from '../api'
+import { CHAT_NO_TOOLS, credits, duration, seconds } from '../api'
 import { splitText, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
 import ChatAttachments from './ChatAttachments.vue'
 import { answerHtml } from './markdown'
@@ -79,12 +79,14 @@ function act(key: 'copy' | 'again') {
   if (key === 'copy') void copy(props.message.text, 'all')
   else if (props.message.turn_id) emit('again', props.message.turn_id)
 }
-// 回答完之后：用了多久、多少 token（官方程序报的数）
+// 回答完之后：用了多久、这一回合多少 token（官方程序报的数）
 const meta = computed(() => {
   if (!reply.value || pending.value) return ''
   const ran = Number(props.message.timing?.ran_seconds ?? 0), usage = props.message.usage as Record<string, unknown> | null | undefined
   const tokens = usage ? Number(usage.total_tokens ?? 0) || Number(usage.input_tokens ?? 0) + Number(usage.output_tokens ?? 0) : 0
-  return [ran >= 1 && `用时 ${duration(ran)}`, tokens > 0 && `${tokens.toLocaleString()} token`].filter(Boolean).join(' · ')
+  // 报积分的平台（CodeBuddy）：这一回合消耗的积分；没报就不显示，不当成 0
+  const spent = usage && typeof usage.credits === 'number' ? `消耗 ${credits(usage.credits)} 积分` : ''
+  return [ran >= 1 && `用时 ${duration(ran)}`, tokens > 0 && `${tokens.toLocaleString()} token`, spent].filter(Boolean).join(' · ')
 })
 const failure = computed(() => {
   if (status.value !== 'failed' && status.value !== 'unknown') return ''

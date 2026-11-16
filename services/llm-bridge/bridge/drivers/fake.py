@@ -155,9 +155,13 @@ class FakeDriver(Driver):
                 commands, files = ["ls -la"], ["src/b.py"]
                 await sink("command", {"command": commands[0]})
                 await sink("files", {"paths": files})
+            usage: dict[str, Any] = {"input_tokens": 1, "output_tokens": 1}
+            if text.startswith("credits:"):
+                # 模拟报积分的平台（CodeBuddy）：credits:<这一回合消耗的积分>
+                usage |= {"credits": float(text[8:].split()[0]), "credit_status": "known"}
             return TurnOutcome(
                 text=reply,
-                usage={"input_tokens": 1, "output_tokens": 1},
+                usage=usage,
                 commands=commands,
                 files=files,
             )

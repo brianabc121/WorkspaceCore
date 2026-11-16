@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { X } from '@lucide/vue'
-import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, originName, platformName, quotaKind, quotaUsage, seconds, sourceTasks, type Quota } from '../api'
+import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, originName, platformName, quotaKind, quotaUsage, recentUse, seconds, sourceTasks, type Quota } from '../api'
 import { TURN_STATUS, ownerText, type ChatMessage, type ChatSession } from './chatApi'
 
 // 右栏：这个会话的信息、这个平台的额度（T-0242）和回合列表。只显示。
@@ -61,7 +61,7 @@ const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
         <dt>{{ quotaKind(w.kind) }}</dt><dd>{{ quotaUsage(w) }}</dd>
         <dt>重置时间</dt><dd>{{ w.resets_at ? seconds(w.resets_at) : '平台没有给出' }}</dd>
       </dl>
-      <p class="lc-note">最近 5 小时经这个管理器用掉 {{ quota.tokens_5h.toLocaleString() }} 个 token（管理器自己记的，不含别处用的）。</p>
+      <p class="lc-note">{{ recentUse(quota) }}</p>
     </section>
     <template v-if="session.origin === 'external'">
       <p class="lc-note">这是官方程序里已有的会话：这里读到的是它的文字记录，没有回合列表。</p>
