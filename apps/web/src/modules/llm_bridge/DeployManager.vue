@@ -11,7 +11,8 @@ import DeployJob from './DeployJob.vue'
 // preselect：从服务器页面跳过来时（?deploy=<类型>:<服务器>）先选好那台服务器。
 // 本机（T-0238，默认选中）：MCP 管理器随工作台一起启动，选了平台点一下就添加好——不登录服务器、不填地址和令牌。
 const props = defineProps<{ api: LlmBridgeApi; names: string[]; preselect?: { kind: TargetKind; id: string } | null }>()
-const emit = defineEmits<{ deployed: [bridgeId: string, name: string]; cancel: [] }>()
+// started：部署任务开始了（页面据此知道这个任务由表单自己显示进度，刷新后再由页面找回来，T-0272）
+const emit = defineEmits<{ started: [jobId: string]; deployed: [bridgeId: string, name: string]; cancel: [] }>()
 
 const KINDS = Object.keys(TARGET_KIND) as TargetKind[]
 // 一类服务器一台都没有时，写明去哪个页面添加
@@ -106,6 +107,7 @@ async function submit() {
     const started = await props.api.deploy({ target_kind: form.kind, target_id: form.server, name: form.name.trim(), platforms: ALL.filter(p => form.platforms.includes(p)), request_id: requestId, ...(password ? { sudo_password: password } : {}) })
     form.password = ''; sudo.hint = '' // 密码不留在页面上
     jobId.value = started.id
+    emit('started', started.id)
   } catch (e) { error.value = deployError(e) } finally { busy.value = false }
 }
 // 任务结束：成功就告诉上层（刷新管理器列表并选中它）；失败留在这里，可以改了再来。

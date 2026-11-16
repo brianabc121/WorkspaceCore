@@ -73,14 +73,10 @@
 .lb-modes button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
 .lb-deploy-form, .lb-deploy-form form { display: grid; gap: 8px; min-width: 0; }
 .lb-deploy-form .form-field { margin: 8px 0; }
-.lb-job { display: grid; gap: 8px; min-width: 0; }
-.lb-job p { margin: 0; overflow-wrap: anywhere; }
-.lb-job-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
-.lb-job-steps li { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: .88rem; }
-.lb-job-steps li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
-.lb-job-steps li[data-status="pending"] { color: var(--muted); }
-.lb-job-log { margin: 6px 0 0; padding: 10px 12px; max-height: 320px; overflow: auto; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font: .78rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .lb-danger-button { background: var(--danger); border-color: var(--danger); }
+/* 任务进度（T-0272）：和智能体服务器初始化共用 JobProgress，卡片本身是白底；单独显示时外面不再套灰框 */
+.lb-form.lb-progress { display: grid; gap: 8px; padding: 0; border: 0; background: none; }
+.lb-progress > .ssh-job, .lb-deploy-form > .ssh-job { margin: 0; }
 
 
 /* 额度（T-0237） */

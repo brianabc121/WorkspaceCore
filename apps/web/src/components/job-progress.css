@@ -1,4 +1,4 @@
-/* SSH 任务进度（初始化 / 部署 / 卸载共用，T-0269 效果图）：标题行、分格进度条、步骤时间线、失败原因、实时输出、折叠的命令输出。
+/* 后台任务的逐步进度（共用组件 JobProgress.vue，T-0269 效果图；T-0272 起 MCP 管理器的部署也用它）：标题行、分格进度条、步骤时间线、失败原因、实时输出、折叠的命令输出。
    颜色只用主题变量（亮 / 暗自动跟随）；终端块在两种主题下都是深色底。 */
 .ssh-job {
   --ssh-term-bg: #121726; --ssh-term-text: #c9d1e3; --ssh-term-muted: #7c869c; --ssh-term-cmd: #9fb0ff; --ssh-term-err: #ff8f9c;
@@ -12,6 +12,10 @@
 .ssh-job-head h4 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: .95rem; font-weight: 700; }
 .ssh-job-head h4 svg { width: 17px; height: 17px; color: var(--muted); }
 .ssh-job-time { margin-left: auto; color: var(--muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+/* 标题下面一行：在哪台服务器、怎么连（没有就不显示） */
+.ssh-job-meta { flex-basis: 100%; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+/* 组件末尾的补充说明（插槽 after） */
+.ssh-job-after { display: grid; gap: 8px; margin: 0 16px 12px; min-width: 0; }
 
 /* 按步骤分格的进度条 */
 .ssh-job-progress { display: grid; gap: 6px; padding: 0 16px 12px; }

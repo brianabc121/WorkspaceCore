@@ -7,11 +7,11 @@ import ManagementPage from '../../components/management/ManagementPage.vue'
 import DataState from '../../components/DataState.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { isModuleDisabled } from '../../services/api'
-import { PLATFORMS, TARGET_KIND, bridgeError, deployError, isSudoJobError, networkName, useLlmBridge, type Bridge, type ManagedAction, type Platform, type TargetKind } from './api'
+import { PLATFORMS, TARGET_KIND, bridgeError, isSudoJobError, networkName, useLlmBridge, type Bridge, type DeployJob as Job, type ManagedAction, type Platform, type TargetKind } from './api'
 import ManagerCard from './ManagerCard.vue'
 import ManagerOperation from './ManagerOperation.vue'
 import DeployManager from './DeployManager.vue'
-import DeployJob from './DeployJob.vue'
+import DeployProgress from './DeployProgress.vue'
 import BridgeAccounts from './BridgeAccounts.vue'
 import BridgeSettingsForm from './BridgeSettingsForm.vue'
 import BridgeEnvironments from './BridgeEnvironments.vue'
@@ -24,6 +24,7 @@ import './llm_bridge.css'
 // 最下面是按实例的权限（右上角“实例权限”跳过去）。一个 MCP 管理器就是一座登记的会话桥：单独部署的容器，单独维护一套账号。
 // 添加有两种方式：一键部署到服务器（工作台经 SSH 部署到智能体服务器或容器服务器并登记，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md），
 // 或者手动添加已经部署好的。工作台部署的管理器可以重新部署、重启、卸载（后台任务，进度显示在列表下面）。
+// 刷新页面（或离开再回来）后，还在进行的任务从任务列表里找回来，接着显示进度（T-0272）。
 // 从服务器页面跳过来：?m=<管理器> 选中那个管理器；?deploy=<类型>:<服务器> 直接打开一键部署并选好那台服务器。
 const props = defineProps<{ scope: string }>()
 const route = useRoute(), router = useRouter()
@@ -152,9 +153,21 @@ async function deployed(id: string, name: string) {
 }
 
 // 工作台部署的管理器：重新部署（升级）、重启、卸载都是后台任务。先在确认框里说明（需要时填登录密码），
-// 开始后进度显示在列表下面
-const jobId = ref<string | null>(null)
-const job = api.useDeployment(jobId)
+// 开始后进度显示在列表下面。正在看的任务：这里开始的，加上进页时还在进行的（一键部署表单里开始的由表单自己显示）
+const watching = ref<string[]>([])
+const formJob = ref<string | null>(null)
+// 进页（刷新、从别的页面回来）后第一次读到任务列表：还在进行的任务接着显示进度
+const resumed = new Set<string>()
+let looked = false
+watch(() => deployments.data.value, data => {
+  if (looked || !data) return
+  looked = true
+  for (const j of data.jobs) {
+    if (j.status !== 'running' || j.id === formJob.value || watching.value.includes(j.id)) continue
+    resumed.add(j.id); watching.value.push(j.id)
+  }
+}, { immediate: true })
+function unwatch(id: string) { watching.value = watching.value.filter(j => j !== id) }
 // 进度里的任务是哪个管理器上的哪种操作：因为 sudo 密码失败时把同一个确认框重新打开
 let running: { job: string; bridge: string; action: ManagedAction } | null = null
 function operate(bridge: Bridge, action: ManagedAction, sudo?: { hint: string }) {
@@ -165,22 +178,25 @@ function operate(bridge: Bridge, action: ManagedAction, sudo?: { hint: string })
 function operationStarted(id: string) {
   if (operation.bridge) running = { job: id, bridge: operation.bridge.id, action: operation.action }
   operation.bridge = null
-  jobId.value = id
+  if (!watching.value.includes(id)) watching.value.unshift(id)
 }
-// 按“哪个任务 + 状态”看：接连两个任务都已经结束时（例如只删除登记，返回时就是成功）也要各刷新一次
-watch(() => (job.data.value ? `${job.data.value.id}:${job.data.value.status}` : ''), async () => {
-  const data = job.data.value, status = data?.status
-  if (!data || status === 'running') return
+// 一个任务结束了（DeployProgress 每个任务 + 状态只报一次）：刷新列表；找回来的一键部署成功了就选中它
+async function settled(data: Job) {
   await Promise.all([api.invalidate('bridges'), api.invalidate('grants'), api.invalidate('deployments'), api.invalidate('deploy-targets'), api.invalidate('installs')])
+  if (data.status === 'succeeded' && data.kind === 'deploy' && data.bridge_id && resumed.has(data.id)) {
+    selectedId.value = data.bridge_id; tab.value = 'accounts'
+    notice.value = `已部署并添加「${data.name}」。接下来在下面的“平台与账号”里登录它控制的平台。`
+    return
+  }
   // 登录密码没填或不对（任务在“检查”一步失败）：重新打开确认框，填了密码再来
-  if (status !== 'failed' || !isSudoJobError(data.error_code) || running?.job !== data.id) return
+  if (data.status !== 'failed' || !isSudoJobError(data.error_code) || running?.job !== data.id) return
   const bridge = list.value.find(b => b.id === running?.bridge)
   if (bridge && !operation.bridge) {
     operate(bridge, running.action, { hint: data.error_code === 'sudo_denied'
       ? '刚才没有成功：登录密码不对，或者这个账号不能使用 sudo。重新填写登录密码后再试。'
       : '刚才没有成功：这台服务器的登录账号用 Docker 要 sudo 密码。填写登录密码后再试（只用这一次，不保存）。' })
   }
-})
+}
 
 function remove(bridge: Bridge) {
   if (!window.confirm(`删除「${bridge.name}」？\n\n只是从工作台里去掉它，不影响它的容器和里面的登录、会话。只允许用它的实例，之后一个 MCP 管理器都用不了，要到“实例权限”里重新选。`)) return
@@ -202,12 +218,7 @@ function remove(bridge: Bridge) {
       <ActionFeedback :error="error" :notice="notice" />
       <ManagerOperation v-if="canWrite && operation.bridge" :key="`${operation.bridge.id}:${operation.action}:${operation.round}`" :api="api" :bridge="operation.bridge" :action="operation.action" :ask-password="operation.askPassword" :hint="operation.hint" @started="operationStarted" @cancel="operation.bridge = null" />
 
-      <div v-if="jobId" class="lb-form">
-        <p v-if="job.isPending.value" role="status" class="form-help">正在读取进度…</p>
-        <DeployJob v-else-if="job.data.value" :job="job.data.value" />
-        <p v-if="job.error.value" role="alert" class="lb-warn is-red">读不到进度：{{ deployError(job.error.value) }}</p>
-        <div v-if="!job.data.value || job.data.value.status !== 'running'" class="lb-actions"><button type="button" class="secondary-button" @click="jobId = null">关闭</button></div>
-      </div>
+      <DeployProgress v-for="id in watching" :key="id" :api="api" :job-id="id" @settled="settled" @close="unwatch(id)" />
 
       <div v-if="canWrite && form.open && !form.id && canDeploy" class="lb-form lb-add">
         <h3>添加 MCP 管理器</h3>
@@ -215,7 +226,7 @@ function remove(bridge: Bridge) {
           <button type="button" :aria-pressed="addMode === 'deploy'" @click="addMode = 'deploy'">一键部署</button>
           <button type="button" :aria-pressed="addMode === 'manual'" @click="addMode = 'manual'">手动添加（已经部署好了）</button>
         </div>
-        <DeployManager v-if="addMode === 'deploy'" :key="preselect ? `${preselect.kind}:${preselect.id}` : 'any'" :api="api" :names="list.map(b => b.name)" :preselect="preselect" @deployed="deployed" @cancel="closeForm" />
+        <DeployManager v-if="addMode === 'deploy'" :key="preselect ? `${preselect.kind}:${preselect.id}` : 'any'" :api="api" :names="list.map(b => b.name)" :preselect="preselect" @started="formJob = $event" @deployed="deployed" @cancel="closeForm" />
       </div>
 
       <form v-if="canWrite && form.open && (form.id || addMode === 'manual')" class="asv-form lb-form" novalidate :aria-label="form.managed ? '给 MCP 管理器改名' : form.id ? '修改 MCP 管理器' : '添加 MCP 管理器'" @submit.prevent="submit">

@@ -35,6 +35,10 @@ const QUESTION = `同问 ${run}`
 // 假的 API 密钥：假程序只看“有没有”，不会发给任何平台
 const FAKE_KEY = `e2e-not-a-real-key-${randomBytes(12).toString('hex')}`
 
+// 等正在进行的回合结束：回合进行中时发送按钮换成“停止”（T-0272）
+async function turnDone(page, message) {
+  check(await until(async () => (await page.getByRole('button', { name: '停止', exact: true }).count()) === 0, 60000), message)
+}
 async function until(test, timeout = 30000) {
   const deadline = Date.now() + timeout
   while (Date.now() < deadline) {
@@ -409,6 +413,8 @@ async function main() {
     await composer(page).fill('history')
     await composer(page).press('Enter')
     await thread(page).getByText('history=3').waitFor({ timeout: 60000 })
+    // 回答的文字先出来、回合随后才结束；回合没结束时清空会被拒绝（“还有消息在排队或进行中”），先等“停止”按钮消失（T-0272）
+    await turnDone(page, '“history”那一回合应结束')
     const clearRefused = await api(page, workspace, 'POST', `${chat}/sessions/${theirId}/clear`, {})
     check(clearRefused.status === 409 && clearRefused.body?.error?.code === 'TAKEOVER_REQUIRED', `不确认就清空别人的会话应被拒绝：${JSON.stringify(clearRefused)}`)
     let clearAsked = ''
@@ -421,6 +427,7 @@ async function main() {
     await composer(page).fill('history')
     await composer(page).press('Enter')
     await thread(page).getByText('history=0').waitFor({ timeout: 60000 })
+    await turnDone(page, '清空后“history”那一回合应结束')
     // 输入 /clear 也是清空：不发给模型（别人建的会话同样先确认）
     await composer(page).fill('/clear')
     await page.getByText('发送后清空这个会话的上下文，不会发给模型').waitFor()
