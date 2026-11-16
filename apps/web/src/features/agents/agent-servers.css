@@ -16,7 +16,7 @@
 .asv-close svg { width: 16px; height: 16px; }
 .asv-rename { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .asv-rename input { flex: 1 1 200px; }
-/* 页头概览：一行五格（连接、服务器环境、CPU、内存、部署智能体；T-0266） */
+/* 页头概览：一行五格（连接、服务器环境、CPU、内存、部署智能体；T-0267） */
 .asv-stats { list-style: none; margin: 16px 0 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .asv-stats > li { display: grid; gap: 6px; align-content: start; padding: 12px 16px; min-width: 0; }
 .asv-stats > li + li { border-left: 1px solid var(--line); }
@@ -31,7 +31,7 @@
 .asv-go:hover { text-decoration: underline; }
 .asv-head .host-alerts { margin-top: 12px; }
 
-/* 连接与初始化（T-0266 效果图）：标题 + 主按钮；左边提示与最近一次任务，右边登录前提；底部移除服务器 */
+/* 连接与初始化（T-0267 效果图）：标题 + 主按钮；左边提示与最近一次任务，右边登录前提；底部移除服务器 */
 .asv-init { padding: 0; display: grid; min-width: 0; }
 .asv-init-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
 .asv-init-title { flex: 1 1 260px; min-width: 0; }

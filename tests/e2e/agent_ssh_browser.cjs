@@ -50,7 +50,7 @@ async function noHorizontalScroll(page) {
 }
 
 // 跟着一次 SSH 任务（SshJob：初始化服务器 / 部署 / 卸载）直到结束，返回每一步的“步骤名 说明=状态”。
-// 进度区块的 data-status 是任务状态（T-0266 起标题与状态分开显示；成功后步骤收起，但仍在页面里）
+// 进度区块的 data-status 是任务状态（T-0267 起标题与状态分开显示；成功后步骤收起，但仍在页面里）
 async function follow(page, region, kind, timeout) {
   const end = Date.now() + timeout
   const finished = async () => /^(succeeded|failed|interrupted)$/.test(await region.getAttribute('data-status', { timeout: 1000 }).catch(() => '') ?? '')
