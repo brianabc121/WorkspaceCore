@@ -268,7 +268,7 @@ describe('OpenClaw agents page: deploy drawer', () => {
     const progress = await screen.findByRole('region', { name: '新智能体的部署' })
     expect(within(progress).getByRole('link', { name: '新加坡节点 B' })).toHaveAttribute('href', '/agent-servers?server=srv-2')
     expect(await within(progress).findByText('部署完成，实例已连上工作台。', {}, { timeout: 5000 })).toBeVisible()
-    // 成功后收起成一条成功条；展开才看到每一步（T-0265）
+    // 成功后收起成一条成功条；展开才看到每一步（T-0266）
     expect(within(progress).queryAllByRole('listitem')).toHaveLength(0)
     await fireEvent.click(within(progress).getByRole('button', { name: /^查看每一步（6 \/ 6 步完成）/ }))
     expect(within(progress).getAllByRole('listitem').map(li => li.getAttribute('data-status'))).toEqual(['done', 'done', 'done', 'done', 'done', 'done'])

@@ -266,7 +266,7 @@ describe('agent servers page: connection and initialization', () => {
     expect(await within(progress).findByText(/这个账号不能用 sudo/, {}, { timeout: 4000 })).toBeVisible()
     const steps = within(progress).getAllByRole('listitem')
     expect(steps.map(li => li.getAttribute('data-status'))).toEqual(['done', 'failed', 'pending'])
-    // 步骤名与说明分两行；失败原因挂在失败的那一步下面；结束后没轮到的步骤是“未执行”（T-0265）
+    // 步骤名与说明分两行；失败原因挂在失败的那一步下面；结束后没轮到的步骤是“未执行”（T-0266）
     expect(within(steps[0]!).getByText('用保存的密码登录服务器')).toBeVisible()
     expect(within(steps[1]!).getByText('检测系统与权限')).toBeVisible()
     expect(within(steps[1]!).getByText('sudo 被拒绝')).toBeVisible()
@@ -352,7 +352,7 @@ describe('agent servers page: connection and initialization', () => {
     })
     const first = await openApp('/agent-servers?server=srv-1')
     const head = await screen.findByRole('region', { name: '服务器：香港节点 A' })
-    // 页头一行五格：连接、服务器环境、CPU、内存、部署智能体（T-0265）；没有上报写“暂无上报”，不画 0
+    // 页头一行五格：连接、服务器环境、CPU、内存、部署智能体（T-0266）；没有上报写“暂无上报”，不画 0
     const meters = within(head).getByRole('list', { name: '服务器概览' })
     expect(within(meters).getAllByRole('listitem').map(li => li.querySelector('.asv-stat-label')?.textContent)).toEqual(['连接', '服务器环境', 'CPU', '内存', '部署智能体'])
     expect(within(meters).getAllByText('暂无上报')).toHaveLength(2)
@@ -386,7 +386,7 @@ describe('agent servers page: connection and initialization', () => {
   })
 })
 
-// T-0265：按效果图重排的“连接与初始化”——登录前提清单、进行中的任务、成功条、没有失败步骤时的失败原因
+// T-0266：按效果图重排的“连接与初始化”——登录前提清单、进行中的任务、成功条、没有失败步骤时的失败原因
 describe('agent servers page: initialization layout', () => {
   const STEPS6 = ['connect', 'inspect', 'docker', 'reconnect', 'workspace', 'verify'] as const
 
