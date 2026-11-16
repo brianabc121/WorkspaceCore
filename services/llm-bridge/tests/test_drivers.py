@@ -17,6 +17,8 @@ from bridge.drivers.base import DriverError, SessionSpec
 from bridge.drivers.cli_stream import (
     CHAT_NOTICE,
     CliStreamDriver,
+    _compaction,
+    _context,
     _turn_usage,
     claude_profile,
     codebuddy_profile,
@@ -489,3 +491,27 @@ def test_turn_usage_prefers_the_turn_total_and_reads_credits() -> None:
     plain = {"usage": {"input_tokens": 5, "output_tokens": 6}}
     assert _turn_usage(plain) == {"input_tokens": 5, "output_tokens": 6}
     assert _turn_usage({"usage": None, "_meta": "x"}) == {"input_tokens": 0, "output_tokens": 0}
+
+
+def test_context_usage_and_compaction_are_read_from_what_the_cli_reports() -> None:
+    """上下文用了多少、压缩的数字只取官方程序报的（T-0257）。"""
+    # CodeBuddy：回合结果的 _meta 里直接有
+    buddy = {"_meta": {"codebuddy.ai/contextUsed": 124_000, "codebuddy.ai/contextWindow": 200_000}}
+    assert _context(buddy, {}) == {"used": 124_000, "window": 200_000}
+    # Claude Code：窗口在 modelUsage 里，用了多少是主回合最近一次调用的输入（含缓存）加输出
+    claude = {"modelUsage": {"a": {"contextWindow": 200_000}, "b": {"contextWindow": 1_000_000}}}
+    last = {
+        "input_tokens": 10,
+        "cache_read_input_tokens": 9_000,
+        "cache_creation_input_tokens": 500,
+        "output_tokens": 90,
+    }
+    assert _context(claude, last) == {"window": 1_000_000, "used": 9_600}
+    # 什么都没报：不写，不当成 0
+    assert _context({}, {}) == {} and _context({"_meta": "x", "modelUsage": []}, {}) == {}
+    assert _context({"_meta": {"codebuddy.ai/contextUsed": -1}}, {}) == {}
+
+    meta = {"trigger": "auto", "pre_tokens": 180_000, "post_tokens": 20_000}
+    assert _compaction(meta) == meta
+    assert _compaction(None) == {"trigger": None, "pre_tokens": None, "post_tokens": None}
+    assert _compaction({"trigger": "x", "pre_tokens": "1"})["trigger"] is None

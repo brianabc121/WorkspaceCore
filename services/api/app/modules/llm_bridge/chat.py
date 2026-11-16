@@ -27,6 +27,7 @@ from app.models import User
 from app.modules.llm_bridge.chat_schemas import (
     LlmChatAttachmentOut,
     LlmChatClearedOut,
+    LlmChatContextOut,
     LlmChatConversationOut,
     LlmChatCreatedOut,
     LlmChatCreateIn,
@@ -87,6 +88,20 @@ def session_out(session: dict[str, Any], me: str) -> LlmChatSessionOut:
         environment=LlmBridgeEnvironmentOut(**environment) if environment else None,
         source=session.get("source") if isinstance(session.get("source"), dict) else None,
         purged_at=session.get("purged_at"),
+        context=_context_out(session.get("context")),
+    )
+
+
+def _context_out(data: Any) -> LlmChatContextOut | None:
+    """管理器报的上下文用量；旧版本的管理器没有这一项。"""
+    if not isinstance(data, dict):
+        return None
+    return LlmChatContextOut(
+        used=data.get("used"),
+        window=data.get("window"),
+        percent=data.get("percent"),
+        compactions=int(data.get("compactions") or 0),
+        last_compacted_at=data.get("last_compacted_at"),
     )
 
 
@@ -242,6 +257,11 @@ class LlmChatService:
                     at=item.get("at"),
                     by=item.get("by") if is_user or cleared else None,
                     cleared_turns=item.get("turns") if cleared else None,
+                    compaction=(
+                        {k: item.get(k) for k in ("trigger", "pre_tokens", "post_tokens")}
+                        if item.get("role") == "context_compacted"
+                        else None
+                    ),
                     mine=(item.get("by_id") == me) if is_user and item.get("by_id") else None,
                     status=item.get("status"),
                     steps=item.get("steps") or [],
@@ -544,6 +564,14 @@ class LlmChatService:
                     "---",
                     "",
                     f"*上下文已清空（{when}{who}）：之后的回答不记得上面的内容*",
+                    "",
+                ]
+                continue
+            if message.role == "context_compacted":
+                lines += [
+                    "---",
+                    "",
+                    f"*平台压缩了上下文（{when}）：之后的回答只记得上面内容的摘要*",
                     "",
                 ]
                 continue

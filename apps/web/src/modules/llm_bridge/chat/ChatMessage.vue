@@ -115,10 +115,19 @@ const clearedText = computed(() => {
   const by = props.message.by ? `，${props.message.by}清空的` : ''
   return `上下文已清空${props.message.at ? `（${seconds(props.message.at)}${by}）` : by}：之后的回答不记得上面的内容`
 })
+// 平台压缩上下文的位置（T-0257）：之前的内容模型只记得摘要
+const compacted = computed(() => props.message.role === 'context_compacted')
+const compactedText = computed(() => {
+  const c = (props.message.compaction ?? {}) as { trigger?: string | null; pre_tokens?: number | null; post_tokens?: number | null }
+  const how = c.trigger === 'manual' ? '手动' : c.trigger === 'auto' ? '自动' : ''
+  const size = typeof c.pre_tokens === 'number' && typeof c.post_tokens === 'number' ? `，${c.pre_tokens.toLocaleString()} → ${c.post_tokens.toLocaleString()} token` : ''
+  return `平台${how}压缩了上下文${props.message.at ? `（${seconds(props.message.at)}${size}）` : size}：之后的回答只记得上面内容的摘要`
+})
 </script>
 
 <template>
   <li v-if="cleared" class="lc-cleared" role="separator" :aria-label="clearedText"><span>{{ clearedText }}</span></li>
+  <li v-else-if="compacted" class="lc-cleared" role="separator" :aria-label="compactedText"><span>{{ compactedText }}</span></li>
   <li v-else class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine, 'is-target': target }]" :data-status="status || undefined" :data-turn="message.turn_id || undefined">
     <div class="lc-msg-head">
       <strong>{{ who }}</strong>

@@ -754,7 +754,7 @@ class Engine:
     ) -> Row:
         session = self._session(caller, session_id, metadata_only=True)
         view: Row = {
-            "session": session_view(session, full=True),
+            "session": {**session_view(session, full=True), "context": self._context(session)},
             "messages": [],
             "next_offset": None,
             "total": 0,
@@ -774,12 +774,20 @@ class Engine:
         else:
             # 清空过上下文的位置：一条 text=context_cleared 的记录，它之前的内容模型已经不记得
             resets = self.store.context_resets(session_id)
+            compacted: dict[str | None, list[Row]] = {}
+            for item in self.store.compactions(session_id):
+                compacted.setdefault(item["turn_id"], []).append(item)
             for turn in self.store.list_turns(session_id=session_id, limit=10_000):
                 while resets and resets[0]["at"] < turn["queued_at"]:
                     reset = resets.pop(0)
                     messages.append(
                         {"role": "status", "text": "context_cleared", "at": reset["at"]}
                     )
+                # 这一回合里平台压缩过上下文：它之前的内容模型只记得摘要
+                messages += [
+                    {"role": "status", "text": "context_compacted", "at": c["at"]}
+                    for c in compacted.pop(turn["id"], [])
+                ]
                 messages.append(
                     {
                         "role": "user",
@@ -1082,6 +1090,16 @@ class Engine:
             if kind == "quota":  # 官方程序报出的额度：记下来，不算会话里的事件
                 self._save_quota(session["slot"], payload.get("windows") or [])
                 return
+            if kind == "compaction":  # 平台压缩了一次上下文（T-0257）：记一行，页面上画分隔
+                self.store.add_compaction(
+                    session_id,
+                    turn_id,
+                    payload.get("trigger"),
+                    payload.get("pre_tokens"),
+                    payload.get("post_tokens"),
+                )
+                self.store.add_event(session_id, turn_id, "compacted", dict(payload))
+                return
             if kind == "image":  # 模型画的图：收进附件，事件里只留名字
                 self._collect_output(session, turn_id, Path(str(payload.get("path"))), image=True)
                 return
@@ -1142,6 +1160,10 @@ class Engine:
             "files": outcome.files[:200],
         }
         fields: Row = {"turn_count": session["turn_count"] + 1}
+        if outcome.context.get("used"):  # 上下文用了多少（T-0257）；没报的保留上一次的
+            fields["context_used"] = outcome.context["used"]
+        if outcome.context.get("window"):
+            fields["context_window"] = outcome.context["window"]
         if not session["title"]:
             fields["title"] = " ".join(turn["text"].split())[:120]
         self.store.update_session(session_id, **fields)
@@ -1276,6 +1298,9 @@ class Engine:
             "started_at": turn["started_at"],
             "finished_at": turn["finished_at"],
         }
+        context = self._context(session) if session else None
+        if context:  # 这个会话的上下文现在用了多少、压缩过几次（T-0257）
+            view["context"] = context
         # 统一的回合状态（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.1）：三条链路都读这几项
         view["timing"] = _timing(turn)
         if turn.get("source"):
@@ -1429,6 +1454,13 @@ class Engine:
         }
 
     # ---- 聊天页用（管理接口；docs/v2/LLM_CHAT_PLAN.md 第 4.1 节） ----
+    def _context(self, session: Row) -> Row | None:
+        """这个会话的上下文用了多少、压缩过几次；官方程序没报过为空。"""
+        done = self.store.compactions(session["id"])
+        return context_view(
+            session, {"count": len(done), "last_at": done[-1]["at"]} if done else None
+        )
+
     def admin_session_view(self, session: Row, busy: set[str] | None = None) -> Row:
         busy = self.store.busy_sessions() if busy is None else busy
         return {
@@ -1741,6 +1773,7 @@ class Engine:
         """一个会话的信息和消息：谁发的、回答、过程、失败原因、进行中已经给出的部分。"""
         session = self._required_session(session_id)
         view = self.admin_session_view(session)
+        view["context"] = self._context(session)
         environment = (
             self.store.get_environment(session["environment_id"])
             if session["environment_id"]
@@ -1765,6 +1798,9 @@ class Engine:
         # 清空上下文的位置（T-0255）：排在清空之后发出的第一条之前
         resets = self.store.context_resets(session_id)
         view["context_cleared_at"] = resets[-1]["at"] if resets else None
+        compacted: dict[str | None, list[Row]] = {}
+        for item in self.store.compactions(session_id):
+            compacted.setdefault(item["turn_id"], []).append(item)
         for turn in self.store.list_turns(session_id=session_id, limit=10_000):
             while resets and resets[0]["at"] < turn["queued_at"]:
                 messages.append(_cleared_view(resets.pop(0)))
@@ -1843,6 +1879,8 @@ class Engine:
                 reply["next_turn_id"] = nxt
             if turn.get("source"):
                 reply["source"] = turn["source"]
+            # 这一回合里平台压缩过上下文（T-0257）：分隔画在这一回合的回答之前
+            messages += [_compacted_view(c) for c in compacted.pop(turn["id"], [])]
             messages.append(reply)
         messages += [_cleared_view(reset) for reset in resets]
         return {"session": view, "messages": messages, "last_event_id": last_event_id}
@@ -2254,7 +2292,7 @@ class Engine:
         reset = self.store.add_context_reset(
             session_id, session["slot"], session["native_id"], len(turns), label
         )
-        self.store.update_session(session_id, native_id=native)
+        self.store.update_session(session_id, native_id=native, context_used=None)
         # 被额度打断、等着自动继续的回合：上下文已经没了，再发“继续”没有意义
         for turn in self.store.pending_resumes(session["platform"]):
             if turn["session_id"] == session_id:
@@ -2367,6 +2405,33 @@ def _event_view(event: Row) -> Row:
     if event["kind"] in ("failed", "unknown") and payload.get("kind"):
         view["reason"] = payload["kind"]
     return view
+
+
+def _compacted_view(item: Row) -> Row:
+    """会话内容里的一条分隔：平台在这里压缩了上下文，之前的内容模型只记得摘要（T-0257）。"""
+    return {
+        "role": "context_compacted",
+        "text": "",
+        "at": item["at"],
+        "trigger": item["trigger"],
+        "pre_tokens": item["pre_tokens"],
+        "post_tokens": item["post_tokens"],
+    }
+
+
+def context_view(session: Row, compactions: Row | None = None) -> Row | None:
+    """这个会话的上下文用了多少（T-0257）：官方程序报的数，没报过也没压缩过为空。"""
+    used, window = session.get("context_used"), session.get("context_window")
+    count = int(compactions["count"]) if compactions else 0
+    if not used and not window and not count:
+        return None
+    return {
+        "used": used,
+        "window": window,
+        "percent": round(used * 100 / window) if used and window else None,
+        "compactions": count,
+        "last_compacted_at": compactions["last_at"] if compactions else None,
+    }
 
 
 def _cleared_view(reset: Row) -> Row:

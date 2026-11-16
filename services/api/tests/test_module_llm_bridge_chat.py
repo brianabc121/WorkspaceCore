@@ -940,3 +940,43 @@ async def test_chat_clear_context(rig: Rig) -> None:  # noqa: F811
     # 归档后不能清空
     assert (await rig.api("POST", f"{base}/archive")).status_code == 200
     assert (await rig.api("POST", f"{base}/clear", json={})).status_code == 409
+
+
+@pytest.mark.integration
+async def test_chat_shows_context_usage_and_compaction(rig: Rig) -> None:  # noqa: F811
+    """上下文用了多少、平台压缩过几次（T-0257）：会话信息、分隔线、导出、智能体的工具结果里都有。"""
+    created = await new_chat(rig, "第一问")
+    session_id = created["session"]["session_id"]
+    base = chat(rig, f"/sessions/{session_id}")
+    await wait_idle(rig, session_id)
+    context = (await rig.api("GET", base)).json()["session"]["context"]
+    assert context == {
+        "used": 1000,
+        "window": 200_000,
+        "percent": 0,
+        "compactions": 0,
+        "last_compacted_at": None,
+    }
+
+    sent = await rig.api(
+        "POST", f"{base}/messages", json={"text": "compact:300 第二问", "request_id": "k2"}
+    )
+    assert sent.status_code == 200, sent.text
+    await wait_idle(rig, session_id)
+    view = (await rig.api("GET", base)).json()
+    assert view["session"]["context"]["used"] == 300
+    assert view["session"]["context"]["compactions"] == 1
+    assert [m["role"] for m in view["messages"]] == [
+        "user",
+        "assistant",
+        "user",
+        "context_compacted",
+        "assistant",
+    ]
+    assert view["messages"][3]["compaction"] == {
+        "trigger": "auto",
+        "pre_tokens": 2000,
+        "post_tokens": 300,
+    }
+    exported = await rig.api("GET", f"{base}/export")
+    assert exported.status_code == 200 and "平台压缩了上下文" in exported.text

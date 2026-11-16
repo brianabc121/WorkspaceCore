@@ -302,3 +302,24 @@ export function groupByDay(sessions: ChatSession[], now = new Date()): { name: s
   for (const s of sessions) groups[s.updated_at >= start ? 0 : s.updated_at >= start - 86400 ? 1 : 2]!.items.push(s)
   return groups.filter(g => g.items.length)
 }
+
+// ---- 上下文用了多少（T-0257）：数字是官方程序报的，没报的那一项不显示 ----
+export type ChatContext = NonNullable<ChatSession['context']>
+const kilo = (n: number) => (n >= 1000 ? `${Math.round(n / 1000).toLocaleString()}k` : String(n))
+/** 会话信息里的一行：“已用 62%（124k / 200k），平台压缩过 2 次” */
+export function contextText(context: ChatContext) {
+  const parts: string[] = []
+  if (context.used && context.window) parts.push(`已用 ${context.percent ?? Math.round(context.used * 100 / context.window)}%（${kilo(context.used)} / ${kilo(context.window)}）`)
+  else if (context.used) parts.push(`已用 ${kilo(context.used)} token`)
+  else if (context.window) parts.push(`窗口 ${kilo(context.window)} token`)
+  if (context.compactions) parts.push(`平台压缩过 ${context.compactions} 次`)
+  return parts.join('，')
+}
+/** 上下文快用满时在输入框上方的提示；没到 70% 不提示 */
+export const CONTEXT_WARN_PERCENT = 70
+export function contextHint(context: ChatContext | null | undefined) {
+  const percent = context?.percent
+  if (typeof percent !== 'number' || percent < CONTEXT_WARN_PERCENT) return ''
+  return `上下文已用 ${percent}%：每个回合都要带上全部历史，越往后越费 token；用满时平台会自动压缩成摘要。这件事聊完了的话，清空上下文或者另开一个会话更省。`
+}
+

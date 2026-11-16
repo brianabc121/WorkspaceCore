@@ -83,6 +83,8 @@ class TurnOutcome:
     usage: dict[str, Any] = field(default_factory=dict)
     commands: list[str] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
+    # 回合结束时上下文用了多少（T-0257）：{"used": token 数, "window": 窗口大小}；官方程序没报的不写
+    context: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

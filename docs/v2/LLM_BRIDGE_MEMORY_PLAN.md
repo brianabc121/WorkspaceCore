@@ -246,3 +246,10 @@
 - CodeBuddy：非交互模式下手动压缩是否可用；压缩前后钩子的输出怎么用。
 - Codex：自动压缩的默认触发点；钩子配置文件的确切位置；压缩后钩子的字段。
 - 业内做法里标 △ 的（mem0、Zep、Letta、LangGraph、OWASP、OpenAI 文档、Factory 的数字）只查到二手来源。
+
+## 11. 实施记录
+
+| 期 | 任务 | 做了什么 | 没做的、没验证的 |
+|---|---|---|---|
+| 1 | T-0257（2026-11-16） | 管理器记下每个会话的上下文用量和窗口（CodeBuddy 取回合结果的 `contextUsed` / `contextWindow`；Claude 取 `modelUsage` 的窗口和主回合最近一次调用的输入加输出；Codex 取 `thread/tokenUsage/updated`）；平台每压缩一次记一行（Claude 的 `compact_boundary`、CodeBuddy 的“正在压缩”状态、Codex 的 `contextCompaction` 条目）；回合结果和会话信息里多 `context`；会话内容里在压缩的位置有一条分隔（智能体读会话时是 `context_compacted`）；聊天页显示用量、分隔线，用到 70% 以上时在输入框上方提示；导出的 Markdown 里有分隔 | 提示里还没有“压缩一下”“带着摘要另开会话”两个按钮（第 2 期）；会话列表和“会话记录”页不显示用量；三家的事件和数字都没有用真实账号跑过，Claude 同时报“正在压缩”和边界事件时按边界事件计数这一点是按程序文件推断的 |
+

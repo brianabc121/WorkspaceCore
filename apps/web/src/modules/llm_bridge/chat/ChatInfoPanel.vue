@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { X } from '@lucide/vue'
 import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, originName, platformName, quotaKind, quotaUsage, recentUse, seconds, sourceTasks, type Quota } from '../api'
-import { TURN_STATUS, ownerText, type ChatMessage, type ChatSession } from './chatApi'
+import { TURN_STATUS, contextText, ownerText, type ChatMessage, type ChatSession } from './chatApi'
 
 // 右栏：这个会话的信息、这个平台的额度（T-0242）和回合列表。只显示。
 // quota 来自管理器的状态；旧版本的管理器没有，这一块不显示。
@@ -48,6 +48,7 @@ const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
       <dt>来源</dt><dd>{{ originName(session.origin) }}</dd>
       <dt>开始</dt><dd>{{ seconds(session.created_at) }}</dd>
       <dt>最后活动</dt><dd>{{ seconds(session.updated_at) }}</dd>
+      <template v-if="session.context && contextText(session.context)"><dt>上下文</dt><dd>{{ contextText(session.context) }}</dd></template>
       <dt>状态</dt><dd>{{ session.status === 'archived' ? '已归档' : session.busy ? '正在回答' : '进行中' }}</dd>
     </dl>
     <section v-if="quota" class="lc-quota" :aria-label="`额度：${platformName(session.platform)}`">

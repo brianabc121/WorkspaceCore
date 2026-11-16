@@ -443,11 +443,22 @@ class CodexDriver(Driver):
                         )
                 elif kind == "webSearch" and item.get("query"):
                     await sink("tool", {"name": "web_search", "input": str(item["query"])})
+                elif kind == "contextCompaction":
+                    # 上下文被压缩了一次（T-0257；0.169.0 生成的接口定义里只有 type 和 id）
+                    await sink(
+                        "compaction", {"trigger": None, "pre_tokens": None, "post_tokens": None}
+                    )
                 elif kind == "imageGeneration" and isinstance(item.get("savedPath"), str):
                     # 模型画的图：官方程序已经存成文件，交给 engine 收进附件
                     await sink("image", {"path": item["savedPath"]})
             elif method == "thread/tokenUsage/updated":
-                last = (params.get("tokenUsage") or {}).get("last") or {}
+                usage = params.get("tokenUsage") or {}
+                last = usage.get("last") or {}
+                # 最近一次模型调用的输入加输出，就是下一次要带上的上下文；窗口大小官方程序给了才有
+                context = {"used": int(last.get("totalTokens") or 0)}
+                if isinstance(usage.get("modelContextWindow"), int):
+                    context["window"] = usage["modelContextWindow"]
+                outcome.context = {k: v for k, v in context.items() if v > 0}
                 outcome.usage = {
                     "input_tokens": int(last.get("inputTokens") or 0),
                     "output_tokens": int(last.get("outputTokens") or 0),

@@ -563,6 +563,52 @@ async def test_search_finds_text_in_questions_and_answers_and_usage_adds_up(brid
     assert quota["credits_5h"] is None
 
 
+async def test_context_usage_and_compactions_are_visible(bridge: Bridge) -> None:
+    """上下文用了多少、平台压缩过几次：回合结果、会话信息、会话内容里都看得到（T-0257）。"""
+    a = await _session(bridge, "agent-1")
+    first = await _send(bridge, "agent-1", a, "第一问", "r1")
+    assert first["context"] == {
+        "used": 1000,
+        "window": 200_000,
+        "percent": 0,
+        "compactions": 0,
+        "last_compacted_at": None,
+    }
+    hit = await _send(bridge, "agent-1", a, "compact:300 第二问", "r2")
+    assert hit["context"]["used"] == 300 and hit["context"]["compactions"] == 1
+    assert hit["context"]["last_compacted_at"]
+    # 没报用量的回合：留着上一次的数
+    kept = await _send(bridge, "agent-1", a, "nocontext: 第三问", "r3")
+    assert kept["context"]["used"] == 300
+
+    view = (await bridge.admin("GET", f"/admin/sessions/{a}")).json()
+    assert view["session"]["context"]["compactions"] == 1
+    roles = [m["role"] for m in view["messages"]]
+    # 分隔画在发生压缩的那一回合的回答之前
+    assert roles == [
+        "user",
+        "assistant",
+        "user",
+        "context_compacted",
+        "assistant",
+        "user",
+        "assistant",
+    ]
+    mark = view["messages"][3]
+    assert (mark["trigger"], mark["pre_tokens"], mark["post_tokens"]) == ("auto", 2000, 300)
+
+    # 智能体读会话：一条 text=context_compacted 的记录
+    got = await bridge.tool("agent-1", "llm_session_get", {"session_id": a})
+    assert got["session"]["context"]["compactions"] == 1
+    assert [m["text"] for m in got["messages"] if m["role"] == "status"] == ["context_compacted"]
+
+    # 清空上下文之后，用量从头算
+    cleared = await bridge.admin("POST", f"/admin/sessions/{a}/clear", json={"by": "测试"})
+    assert cleared.status_code == 200, cleared.text
+    after = (await bridge.admin("GET", f"/admin/sessions/{a}")).json()["session"]["context"]
+    assert after["used"] is None and after["compactions"] == 1
+
+
 async def test_reported_credits_show_on_the_turn_and_add_up(bridge: Bridge) -> None:
     """官方程序报了这一回合消耗的积分（CodeBuddy）：回合上带着，用量和最近 5 小时里相加。"""
     a = await _session(bridge, "agent-1")

@@ -12850,6 +12850,35 @@ export interface components {
             cleared_at?: number | null;
             session: components["schemas"]["LlmChatSessionOut"];
         };
+        /**
+         * LlmChatContextOut
+         * @description 这个会话的上下文用了多少（T-0257）。数字是官方程序报的；没报的那一项为空。
+         */
+        LlmChatContextOut: {
+            /**
+             * Compactions
+             * @description 平台压缩过几次上下文
+             * @default 0
+             */
+            compactions: number;
+            /** Last Compacted At */
+            last_compacted_at?: number | null;
+            /**
+             * Percent
+             * @description 用了百分之多少；两个数都有才给
+             */
+            percent?: number | null;
+            /**
+             * Used
+             * @description 最近一个回合结束时上下文里有多少 token
+             */
+            used?: number | null;
+            /**
+             * Window
+             * @description 上下文窗口多大（token）
+             */
+            window?: number | null;
+        };
         /** LlmChatConversationOut */
         LlmChatConversationOut: {
             /**
@@ -13120,6 +13149,13 @@ export interface components {
              */
             cleared_turns?: number | null;
             /**
+             * Compaction
+             * @description context_compacted：trigger（auto / manual，没报为空）、pre_tokens、post_tokens（压缩前后多少 token，没报为空）
+             */
+            compaction?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Delivery
              * @description 提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；merged 中断上一个回合后合并重发；imported 导入的
              */
@@ -13153,7 +13189,7 @@ export interface components {
             resume?: components["schemas"]["LlmChatResumeOut"] | null;
             /**
              * Role
-             * @description user / assistant；context_cleared：在这里清空了上下文，它之前的内容模型已经不记得
+             * @description user / assistant；context_cleared：在这里清空了上下文，它之前的内容模型已经不记得；context_compacted：平台在这里压缩了上下文，它之前的内容模型只记得摘要
              */
             role: string;
             /**
@@ -13382,6 +13418,8 @@ export interface components {
              * @description 有排队中或进行中的回合
              */
             busy: boolean;
+            /** @description 上下文用了多少、压缩过几次；只在会话内容里给出，官方程序没报过为空 */
+            context?: components["schemas"]["LlmChatContextOut"] | null;
             /** Created At */
             created_at: number;
             /** @description 开发会话用的环境；只在会话内容里给出 */

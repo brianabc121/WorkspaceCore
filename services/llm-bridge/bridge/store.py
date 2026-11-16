@@ -221,6 +221,21 @@ class Store:
             """
         )
         self._migrate_messages()
+        # 平台压缩上下文（T-0257）：每压缩一次记一行；数字是官方程序报的，没报为空
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS compactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+                turn_id TEXT,
+                trigger_kind TEXT,
+                pre_tokens INTEGER,
+                post_tokens INTEGER,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS compactions_session ON compactions (session_id, id);
+            """
+        )
         # 清空上下文（T-0255）：每清空一次记一行，留下清空前的原生会话号和清空的时间
         self._db.executescript(
             """
@@ -296,6 +311,10 @@ class Store:
                 "(o.updated_at = sessions.updated_at AND o.id <= sessions.id))"
             )
         self._db.execute("CREATE INDEX IF NOT EXISTS sessions_rev ON sessions (rev)")
+        # 上下文用了多少、窗口多大（T-0257）：每个回合结束时官方程序报的；没报为空
+        for column in ("context_used", "context_window"):
+            if column not in columns:
+                self._db.execute(f"ALTER TABLE sessions ADD COLUMN {column} INTEGER")
         if "purged_at" not in columns:  # 按保留期清掉了对话内容的时间
             self._db.execute("ALTER TABLE sessions ADD COLUMN purged_at REAL")
         if "request_id" not in columns:  # 新建会话的幂等号（T-0247）：同一个调用方重试不会建出两个
@@ -602,6 +621,28 @@ class Store:
             (session_id, slot, native_id, turns, by, at),
         )
         return {"id": cursor.lastrowid, "turns": turns, "by": by, "at": at}
+
+    def add_compaction(
+        self,
+        session_id: str,
+        turn_id: str | None,
+        trigger: str | None,
+        pre_tokens: int | None,
+        post_tokens: int | None,
+    ) -> None:
+        self._exec(
+            "INSERT INTO compactions (session_id, turn_id, trigger_kind, pre_tokens, post_tokens,"
+            " at) VALUES (?,?,?,?,?,?)",
+            (session_id, turn_id, trigger, pre_tokens, post_tokens, time.time()),
+        )
+
+    def compactions(self, session_id: str) -> list[Row]:
+        """这个会话的上下文被平台压缩过的每一次（按先后）：哪一回合、怎么触发、前后多少 token。"""
+        return self._all(
+            "SELECT id, turn_id, trigger_kind AS trigger, pre_tokens, post_tokens, at "
+            "FROM compactions WHERE session_id = ? ORDER BY id",
+            (session_id,),
+        )
 
     def context_resets(self, session_id: str) -> list[Row]:
         """这个会话清空过几次上下文：每次谁清的、什么时候、清空前那段有几个回合（按先后）。"""

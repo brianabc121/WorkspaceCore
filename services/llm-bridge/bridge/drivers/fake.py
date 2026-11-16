@@ -159,9 +159,21 @@ class FakeDriver(Driver):
             if text.startswith("credits:"):
                 # 模拟报积分的平台（CodeBuddy）：credits:<这一回合消耗的积分>
                 usage |= {"credits": float(text[8:].split()[0]), "credit_status": "known"}
+            context = {"used": 1000 * len(history) // 2, "window": 200_000}
+            if text.startswith("compact:"):
+                # 模拟平台压缩了一次上下文：compact:<压缩后剩多少 token>
+                kept = int(text[8:].split()[0])
+                await sink(
+                    "compaction",
+                    {"trigger": "auto", "pre_tokens": context["used"], "post_tokens": kept},
+                )
+                context["used"] = kept
+            if text.startswith("nocontext:"):
+                context = {}  # 模拟不报上下文用量的平台
             return TurnOutcome(
                 text=reply,
                 usage=usage,
+                context=context,
                 commands=commands,
                 files=files,
             )

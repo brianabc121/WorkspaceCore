@@ -131,6 +131,66 @@ def codebuddy_profile(binary: str) -> CliProfile:
     )
 
 
+def _count(value: Any) -> int | None:
+    """官方程序报的一个 token 数：是不小于 0 的整数才要。"""
+    if isinstance(value, int | float) and not isinstance(value, bool) and value >= 0:
+        return int(value)
+    return None
+
+
+def _compaction(meta: Any) -> dict[str, Any]:
+    """一次上下文压缩。Claude Code 的 `compact_boundary` 带 `compact_metadata`
+    （`trigger`: manual / auto，`pre_tokens`，`post_tokens`，2.1.323 的程序文件里核对）；
+    CodeBuddy Code 2.184.0 只报“正在压缩”的状态，这些都是空的。"""
+    data: dict[str, Any] = meta if isinstance(meta, dict) else {}
+    trigger = data.get("trigger")
+    return {
+        "trigger": trigger if trigger in ("manual", "auto") else None,
+        "pre_tokens": _count(data.get("pre_tokens")),
+        "post_tokens": _count(data.get("post_tokens")),
+    }
+
+
+def _context(result: dict[str, Any], last_usage: dict[str, Any]) -> dict[str, int]:
+    """回合结束时上下文用了多少、窗口多大；官方程序没报的那一项不写。
+
+    - CodeBuddy Code：`result._meta` 的 `codebuddy.ai/contextUsed`、`codebuddy.ai/contextWindow`
+      （程序自带的文档 stream-json-turn-usage）。
+    - Claude Code：窗口在 `result.modelUsage[<模型>].contextWindow`；用了多少取主回合最近一次
+      模型调用的输入（含缓存读写）加输出——下一次调用要带上的就是这些。
+    """
+    out: dict[str, int] = {}
+    meta = result.get("_meta")
+    if isinstance(meta, dict):
+        used, window = (
+            _count(meta.get("codebuddy.ai/contextUsed")),
+            _count(meta.get("codebuddy.ai/contextWindow")),
+        )
+        if used is not None:
+            out["used"] = used
+        if window:
+            out["window"] = window
+    models = result.get("modelUsage")
+    if "window" not in out and isinstance(models, dict):
+        largest = 0
+        for model in models.values():
+            if isinstance(model, dict):
+                largest = max(largest, _count(model.get("contextWindow")) or 0)
+        if largest:
+            out["window"] = largest
+    if "used" not in out and last_usage:
+        keys = (
+            "input_tokens",
+            "cache_read_input_tokens",
+            "cache_creation_input_tokens",
+            "output_tokens",
+        )
+        total = sum(_count(last_usage.get(key)) or 0 for key in keys)
+        if total:
+            out["used"] = total
+    return out
+
+
 _TURN_USAGE = "codebuddy.ai/turnUsage"
 
 
@@ -454,6 +514,8 @@ class CliStreamDriver(Driver):
             messages: list[str] = []
             limited: list[dict[str, Any]] = []
             result: dict[str, Any] | None = None
+            compacting = boundaries = 0  # 压缩（T-0257）：“正在压缩”的状态、带数字的边界事件
+            last_usage: dict[str, Any] = {}
             while line := await proc.stdout.readline():
                 try:
                     event = json.loads(line)
@@ -467,6 +529,16 @@ class CliStreamDriver(Driver):
                         await sink("delta", {"text": delta})
                 elif event.get("type") == "assistant":
                     await self._on_assistant(event, messages, outcome, sink)
+                    used = (event.get("message") or {}).get("usage")
+                    if isinstance(used, dict) and not event.get("parent_tool_use_id"):
+                        last_usage = used  # 主回合最近一次模型调用：它的输入就是现在的上下文
+                elif event.get("type") == "system":
+                    subtype = event.get("subtype")
+                    if subtype == "compact_boundary":
+                        boundaries += 1
+                        await sink("compaction", _compaction(event.get("compact_metadata")))
+                    elif subtype == "status" and event.get("status") == "compacting":
+                        compacting += 1
                 elif event.get("type") == "user":
                     await self._on_tool_results(event, sink)
                 elif event.get("type") == "rate_limit_event":
@@ -482,6 +554,10 @@ class CliStreamDriver(Driver):
             if result is None:
                 tail = redact(stderr.strip()[-300:]) or f"退出码 {proc.returncode}"
                 raise DriverError(_error_kind(tail), f"{self.profile.label} 没有返回结果：{tail}")
+            # 只报“正在压缩”、不报边界事件的程序（CodeBuddy）：按状态出现的次数记
+            for _ in range(compacting if not boundaries else 0):
+                await sink("compaction", _compaction(None))
+            outcome.context = _context(result, last_usage)
             return self._finish(result, messages, outcome, limited)
         finally:
             self._procs.pop(spec.native_id, None)

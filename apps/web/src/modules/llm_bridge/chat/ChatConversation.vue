@@ -4,7 +4,7 @@ import { Archive, ArrowLeft, Download, Eraser, Info, Paperclip, Pencil, RefreshC
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { CHAT_NO_TOOLS, MODES, platformName, seconds, type Bridge, type Platform, type Quota } from '../api'
-import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, hasContext, isClearCommand, needsTakeover, newRequestId, ownerText, slashCommand, type ChatAttachment, type LlmChatApi } from './chatApi'
+import { ATTACHMENTS, IMAGE_ACCEPT, chatError, contextHint, fileSize, hasContext, isClearCommand, needsTakeover, newRequestId, ownerText, slashCommand, type ChatAttachment, type LlmChatApi } from './chatApi'
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
 import ChatInfoPanel from './ChatInfoPanel.vue'
@@ -354,6 +354,7 @@ function archive() {
             <label class="check-field"><input v-model="sendMode" type="radio" name="lc-send-mode" value="insert" />插入</label>
           </fieldset>
           <p v-if="activeTurn" class="lc-hint">{{ inserting ? '插入：这条消息直接送进正在处理的回合。平台做不到时，会中断正在处理的回合，把这条消息和“接着刚才没做完的继续”一起重新发。' : '上一条还没答完：现在发的不会打断它，会进队列，等前面的做完再发给模型。' }}</p>
+          <p v-if="contextHint(session.context)" class="lc-note" role="note">{{ contextHint(session.context) }}</p>
           <p v-if="sendNotice" class="lc-note" role="status">{{ sendNotice }}</p>
         </template>
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>

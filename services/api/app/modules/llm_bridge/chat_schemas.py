@@ -18,6 +18,16 @@ class _In(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LlmChatContextOut(BaseModel):
+    """这个会话的上下文用了多少（T-0257）。数字是官方程序报的；没报的那一项为空。"""
+
+    used: int | None = Field(default=None, description="最近一个回合结束时上下文里有多少 token")
+    window: int | None = Field(default=None, description="上下文窗口多大（token）")
+    percent: int | None = Field(default=None, description="用了百分之多少；两个数都有才给")
+    compactions: int = Field(default=0, description="平台压缩过几次上下文")
+    last_compacted_at: float | None = None
+
+
 class LlmChatSessionOut(BaseModel):
     session_id: str
     platform: str
@@ -43,6 +53,10 @@ class LlmChatSessionOut(BaseModel):
     )
     purged_at: float | None = Field(
         default=None, description="对话内容按保留期清掉的时间；没清过为空"
+    )
+    context: LlmChatContextOut | None = Field(
+        default=None,
+        description="上下文用了多少、压缩过几次；只在会话内容里给出，官方程序没报过为空",
     )
 
 
@@ -92,7 +106,8 @@ class LlmChatResumeOut(BaseModel):
 class LlmChatMessageOut(BaseModel):
     role: str = Field(
         description="user / assistant；context_cleared：在这里清空了上下文，"
-        "它之前的内容模型已经不记得"
+        "它之前的内容模型已经不记得；context_compacted：平台在这里压缩了上下文，"
+        "它之前的内容模型只记得摘要"
     )
     turn_id: str | None = None
     text: str
@@ -102,6 +117,11 @@ class LlmChatMessageOut(BaseModel):
     )
     cleared_turns: int | None = Field(
         default=None, description="context_cleared：清空的那段上下文里有几个回合"
+    )
+    compaction: dict[str, Any] | None = Field(
+        default=None,
+        description="context_compacted：trigger（auto / manual，没报为空）、"
+        "pre_tokens、post_tokens（压缩前后多少 token，没报为空）",
     )
     mine: bool | None = Field(default=None, description="是不是当前用户发的（只有 user 消息有）")
     status: str | None = Field(

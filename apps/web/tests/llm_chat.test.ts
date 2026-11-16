@@ -573,6 +573,23 @@ describe('大模型聊天', () => {
 
   const twoModels: Schema['LlmChatOptionsOut'] = { models: [{ id: 'sonnet', name: 'Sonnet', description: '', default: true, efforts: [] }, { id: 'opus', name: 'Opus', description: '', default: false, efforts: [] }], models_error: '', environments: [] }
 
+  it('shows how full the context is, where the platform compacted it, and warns when it is nearly full', async () => {
+    const mark: Message = { role: 'context_compacted', turn_id: null, text: '', at: now() - 50, compaction: { trigger: 'auto', pre_tokens: 180000, post_tokens: 20000 }, steps: [], attachments: [], imported: false }
+    setup('owner', {}, async (_r, w) => {
+      w.conversations[S1] = talk({ context: { used: 164000, window: 200000, percent: 82, compactions: 1, last_compacted_at: now() - 50 } }, [asked('写一个周报模板'), mark, answered('好的，模板如下。')])
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    await composer()
+    // 压缩的位置：一条分隔，说明之前的内容只剩摘要
+    expect(await screen.findByRole('separator', { name: /平台自动压缩了上下文（.*180,000 → 20,000 token）：之后的回答只记得上面内容的摘要/ })).toBeVisible()
+    // 快用满：输入框上方提示
+    expect(screen.getByText(/上下文已用 82%：每个回合都要带上全部历史/)).toBeVisible()
+    // 会话信息里有一行
+    const info = await screen.findByRole('complementary', { name: '会话信息' })
+    expect(within(info).getByText('已用 82%（164k / 200k），平台压缩过 1 次')).toBeVisible()
+  })
+
   it('clears the context with /clear instead of sending it, and marks where the context was cleared', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const bodies: unknown[] = []

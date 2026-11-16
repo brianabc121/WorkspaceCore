@@ -198,6 +198,8 @@ DESCRIPTIONS: dict[str, str] = {
     "llm_bridge_turn_get": "取一次发送（回合）的状态和结果。默认只给最终回答（太长会截断，"
     "按 result_next_offset 接着取）；detail=steps 再带上过程。"
     "data.outputs 是这一回合产出的文件，用 llm_bridge_file_get 按编号读。"
+    "data.context 是这个会话的上下文现在用了多少（used / window / percent）和平台压缩过几次；"
+    "快用满时，另开一个会话比接着聊省 token。"
     "data.usage 是这一回合的 token 数；CodeBuddy 还带 credits（这一回合消耗的积分，"
     "官方程序报的；不是剩余积分）。" + _NOTE,
     "llm_bridge_file_get": "按编号读一个回合产出的文字文件（编号在回合结果的 data.outputs 里）。"
