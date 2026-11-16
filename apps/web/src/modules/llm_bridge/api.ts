@@ -121,7 +121,14 @@ export function quotaUsage(w: QuotaWindow) {
   return `已用 ${used}%，剩余 ${100 - used}%`
 }
 /** 平台的官方程序不给额度时（CodeBuddy）页面上的说明：不显示猜的数字 */
-export const NO_QUOTA = '这个平台的官方程序不提供剩余额度和重置时间（CodeBuddy 按积分计费），这里显示不了；剩余积分请到平台官网的账号页面查看。'
+export const NO_QUOTA = '这个平台的官方程序不提供剩余积分和重置时间（CodeBuddy 按积分计费），这里显示不了；每个回合消耗的积分在回答下面，剩余积分请到平台官网的账号页面查看。'
+/** 积分：最多两位小数，不带多余的 0 */
+export const credits = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+/** 最近 5 小时经这个管理器用掉多少：token，报积分的平台（CodeBuddy）再加上消耗的积分 */
+export function recentUse(quota: { tokens_5h: number; credits_5h?: number | null }) {
+  const spent = typeof quota.credits_5h === 'number' ? `、消耗 ${credits(quota.credits_5h)} 积分` : ''
+  return `最近 5 小时经这个管理器用掉 ${quota.tokens_5h.toLocaleString()} 个 token${spent}（管理器自己记的，不含别处用的）。`
+}
 /** 一段时间有多长：秒数 → “45 秒”“3 分 20 秒”“1 小时 5 分” */
 export function duration(total: number) {
   const s = Math.round(total)

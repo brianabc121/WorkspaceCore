@@ -120,7 +120,9 @@ class LlmChatMessageOut(BaseModel):
         "waited_seconds（排了多久）、ran_seconds（做了多久）",
     )
     usage: dict[str, Any] | None = Field(
-        default=None, description="这一回合的 token 数（官方程序报的，不是账单）"
+        default=None,
+        description="这一回合的 token 数（官方程序报的，不是账单）；"
+        "CodeBuddy 还带 credits：这一回合消耗的积分",
     )
     next_turn_id: str | None = Field(default=None, description="被打断或续跑时，接着做的是哪一回合")
     source: dict[str, Any] | None = Field(

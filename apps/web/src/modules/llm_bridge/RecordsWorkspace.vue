@@ -6,7 +6,7 @@ import ManagementPage from '../../components/management/ManagementPage.vue'
 import ManagementSection from '../../components/management/ManagementSection.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { formatTime } from '../../features/time'
-import { MODES, OWNER_KIND, PLATFORMS, bridgeError, platformName, seconds, sourceTasks, useLlmBridge, type IndexFilter, type IndexSession, type Platform, type SearchHit, type UsageRow } from './api'
+import { MODES, OWNER_KIND, PLATFORMS, bridgeError, credits, platformName, seconds, sourceTasks, useLlmBridge, type IndexFilter, type IndexSession, type Platform, type SearchHit, type UsageRow } from './api'
 
 // 会话记录（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 4.2）：管理员事后查找、回溯。
 // - 列表来自工作台的会话索引：跨 MCP 管理器，按发起人、平台、用法、时间、有没有失败筛选；不含对话内容。
@@ -96,6 +96,11 @@ const byOwner = computed(() => {
   return [...groups.values()].sort((a, b) => b.tokens - a.tokens || b.turns - a.turns)
 })
 const total = computed(() => byOwner.value.reduce((sum, g) => ({ turns: sum.turns + g.turns, tokens: sum.tokens + g.tokens }), { turns: 0, tokens: 0 }))
+// 消耗的积分：只有报积分的平台（CodeBuddy）的回合有；一个都没有就不显示
+const spent = computed(() => {
+  const known = rows.value.filter((r) => typeof r.credits === 'number')
+  return known.length ? known.reduce((sum, r) => sum + (r.credits ?? 0), 0) : null
+})
 </script>
 
 <template>
@@ -202,7 +207,7 @@ const total = computed(() => byOwner.value.reduce((sum, g) => ({ turns: sum.turn
         <p v-if="usage.data.value?.failed.length" class="lb-warn" role="note">这些 MCP 管理器的用量没有取到：{{ usage.data.value.failed.join('、') }}</p>
         <p v-if="!byOwner.length" class="ws-state-line">这段时间没有回合。</p>
         <template v-else>
-          <p class="form-help">一共 {{ total.turns.toLocaleString() }} 个回合，{{ total.tokens.toLocaleString() }} 个 token。</p>
+          <p class="form-help">一共 {{ total.turns.toLocaleString() }} 个回合，{{ total.tokens.toLocaleString() }} 个 token<template v-if="spent !== null">，CodeBuddy 消耗 {{ credits(spent) }} 积分</template>。</p>
           <table class="asv-table lb-table" aria-label="用量">
             <thead><tr><th scope="col">谁</th><th scope="col">回合</th><th scope="col">失败</th><th scope="col">中断</th><th scope="col">token</th></tr></thead>
             <tbody>

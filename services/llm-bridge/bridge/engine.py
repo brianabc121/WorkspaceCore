@@ -32,7 +32,7 @@ from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
 from bridge.drivers.base import Driver, DriverError, Mode, SessionSpec
 from bridge.redact import mask_identity, redact
-from bridge.store import Row, Store, message_of, new_id, usage_tokens
+from bridge.store import Row, Store, message_of, new_id, usage_credits, usage_tokens
 
 logger = logging.getLogger("bridge.engine")
 
@@ -1374,12 +1374,17 @@ class Engine:
                     "failed": 0,
                     "interrupted": 0,
                     "tokens": 0,
+                    "credits": None,
                 },
             )
             item["turns"] += 1
             item["failed"] += row["status"] in ("failed", "unknown")
             item["interrupted"] += row["status"] == "interrupted"
-            item["tokens"] += usage_tokens((row["summary"] or {}).get("usage") or {})
+            usage = (row["summary"] or {}).get("usage") or {}
+            item["tokens"] += usage_tokens(usage)
+            spent = usage_credits(usage)
+            if spent is not None:
+                item["credits"] = round((item["credits"] or 0.0) + spent, 2)
             if row["owner"]:
                 item["owner"] = row["owner"]
         return {"rows": list(totals.values())}
@@ -2040,6 +2045,7 @@ class Engine:
                     self._save_quota(slot, windows)
         now = time.time()
         pauses, tokens = self.store.pauses(), self.store.tokens_since(now - 5 * 3600)
+        credits = self.store.credits_since(now - 5 * 3600)
         rows: dict[str, list[Row]] = {}
         for row in self.store.quota_windows():
             passed = bool(row["resets_at"]) and row["resets_at"] <= now
@@ -2068,6 +2074,8 @@ class Engine:
                 "pause_estimated": bool(pause["estimated"]) if pause else False,
                 "waiting_resume": len(self.store.pending_resumes(platform)),
                 "tokens_5h": tokens.get(platform, 0),
+                # 只有官方程序报积分的平台（CodeBuddy）有；是消耗掉的，不是剩余的
+                "credits_5h": credits.get(platform),
             }
         return {"platforms": out}
 

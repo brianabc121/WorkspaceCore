@@ -901,6 +901,19 @@ async def test_records_can_be_filtered_searched_and_usage_summed(rig: Rig) -> No
     assert rows["agent"]["turns"] == 2 and rows["agent"]["failed"] == 1
     assert rows["agent"]["owner"] == "openclaw-1" and rows["agent"]["tokens"] > 0
     assert rows["user"]["turns"] == 1 and rows["user"]["bridge_name"] == "主桥"
+    # 没有回合报积分：积分是空的，不是 0
+    assert rows["agent"]["credits"] is None
+    quota = (await rig.api("GET", f"/bridges/{rig.bridge_id}/quota")).json()["platforms"]
+    assert quota["claude"]["credits_5h"] is None
+    # 官方程序报了这一回合消耗的积分（CodeBuddy）：工具结果、用量、最近 5 小时里都有
+    spent = await send(good["session_id"], "credits:2.5 再来一问", "r3")
+    assert spent["usage"]["credits"] == 2.5
+    usage = (await rig.api("GET", "/usage", params={"days": 7})).json()
+    assert {r["owner_kind"]: r for r in usage["rows"]}["agent"]["credits"] == 2.5
+    quota = (await rig.api("GET", f"/bridges/{rig.bridge_id}/quota")).json()["platforms"]
+    assert quota["claude"]["credits_5h"] == 2.5
+    status = ok(await call(env, agent, "llm_bridge_status", {}))
+    assert status["quota"]["claude"]["credits_5h"] == 2.5
     # 管理器连不上：说明哪个没取到
     rig.down[0] = True
     assert (await rig.api("GET", "/usage")).json()["failed"] == ["主桥"]

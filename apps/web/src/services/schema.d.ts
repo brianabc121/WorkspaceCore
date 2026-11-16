@@ -12307,6 +12307,11 @@ export interface components {
              */
             can_refresh: boolean;
             /**
+             * Credits 5H
+             * @description 最近 5 小时经这个管理器消耗的积分（各回合官方程序报的数相加）。只有报积分的平台（CodeBuddy）有；是消耗掉的，不是剩余的
+             */
+            credits_5h?: number | null;
+            /**
              * Pause Estimated
              * @description 平台没说什么时候重置，暂停的时间是估计的
              */
@@ -12318,7 +12323,7 @@ export interface components {
             paused_until: number | null;
             /**
              * Reports Quota
-             * @description 平台给不给额度（已用百分比、重置时间）。CodeBuddy 的官方程序不给：windows 一直是空的，只有 tokens_5h
+             * @description 平台给不给额度（已用百分比、重置时间）。CodeBuddy 的官方程序不给：windows 一直是空的，只有 tokens_5h 和 credits_5h
              * @default true
              */
             reports_quota: boolean;
@@ -12746,6 +12751,11 @@ export interface components {
             /** Bridge Name */
             bridge_name: string;
             /**
+             * Credits
+             * @description 消耗的积分相加（CodeBuddy）；没有回合报积分为空
+             */
+            credits?: number | null;
+            /**
              * Day
              * @description 哪一天（UTC），YYYY-MM-DD
              */
@@ -13129,7 +13139,7 @@ export interface components {
             turn_id?: string | null;
             /**
              * Usage
-             * @description 这一回合的 token 数（官方程序报的，不是账单）
+             * @description 这一回合的 token 数（官方程序报的，不是账单）；CodeBuddy 还带 credits：这一回合消耗的积分
              */
             usage?: {
                 [key: string]: unknown;

@@ -601,7 +601,7 @@ describe('大模型客户端管理', () => {
     expect(within(claude).getByRole('note')).toHaveTextContent(/额度用完，这个平台暂停到 .+（平台没有给出重置时间，这是估计的）；到时间后自动恢复。\s*有 2 个被打断的会话在等自动继续。/)
     expect(within(claude).getByText('已用 100%，剩余 0%')).toBeVisible()
     expect(within(claude).getByText('平台没有给出')).toBeVisible()
-    expect(within(screen.getByRole('article', { name: '额度：CodeBuddy' })).getByText(/官方程序不提供剩余额度和重置时间/)).toBeVisible()
+    expect(within(screen.getByRole('article', { name: '额度：CodeBuddy' })).getByText(/官方程序不提供剩余积分和重置时间/)).toBeVisible()
 
     await fireEvent.click(screen.getByRole('button', { name: '向平台查一次' }))
     await waitFor(() => expect(requests.some(r => path(r) === `${base}/quota` && new URL(r.url).searchParams.get('refresh') === 'true')).toBe(true))

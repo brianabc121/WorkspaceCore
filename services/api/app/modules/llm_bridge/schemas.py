@@ -205,12 +205,17 @@ class LlmBridgeQuotaOut(BaseModel):
     reports_quota: bool = Field(
         default=True,
         description="平台给不给额度（已用百分比、重置时间）。"
-        "CodeBuddy 的官方程序不给：windows 一直是空的，只有 tokens_5h",
+        "CodeBuddy 的官方程序不给：windows 一直是空的，只有 tokens_5h 和 credits_5h",
     )
     paused_until: float | None = Field(description="因为额度用完暂停到什么时候；没暂停为空")
     pause_estimated: bool = Field(description="平台没说什么时候重置，暂停的时间是估计的")
     waiting_resume: int = Field(description="有几个被打断的会话在等自动续跑")
     tokens_5h: int = Field(description="最近 5 小时经这个管理器用掉的 token（管理器自己记的）")
+    credits_5h: float | None = Field(
+        default=None,
+        description="最近 5 小时经这个管理器消耗的积分（各回合官方程序报的数相加）。"
+        "只有报积分的平台（CodeBuddy）有；是消耗掉的，不是剩余的",
+    )
 
 
 class LlmBridgeQuotaList(BaseModel):
@@ -469,6 +474,9 @@ class LlmBridgeUsageRowOut(BaseModel):
     failed: int = Field(description="失败和结果未知的回合数")
     interrupted: int
     tokens: int = Field(description="官方程序报的 token 数相加，不是账单；没报的回合算 0")
+    credits: float | None = Field(
+        default=None, description="消耗的积分相加（CodeBuddy）；没有回合报积分为空"
+    )
 
 
 class LlmBridgeUsageOut(BaseModel):

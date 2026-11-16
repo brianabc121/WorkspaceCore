@@ -15,6 +15,7 @@ import asyncio
 import base64
 import contextlib
 import json
+import math
 import os
 import re
 import uuid
@@ -128,6 +129,42 @@ def codebuddy_profile(binary: str) -> CliProfile:
         allow_existing=False,
         reports_quota=False,
     )
+
+
+_TURN_USAGE = "codebuddy.ai/turnUsage"
+
+
+def _turn_usage(result: dict[str, Any]) -> dict[str, Any]:
+    """回合结果里的用量。
+
+    CodeBuddy Code 的 `result.usage` 是整个会话累计的 token；这一回合自己的在
+    `result._meta["codebuddy.ai/turnUsage"].total` 里，连同这一回合消耗的积分
+    （官方文档 stream-json-turn-usage，2.184.0 核验）。有它就用它；没有（Claude Code、
+    旧版本）用 `result.usage`。积分只取官方报出来的数，没报就不写，不拿 token 折算。
+    """
+    raw = result.get("usage")
+    usage: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    meta = result.get("_meta")
+    turn = meta.get(_TURN_USAGE) if isinstance(meta, dict) else None
+    total = turn.get("total") if isinstance(turn, dict) else None
+    out: dict[str, Any] = {}
+    if isinstance(total, dict):
+        if isinstance(total.get("usage"), dict):
+            usage = total["usage"]
+        credits = total.get("credits")
+        if (
+            isinstance(credits, int | float)
+            and not isinstance(credits, bool)
+            and math.isfinite(credits)
+            and credits >= 0
+        ):
+            out["credits"] = round(float(credits), 2)
+        status = total.get("creditStatus")
+        if status in ("known", "partial", "unknown"):
+            out["credit_status"] = status
+    out["input_tokens"] = int(usage.get("input_tokens") or 0)
+    out["output_tokens"] = int(usage.get("output_tokens") or 0)
+    return out
 
 
 def _error_kind(text: str) -> ErrorKind:
@@ -523,12 +560,7 @@ class CliStreamDriver(Driver):
                     resets_at=min(resets) if resets else quota.parse_reset(text),
                 )
             raise DriverError(_error_kind(text), redact(text)[:500])
-        raw = result.get("usage")
-        usage: dict[str, Any] = raw if isinstance(raw, dict) else {}
-        outcome.usage = {
-            "input_tokens": int(usage.get("input_tokens") or 0),
-            "output_tokens": int(usage.get("output_tokens") or 0),
-        }
+        outcome.usage = _turn_usage(result)
         final = result.get("result")
         outcome.text = (
             final if isinstance(final, str) and final else (messages[-1] if messages else "")

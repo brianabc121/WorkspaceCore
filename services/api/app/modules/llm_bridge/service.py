@@ -708,6 +708,7 @@ class LlmBridgeService:
                         failed=int(item.get("failed") or 0),
                         interrupted=int(item.get("interrupted") or 0),
                         tokens=int(item.get("tokens") or 0),
+                        credits=_credits(item.get("credits")),
                     )
                 )
         rows.sort(key=lambda r: (r.day, r.tokens), reverse=True)
@@ -807,3 +808,10 @@ class LlmBridgeService:
         )
         await self.db.commit()
         return self._grant_out(instance, row)
+
+
+def _credits(value: Any) -> float | None:
+    """管理器报的积分：是数才要，旧版本的管理器没有这一项。"""
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return round(float(value), 2)
+    return None

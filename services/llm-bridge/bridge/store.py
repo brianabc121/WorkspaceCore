@@ -158,6 +158,14 @@ def usage_tokens(usage: Row) -> int:
     return int(used or 0)
 
 
+def usage_credits(usage: Row) -> float | None:
+    """官方程序报的这一回合消耗的积分（CodeBuddy）；没报为空，不当成 0。"""
+    credits = usage.get("credits")
+    if isinstance(credits, int | float) and not isinstance(credits, bool):
+        return float(credits)
+    return None
+
+
 class Store:
     def __init__(self, path: Path | str) -> None:
         if isinstance(path, Path):
@@ -773,6 +781,21 @@ class Store:
         for row in rows:
             used = usage_tokens((row["summary"] or {}).get("usage") or {})
             totals[row["platform"]] = totals.get(row["platform"], 0) + used
+        return totals
+
+    def credits_since(self, since: float) -> dict[str, float]:
+        """各平台最近一段时间经这座桥消耗的积分；只含官方程序报了积分的平台（CodeBuddy）。"""
+        totals: dict[str, float] = {}
+        rows = self._all(
+            "SELECT s.platform AS platform, t.summary AS summary FROM turns t"
+            " JOIN sessions s ON s.id = t.session_id WHERE t.finished_at >= ?"
+            " AND t.summary IS NOT NULL",
+            (since,),
+        )
+        for row in rows:
+            used = usage_credits((row["summary"] or {}).get("usage") or {})
+            if used is not None:
+                totals[row["platform"]] = round(totals.get(row["platform"], 0.0) + used, 2)
         return totals
 
     def next_queued(self, session_id: str) -> Row | None:

@@ -861,6 +861,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 - 平台给的是**已用百分比和重置时间**，不是剩余 token 数。Codex 可以随时查；Claude 只在跑回合时顺带报出来，接口给的是最近一次看到的。
 - 每个平台多一个 `reports_quota`（T-0242）：平台给不给额度。CodeBuddy 是 `false`——锁定版本（2.184.0）的官方程序在回合输出里不带已用百分比和重置时间，也没有能查的接口，所以 `windows` 一直是空的，只有 `tokens_5h`；页面照实说明，不显示猜的数字。旧版本的管理器没有这个字段，按 `true` 处理。
+- 每个平台多一个 `credits_5h`（T-0254）：最近 5 小时经这个管理器消耗的积分，各回合官方程序报的数相加；只有报积分的平台（CodeBuddy）有，别的是 `null`。是消耗掉的，不是剩余的。回合的 `usage` 里相应多 `credits`、`credit_status`；用量（`GET /api/v1/llm_bridge/usage`）每行多 `credits`。CodeBuddy 回合的 `usage` 里的 token 改为这一回合自己的（之前是会话累计的）。
 - 状态（`GET .../bridges/{id}/status`）多一个 `quota`：每个平台的 `windows`（`kind`：`five_hour` / `weekly` / 平台给的别的名字；`used_percent`、`resets_at`、`reset_passed`、`status`：`ok` / `warning` / `exceeded`、`plan`、`observed_at`）、`can_refresh`、`paused_until`、`pause_estimated`、`waiting_resume`、`tokens_5h`（最近 5 小时经这个管理器用掉的 token，管理器自己记的）。
 - 设置多三项：`auto_resume`（默认开）、`auto_resume_max`（同一次中断最多自动续几次，默认 3，1–10）、`resume_text`（自动继续时发的那句话，默认“继续意外中断的任务”，1–200 字）。
 - 回合多一个状态 `interrupted`（`failure.kind = quota_exceeded`）：额度用完被打断，不算失败。这样的回合带 `resume`：`state`（`pending` 到点自动继续 / `forced` 有人点了现在就试 / `done` 已经续跑 / `cancelled` 不要自动继续 / `skipped` / `exhausted` 次数用完）、`at`、`attempt`、`resumed_by`。平台暂停期间新发的消息排队，不去撞限额。
