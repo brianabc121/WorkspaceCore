@@ -21121,7 +21121,7 @@
             "title": "Path"
           },
           "section": {
-            "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+            "pattern": "^(workspace|tools|admin|apps|servers|custom-[a-z0-9][a-z0-9-]{0,39})$",
             "title": "Section",
             "type": "string"
           },
@@ -21203,7 +21203,7 @@
           },
           "placements": {
             "additionalProperties": {
-              "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+              "pattern": "^(workspace|tools|admin|apps|servers|custom-[a-z0-9][a-z0-9-]{0,39})$",
               "type": "string"
             },
             "description": "已有页面挪到哪个分组：{站内路径: 分组}",
@@ -21217,7 +21217,7 @@
           "section_order": {
             "description": "分组顺序；没列出的排在后面",
             "items": {
-              "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+              "pattern": "^(workspace|tools|admin|apps|servers|custom-[a-z0-9][a-z0-9-]{0,39})$",
               "type": "string"
             },
             "maxItems": 16,
@@ -21271,7 +21271,7 @@
           },
           "placements": {
             "additionalProperties": {
-              "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+              "pattern": "^(workspace|tools|admin|apps|servers|custom-[a-z0-9][a-z0-9-]{0,39})$",
               "type": "string"
             },
             "description": "已有页面挪到哪个分组：{站内路径: 分组}",
@@ -21285,7 +21285,7 @@
           "section_order": {
             "description": "分组顺序；没列出的排在后面",
             "items": {
-              "pattern": "^(workspace|tools|admin|apps|custom-[a-z0-9][a-z0-9-]{0,39})$",
+              "pattern": "^(workspace|tools|admin|apps|servers|custom-[a-z0-9][a-z0-9-]{0,39})$",
               "type": "string"
             },
             "maxItems": 16,

@@ -22,7 +22,7 @@ const json = async (requests: Request[], method: string, p: string) => {
 afterEach(() => { vi.restoreAllMocks(); sessionStorage.clear(); localStorage.clear() })
 
 describe('agent servers page: navigation and old links', () => {
-  it('has its own sidebar entry next to OpenClaw 智能体, and the runner page stays separate', async () => {
+  it('sits with the runner page in the 服务器 group, separate from OpenClaw 智能体', async () => {
     setup(r => path(r) === '/api/v1/agents/servers' ? Response.json(serverList([])) : undefined)
     await openApp('/agent-servers')
     expect(await screen.findByRole('heading', { level: 1, name: '智能体服务器' })).toBeVisible()
@@ -31,7 +31,12 @@ describe('agent servers page: navigation and old links', () => {
     expect(within(nav).getByRole('link', { name: '智能体服务器' })).toHaveAttribute('href', '/agent-servers')
     expect(within(nav).getByRole('link', { name: 'OpenClaw 智能体' })).toHaveAttribute('href', '/agents')
     expect(within(nav).getByRole('link', { name: '容器服务器' })).toHaveAttribute('href', '/runner')
-    expect(links.indexOf('智能体服务器')).toBe(links.indexOf('OpenClaw 智能体') - 1)
+    // 一级分类“服务器”：智能体服务器、容器服务器两项，排在“连接与工具”后面（人类 2026-11-16 要求）
+    const group = (name: string) => document.getElementById(within(nav).getByRole('button', { name }).getAttribute('aria-controls')!)!
+    expect(within(group('服务器')).getAllByRole('link').map(a => a.textContent?.trim())).toEqual(['智能体服务器', '容器服务器'])
+    expect(within(group('连接与工具')).getByRole('link', { name: 'OpenClaw 智能体' })).toBeInTheDocument()
+    const groups = within(nav).getAllByRole('button').map(b => b.textContent?.trim())
+    expect(groups.indexOf('服务器')).toBe(groups.indexOf('连接与工具') + 1)
     expect(links).not.toContain('OpenClaw 实例')
   })
 
