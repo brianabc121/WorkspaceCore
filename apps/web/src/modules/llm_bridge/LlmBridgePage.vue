@@ -23,17 +23,19 @@ const manage = computed(() => route.query.view === 'manage')
 const records = computed(() => route.query.view === 'records')
 const digests = computed(() => route.query.view === 'digests')
 const chat = computed(() => !manage.value && !records.value && !digests.value)
+// 页头的一句说明随视图变化
+const subtitle = computed(() => (manage.value ? '管理运行位置、平台登录与智能体访问' : records.value ? '跨管理器查找、回溯会话，看用量' : digests.value ? '回顾会话记录，将值得保留的内容转成正式笔记' : '连接你的 AI，让对话与工作衔接'))
 const scopeKey = computed(() => `${auth.user?.id}:${auth.workspaceId}`)
 </script>
 
 <template>
   <template v-if="auth.canManage && auth.workspaceId">
-    <header class="lc-views" :class="{ 'is-chat': chat }">
-      <div v-if="chat" class="lc-hero">
+    <header class="lc-views">
+      <div class="lc-hero">
         <span class="lc-hero-icon" aria-hidden="true"><Box /></span>
         <div class="lc-hero-text">
           <h1>大模型客户端</h1>
-          <p>连接你的 AI，让对话与工作衔接</p>
+          <p>{{ subtitle }}</p>
         </div>
       </div>
       <nav aria-label="大模型客户端的视图">

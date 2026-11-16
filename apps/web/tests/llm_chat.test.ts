@@ -100,10 +100,13 @@ describe('大模型聊天', () => {
     const views = screen.getByRole('navigation', { name: '大模型客户端的视图' })
     expect(within(views).getByRole('link', { name: '对话' })).toHaveAttribute('aria-current', 'page')
     await fireEvent.click(within(views).getByRole('link', { name: '管理器与账号' }))
-    expect(await screen.findByRole('heading', { level: 1, name: '大模型客户端管理' })).toBeVisible()
+    // 四个视图共用页头（大模型客户端），说明随视图变化；子页面的标题在页内卡片上
+    expect(await screen.findByRole('heading', { level: 2, name: '管理器与账号' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: '大模型客户端' })).toBeVisible()
+    expect(screen.getByText('管理运行位置、平台登录与智能体访问', { selector: '.lc-hero p' })).toBeVisible()
     expect(router.currentRoute.value.query.view).toBe('manage')
     await fireEvent.click(within(views).getByRole('link', { name: '对话' }))
-    expect(await screen.findByRole('heading', { level: 1, name: '大模型客户端' })).toBeVisible()
+    expect(await screen.findByText('连接你的 AI，让对话与工作衔接')).toBeVisible()
   })
 
   it('lists the sessions by day with who made them, and searches, filters and syncs', async () => {
@@ -829,15 +832,51 @@ describe('大模型聊天', () => {
     expect(actions).toEqual(steps.map(([, action]) => action))
   })
 
-  it('lists all digests in their own view', async () => {
+  it('lists all digests in their own view and previews the chosen one section by section', async () => {
     const item: Schema['LlmBridgeDigestItem'] = { id: 'd1', bridge_id: ONE, bridge_name: '主账号', session_id: S1, session_title: '周报怎么写', owner: 'openclaw-1', owner_kind: 'agent', note_id: 'n1', note_title: '会话纪要：周报怎么写', space_id: 'sp', space_name: 'openclaw-1', state: 'active', turns_written: 4, written_at: '2026-11-16T01:00:00Z', reason: 'idle' }
-    setup('owner', {}, r => (path(r) === '/api/v1/llm_bridge/digests' ? Response.json({ digests: [item], next_offset: null }) : undefined))
+    const other: Schema['LlmBridgeDigestItem'] = { ...item, id: 'd2', session_id: S2, session_title: '旧的会话', note_id: null, note_title: null, state: 'deleted', reason: null }
+    const body = ['> **会话纪要（未确认）**', '', '## 结论和决定', '', '先备份再升级', '', '## 没解决的问题', '', '- 第 2 回合失败', '', '## 涉及的文件和命令', '', '- 文件：`src/a.py`', '', '## 后续要做的', '', '（由人补上）', '', '## 回合清单',
+      '', `### 第 1 回合（2026-11-16 01:00，完成） [打开](/llm_bridge?m=${ONE}&s=${S1}&t=${T1})`, '', '**问**：', '', '> 写一个周报模板', '',
+      `### 第 2 回合（2026-11-16 01:05，失败） [打开](/llm_bridge?m=${ONE}&s=${S1}&t=${T2})`, '', '**问**：', '', '> 再写一份', ''].join('\n')
+    const asked: (string | null)[] = []
+    setup('owner', {}, r => {
+      if (path(r) === '/api/v1/llm_bridge/digests') { const u = new URL(r.url); asked.push(u.searchParams.get('state')); return Response.json({ digests: u.searchParams.get('state') === 'deleted' ? [other] : [item, other], next_offset: null }) }
+      if (path(r) === '/api/v1/knowledge/notes/n1') return Response.json({ id: 'n1', title: item.note_title, body, version: 1 })
+      return undefined
+    })
     await openApp('/llm_bridge?view=digests')
-    const table = await screen.findByRole('table', { name: '会话纪要' })
-    expect(within(table).getByRole('link', { name: '会话纪要：周报怎么写' })).toHaveAttribute('href', '/knowledge/notes/n1')
-    expect(within(table).getByRole('link', { name: '周报怎么写' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S1}`)
-    expect(within(table).getByText('24 小时没有新回合')).toBeVisible()
+    const list = await screen.findByRole('region', { name: '纪要列表' })
+    const first = await within(list).findByRole('button', { name: /周报怎么写/ })
+    expect(first).toHaveAttribute('aria-current', 'true')
+    expect(first).toHaveTextContent('未确认')
+    expect(first).toHaveTextContent('openclaw-1 · 主账号')
+    expect(first).toHaveTextContent('4 个回合')
+    const preview = screen.getByRole('region', { name: '纪要预览' })
+    expect(within(preview).getByRole('heading', { name: '会话纪要：周报怎么写' })).toBeVisible()
+    expect(within(preview).getByRole('link', { name: '查看原会话' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S1}`)
+    expect(within(preview).getByRole('link', { name: '知识库中打开' })).toHaveAttribute('href', '/knowledge/notes/n1')
+    expect(within(preview).getByText('24 小时没有新回合')).toBeVisible()
+    // 正文按栏分开；回合清单最新的在前，默认展开最新的一回合
+    expect(await within(preview).findByRole('region', { name: '结论和决定' })).toHaveTextContent('先备份再升级')
+    expect(within(preview).getByRole('region', { name: '涉及的文件和命令' }).querySelector('code')).toHaveTextContent('src/a.py')
+    const turns = within(preview).getByRole('region', { name: '回合清单' })
+    const heads = within(turns).getAllByRole('button')
+    expect(heads.map(b => b.textContent)).toEqual(['第 2 回合· 失败', '第 1 回合· 完成'])
+    expect(heads[0]).toHaveAttribute('aria-expanded', 'true')
+    expect(within(turns).getByText('再写一份')).toBeVisible()
+    await fireEvent.click(heads[1]!)
+    expect(within(turns).getByText('写一个周报模板')).toBeVisible()
+    expect(within(turns).getByRole('link', { name: '打开这一回合' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S1}&t=${T1}`)
+    expect(within(preview).getByRole('button', { name: '关闭自动更新' })).toBeVisible()
+    // 删掉的那篇：没有正文可预览
+    await fireEvent.click(within(list).getByRole('button', { name: /旧的会话/ }))
+    expect(await within(preview).findByText(/没有可以预览的内容/)).toBeVisible()
+    // 按状态看：“更多”里的已删除
+    await fireEvent.click(screen.getByRole('button', { name: '更多' }))
+    await fireEvent.click(within(screen.getByRole('group', { name: '更多状态' })).getByRole('button', { name: '已删除' }))
+    await waitFor(() => expect(asked).toContain('deleted'))
     expect(screen.getByRole('link', { name: '会话纪要' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: '纪要设置' })).toHaveAttribute('href', '/llm_bridge?view=manage&tab=settings')
   })
 
   it('compacts or continues with a summary from the near-limit hint and tags those turns', async () => {

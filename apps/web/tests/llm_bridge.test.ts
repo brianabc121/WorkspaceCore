@@ -60,7 +60,7 @@ describe('大模型客户端管理', () => {
   it('shows the registered bridges, the account states and the channels', async () => {
     const requests = setup('owner')
     await openApp('/llm_bridge?view=manage')
-    expect(await screen.findByRole('heading', { level: 1, name: '大模型客户端管理' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 2, name: '管理器与账号' })).toBeVisible()
     const list = await screen.findByRole('region', { name: 'MCP 管理器' })
     expect(await within(list).findByRole('button', { name: '查看 MCP 管理器：主账号' })).toBeVisible()
     expect(within(list).getByText('http://10.0.0.5:8787')).toBeVisible()
@@ -74,8 +74,9 @@ describe('大模型客户端管理', () => {
     expect(within(workbuddy).getByText('账号不一致')).toBeVisible()
     expect(within(workbuddy).getByText(/只能点“更换账号”/)).toBeVisible()
     expect(within(workbuddy).queryByRole('button', { name: '登录CodeBuddy' })).not.toBeInTheDocument()
-    expect(screen.getByText('排队中 1')).toBeVisible()
-    expect(screen.getByText('进行中 2')).toBeVisible()
+    const overview = screen.getByRole('group', { name: '运行概览' })
+    expect(overview).toHaveTextContent('排队中 1')
+    expect(overview).toHaveTextContent('进行中 2')
     expect(within(screen.getByRole('table', { name: '通道' })).getByText('云端通道还没有实现')).toBeVisible()
     expect(requests.find(r => path(r) === `${base}/status`)!.headers.get('X-Workspace-Id')).toBe('workspace-a')
   })
@@ -134,7 +135,7 @@ describe('大模型客户端管理', () => {
     expect(await within(env).findByText('工作台仓库')).toBeVisible()
     expect(within(env).getByText('可写工作区')).toBeVisible()
     expect(within(env).queryByRole('button')).not.toBeInTheDocument()
-    const set = await openTab('设置')
+    const set = await openTab('运行设置')
     expect(within(set).getByLabelText('每个平台同时进行的会话数')).toBeDisabled()
     expect(within(set).queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
     expect(writes(requests)).toEqual([])
@@ -330,7 +331,7 @@ describe('大模型客户端管理', () => {
       return undefined
     })
     await openApp('/llm_bridge?view=records')
-    expect(await screen.findByRole('heading', { level: 1, name: '会话记录' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 2, name: '会话记录' })).toBeVisible()
     // 列表：谁建的、平台和用法、回合和失败、token；点标题进聊天页；出处里的任务能点到任务
     const table = await screen.findByRole('table', { name: '会话记录' })
     const row = within(table).getAllByRole('row')[1]!
@@ -443,6 +444,30 @@ describe('大模型客户端管理', () => {
     expect(screen.getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' })).toBeVisible()
   })
 
+  it('finds managers by name, opens the tab named in the address and keeps the actions in the 管理操作 menu', async () => {
+    const one = { ...bridge, name: '1 号' }, two = { ...bridge, id: OTHER, name: '2 号', base_url: 'http://llm-bridge-2:8787' }
+    setup('owner', r => (path(r) === `/api/v1/llm_bridge/bridges/${OTHER}/status` ? Response.json(status()) : undefined), [one, two])
+    // 从“会话纪要”的“纪要设置”过来：?tab=settings 直接打开运行设置
+    await openApp('/llm_bridge?view=manage&tab=settings')
+    expect(await screen.findByRole('tab', { name: '运行设置' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('Owner')).toBeVisible()
+    const list = screen.getByRole('region', { name: 'MCP 管理器' })
+    expect(within(list).getByRole('heading', { name: 'MCP 管理器 · 2' })).toBeVisible()
+    await fireEvent.update(within(list).getByRole('searchbox', { name: '查找管理器' }), '2')
+    await waitFor(() => expect(within(list).queryByRole('article', { name: 'MCP 管理器：1 号' })).not.toBeInTheDocument())
+    expect(within(list).getByRole('article', { name: 'MCP 管理器：2 号' })).toBeVisible()
+    // 右边详情：连接状态、在哪儿；操作收在“管理操作”里，按 Esc 收起
+    const detail = screen.getByRole('region', { name: 'MCP 管理器：1 号' })
+    expect(await within(detail).findByText('已连接')).toBeVisible()
+    expect(within(detail).getByText('http://10.0.0.5:8787')).toBeVisible()
+    expect(within(detail).queryByRole('button', { name: '停用1 号' })).not.toBeInTheDocument()
+    await fireEvent.click(within(detail).getByRole('button', { name: '管理操作' }))
+    expect(within(detail).getByRole('group', { name: '管理操作：1 号' })).toBeVisible()
+    for (const name of ['修改1 号', '停用1 号', '删除1 号']) expect(within(detail).getByRole('button', { name })).toBeVisible()
+    await fireEvent.keyDown(document, { key: 'Escape' })
+    expect(within(detail).queryByRole('button', { name: '停用1 号' })).not.toBeInTheDocument()
+  })
+
   it('changes the controlled platforms after confirming, never to none, and only offers logout for an unchecked platform', async () => {
     let platforms = ['codex', 'claude']
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
@@ -522,7 +547,7 @@ describe('大模型客户端管理', () => {
   it('turns session digests off in the settings, sending only what changed', async () => {
     const requests = setup('owner', async r => (path(r) === `${base}/settings` ? Response.json({ ...settings, ...(await r.clone().json()) }) : undefined))
     await openApp('/llm_bridge?view=manage')
-    const set = await openTab('设置')
+    const set = await openTab('运行设置')
     // 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：默认开；只在改了的时候提交（旧版本的管理器不认识这两项）
     const digest = await within(set).findByRole('group', { name: '会话纪要' })
     expect(within(digest).getByLabelText(/把会话的重点自动整理成纪要/)).toBeChecked()
@@ -543,7 +568,7 @@ describe('大模型客户端管理', () => {
       return undefined
     })
     await openApp('/llm_bridge?view=manage')
-    const set = await openTab('设置')
+    const set = await openTab('运行设置')
     const group = await within(set).findByRole('group', { name: '自动压缩的位置' })
     const claude = within(group).getByLabelText('Claude：上下文用到百分之多少时自动压缩')
     expect(claude).toHaveValue(0)
@@ -563,7 +588,7 @@ describe('大模型客户端管理', () => {
       return undefined
     })
     await openApp('/llm_bridge?view=manage')
-    const set = await openTab('设置')
+    const set = await openTab('运行设置')
     const group = await within(set).findByRole('group', { name: '压缩时的钩子' })
     const box = within(group).getByLabelText(/压缩上下文时，提醒它保留要紧的内容/)
     expect(box).not.toBeChecked()
@@ -582,7 +607,7 @@ describe('大模型客户端管理', () => {
   it('shows no hooks switch for a manager that does not know it', async () => {
     setup('owner', async r => (path(r) === `${base}/status` ? Response.json({ ...status(), settings }) : undefined))
     await openApp('/llm_bridge?view=manage')
-    const set = await openTab('设置')
+    const set = await openTab('运行设置')
     await within(set).findByRole('button', { name: '保存设置' })
     expect(within(set).queryByRole('group', { name: '压缩时的钩子' })).toBeNull()
   })
@@ -594,7 +619,7 @@ describe('大模型客户端管理', () => {
       return undefined
     })
     await openApp('/llm_bridge?view=manage')
-    const set = await openTab('设置')
+    const set = await openTab('运行设置')
     const concurrency = await within(set).findByLabelText('每个平台同时进行的会话数')
     expect(concurrency).toHaveValue(2)
     expect(concurrency).toHaveAttribute('max', '16')
@@ -764,7 +789,7 @@ describe('大模型客户端管理', () => {
     expect(await within(card).findByRole('alert')).toHaveTextContent(/MCP 管理器不接受这枚令牌/)
     const env = await openTab('开发环境')
     expect(await within(env).findByText(/MCP 管理器暂时连不上/)).toBeVisible()
-    expect(screen.getByRole('heading', { level: 1, name: '大模型客户端管理' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 2, name: '管理器与账号' })).toBeVisible()
   })
 
   it('treats MODULE_DISABLED as 功能已停用, not as a failure', async () => {
@@ -779,7 +804,7 @@ describe('大模型客户端管理', () => {
   it('keeps members out of the page', async () => {
     const requests = setup('member')
     await openApp('/llm_bridge?view=manage')
-    await waitFor(() => expect(screen.queryByRole('heading', { level: 1, name: '大模型客户端管理' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('heading', { level: 2, name: '管理器与账号' })).not.toBeInTheDocument())
     expect(requests.some(r => path(r).startsWith('/api/v1/llm_bridge'))).toBe(false)
   })
 })

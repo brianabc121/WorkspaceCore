@@ -1,4 +1,4 @@
-import { computed, type Ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../../services/api'
@@ -245,9 +245,9 @@ export function useLlmChat(scope: string) {
         params: { ...at(bridge), query: { q: q.slice(0, 2000), ...(session ? { session_id: session } : {}), ...(limit ? { limit } : {}) } }, signal,
       }))
     },
-    useDigests: (state: Ref<string | null>, wanted: Ref<boolean>) => useQuery({
-      queryKey: computed(() => key('digests', state.value)), enabled: computed(() => active() && wanted.value),
-      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/digests', { params: { header, query: { limit: 200, ...(state.value ? { state: state.value } : {}) } }, signal })),
+    useDigests: (state: Ref<string | null>, wanted: Ref<boolean>, bridge: Ref<string | null> = ref(null)) => useQuery({
+      queryKey: computed(() => key('digests', state.value, bridge.value)), enabled: computed(() => active() && wanted.value),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/digests', { params: { header, query: { limit: 200, ...(state.value ? { state: state.value } : {}), ...(bridge.value ? { bridge_id: bridge.value } : {}) } }, signal })),
     }),
     /** 会话纪要的操作：关掉 / 打开、现在整理、转成正式笔记、删除（进回收站） */
     async digest(bridge: string, session: string, action: 'on' | 'off' | 'write' | 'promote' | 'delete') {

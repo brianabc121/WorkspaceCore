@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, toRef } from 'vue'
-import { RefreshCw } from '@lucide/vue'
-import ManagementSection from '../../components/management/ManagementSection.vue'
+import { Activity, ArrowRight, Clock, KeyRound, Play, RefreshCw, UserRound } from '@lucide/vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
-import BridgeQuota from './BridgeQuota.vue'
+import AccountQuota from './AccountQuota.vue'
+import { PLATFORM_MARK } from './chat/chatApi'
 import BridgeConnectivity from './BridgeConnectivity.vue'
 import { ApiError } from '../../services/api'
-import { ACCOUNT_STATE, METHODS, MODES, PLATFORMS, PLATFORM_SLOT, bridgeError, methodName, platformName, seconds, type Account, type Bridge, type BridgeStatus, type LlmBridgeApi, type LoginBody, type LoginMethod, type Platform, type Slot } from './api'
+import { ACCOUNT_STATE, METHODS, MODES, PLATFORMS, PLATFORM_SLOT, bridgeError, methodName, platformName, seconds, type Account, type ConnectivityTarget, type Bridge, type BridgeStatus, type LlmBridgeApi, type LoginBody, type LoginMethod, type Platform, type Slot } from './api'
 
 // 一个 MCP 管理器的平台与账号：它控制哪些平台（owner 勾选，立即保存）、这些平台的账号登录情况与操作、
 // 通道、排队与进行中的回合数。没勾选的平台不能登录，智能体也用不了；已有的登录保留着，可以退出。
@@ -51,6 +51,29 @@ const accountOf = (platform: Platform) => props.status?.accounts.find(a => a.slo
 // 没勾选的平台：只有还登录着（或账号不一致）才显示，方便退出登录
 const accounts = computed(() => (props.status?.accounts ?? []).filter(a => a.enabled || a.state === 'logged_in' || a.state === 'mismatch'))
 const channels = computed(() => (props.status?.channels ?? []).filter(c => c.enabled))
+// 一个账号槽位对应的平台（OpenAI 的账号同时给 ChatGPT 和 Codex 用）：卡片的标记和额度按它们来
+const platformsOf = (slot: string) => PLATFORMS.map(p => p.id).filter(id => PLATFORM_SLOT[id] === slot)
+const markOf = (slot: string) => platformsOf(slot).map(id => PLATFORM_MARK[id]).join('') || '?'
+const quotaOf = (slot: string) => platformsOf(slot).flatMap(id => (props.status?.quota?.[id] ? [{ platform: id, quota: props.status.quota[id]! }] : []))
+// 有额度、却没有账号卡片的平台（很少见）：放在卡片后面
+const looseQuota = computed(() => Object.entries(props.status?.quota ?? {}).filter(([id]) => !accounts.value.some(a => platformsOf(a.slot).includes(id as Platform))).map(([platform, quota]) => ({ platform, quota })))
+const canAsk = computed(() => Object.values(props.status?.quota ?? {}).some(q => q.can_refresh))
+const asking = ref(false), askError = ref('')
+async function askQuota() {
+  if (asking.value) return
+  asking.value = true; askError.value = ''
+  try { await props.api.refreshQuota(props.bridge.id) } catch (e) { askError.value = bridgeError(e) } finally { asking.value = false }
+}
+// 连通性的一句话：可用（最快的那个地址的延迟）/ 被平台拒绝 / 连不上
+function netSummary(slot: string) {
+  const info = net.data.value?.slots[slot]
+  if (!info) return null
+  const ok = info.targets.filter((t: ConnectivityTarget) => t.ok && t.latency_ms != null).map((t: ConnectivityTarget) => t.latency_ms!)
+  if (info.ok) return { tone: 'ok', text: `可用${ok.length ? ` · ${Math.min(...ok)} ms` : ''}` }
+  return { tone: 'bad', text: info.targets.some((t: ConnectivityTarget) => t.state === 'blocked') ? '被平台拒绝' : '连不上' }
+}
+// 运行概览：展开看每个平台同时在跑几个会话、上限多少
+const showLoad = ref(false)
 
 const acked = computed(() => props.status?.settings?.claude_subscription_ack ?? false)
 const needsAck = (slot: Slot | null, method: LoginMethod) => slot === 'claude' && method !== 'api_key' && !acked.value
@@ -141,10 +164,7 @@ function reset(account: Account) {
 </script>
 
 <template>
-  <ManagementSection title="平台与账号" :label="`平台与账号：${bridge.name}`" description="这个 MCP 管理器控制哪些平台，以及每个平台登录的账号。一个平台只登录一个账号；登录信息保存在这个管理器的数据卷里，不保存在工作台。">
-    <template #actions>
-      <button type="button" class="secondary-button" :disabled="loading" @click="emit('reload')"><RefreshCw aria-hidden="true" />刷新状态</button>
-    </template>
+  <section class="lb-accounts-panel" :aria-label="`平台与账号：${bridge.name}`">
     <p v-if="!bridge.enabled" role="note" class="lb-warn">这个 MCP 管理器已停用：智能体不能经它发指令。</p>
     <ActionFeedback :error="error" :notice="notice" />
 
@@ -159,22 +179,24 @@ function reset(account: Account) {
       <button type="button" class="secondary-button" @click="emit('reload')">重试</button>
     </div>
     <template v-else>
-      <div class="lb-control">
-        <fieldset :key="redraw" class="lb-checks" :disabled="!canWrite || !!busy" aria-label="控制的平台">
-          <legend>这个管理器控制的平台</legend>
-          <label v-for="p in PLATFORMS" :key="p.id" class="check-field"><input type="checkbox" :checked="controlled.includes(p.id)" @change="setPlatform(p.id, checked($event))" />{{ p.name }}</label>
+      <div class="lb-control-row">
+        <fieldset :key="redraw" class="lb-control" :disabled="!canWrite || !!busy" aria-label="控制的平台">
+          <legend>已控制平台：</legend>
+          <label v-for="p in PLATFORMS" :key="p.id" class="lb-control-chip"><input type="checkbox" :checked="controlled.includes(p.id)" @change="setPlatform(p.id, checked($event))" />{{ p.name }}</label>
         </fieldset>
-        <p class="form-help">只有勾选的平台能在这里登录账号、被智能体使用{{ canWrite ? '；改动立即保存' : '' }}。ChatGPT 和 Codex 用的是同一个 ChatGPT 账号。</p>
+        <p class="lb-control-note">只有勾选的平台能在这里登录、被智能体使用{{ canWrite ? '；改动立即保存' : '' }}。ChatGPT 与 Codex 共用同一个账号。</p>
       </div>
 
-      <div class="lb-counters" role="group" aria-label="回合">
-        <span class="mg-tag">排队中 {{ status.queued }}</span>
-        <span class="mg-tag">进行中 {{ status.running }}</span>
-        <span v-for="(load, platform) in status.load" :key="platform" class="mg-tag" :class="{ 'is-full': load.running >= load.limit }">{{ platformName(String(platform)) }}：{{ load.running }} / {{ load.limit }} 个会话在跑<template v-if="load.waiting">，{{ load.waiting }} 个在等</template></span>
-        <span v-if="status.version" class="mg-tag">版本 {{ status.version }}</span>
+      <div class="lb-overview" role="group" aria-label="运行概览">
+        <strong class="lb-overview-title">运行概览</strong>
+        <span class="lb-overview-item"><Play aria-hidden="true" />进行中 <b>{{ status.running }}</b></span>
+        <span class="lb-overview-item"><Clock aria-hidden="true" />排队中 <b>{{ status.queued }}</b></span>
+        <span v-if="status.version" class="lb-overview-version">版本 {{ status.version }}</span>
+        <button v-if="Object.keys(status.load).length" type="button" class="asv-link lb-overview-more" :aria-expanded="showLoad" @click="showLoad = !showLoad">{{ showLoad ? '收起平台并发' : '查看平台并发' }}<ArrowRight aria-hidden="true" /></button>
       </div>
-
-      <BridgeQuota :api="api" :bridge="bridge" :status="status" />
+      <ul v-if="showLoad" class="lb-load" aria-label="各平台的并发">
+        <li v-for="(load, platform) in status.load" :key="platform" :class="{ 'is-full': load.running >= load.limit }">{{ platformName(String(platform)) }}：{{ load.running }} / {{ load.limit }} 个会话在跑<template v-if="load.waiting">，{{ load.waiting }} 个在等</template></li>
+      </ul>
 
       <div v-if="device" class="lb-code" role="region" :aria-label="device.code ? '设备码登录' : '网页登录'">
         <p>正在登录「{{ device.label }}」：在你自己的浏览器里打开下面的网址{{ device.code ? '，输入验证码' : '并登录' }}。完成后这里会自动更新。</p>
@@ -183,29 +205,35 @@ function reset(account: Account) {
         <p role="status" class="form-help">正在等待你完成登录…</p>
         <div><button type="button" class="secondary-button" @click="cancelDevice">不等了</button></div>
       </div>
+      <p v-if="askError" class="lb-warn is-red" role="alert">{{ askError }}</p>
 
-      <div class="lb-quota-head">
-        <p class="form-help">每个平台下面的“平台连通性”是这个 MCP 管理器所在的服务器访问这个平台的情况和延迟：有些服务器访问不了 ChatGPT / Claude，或者被平台拒绝，登录之前先看这里。</p>
-        <button type="button" class="secondary-button" :disabled="netBusy || net.isFetching.value" @click="recheckNet"><RefreshCw aria-hidden="true" />{{ netBusy || net.isFetching.value ? '正在检测…' : '重新检测连通性' }}</button>
-      </div>
       <div class="lb-accounts">
         <article v-for="a in accounts" :key="a.slot" class="lb-account" :class="{ 'is-off': !a.enabled }" :aria-label="`账号：${a.label}`">
-          <div class="lb-account-head"><h3>{{ a.label }}</h3><span class="asv-state" :class="stateOf(a).tone">{{ stateOf(a).text }}</span></div>
+          <div class="lb-account-head">
+            <span class="lb-account-mark" :data-slot="a.slot" aria-hidden="true">{{ markOf(a.slot) }}</span>
+            <h3>{{ a.label }}</h3>
+            <span class="asv-state" :class="stateOf(a).tone">{{ stateOf(a).text }}</span>
+          </div>
           <p v-if="!a.enabled" role="note" class="lb-warn">这个管理器没有勾选这个平台：智能体用不了它，也不能在这里重新登录。原来的登录还在，不需要的话可以退出。</p>
-          <dl class="lb-meta">
-            <dt>账号</dt><dd>{{ a.identity || '—' }}</dd>
-            <dt>登录方式</dt><dd>{{ methodName(a.method) }}</dd>
-            <dt>首次登录</dt><dd>{{ seconds(a.first_login_at) }}</dd>
-            <dt>进行中</dt><dd>{{ a.running }} 个回合</dd>
+          <dl class="lb-kv">
+            <dt><UserRound aria-hidden="true" />身份</dt><dd>{{ a.identity || '—' }}</dd>
+            <dt><KeyRound aria-hidden="true" />登录方式</dt><dd :title="a.first_login_at ? `首次登录：${seconds(a.first_login_at)}` : undefined">{{ methodName(a.method) }}</dd>
+            <template v-if="a.enabled && netSummary(a.slot)">
+              <dt><Activity aria-hidden="true" />连通性</dt><dd><span class="lb-net-sum" :data-tone="netSummary(a.slot)!.tone">{{ netSummary(a.slot)!.text }}</span></dd>
+            </template>
+            <dt><Play aria-hidden="true" />运行</dt><dd>{{ a.running }} 个回合</dd>
           </dl>
           <BridgeConnectivity v-if="a.enabled" :data="net.data.value" :account="a.slot" :label="a.label" :loading="net.isPending.value || netBusy" :failed="netFailed" />
+          <AccountQuota v-for="q in quotaOf(a.slot)" :key="q.platform" :platform="q.platform" :quota="q.quota" />
           <p v-if="a.detail" class="form-help">{{ a.detail }}</p>
           <p v-if="a.registered && a.state === 'logged_out'" class="form-help">这个管理器登记过这个平台的账号{{ a.identity ? `（${a.identity}）` : '' }}。重新登录同一个账号可以接着用原来的会话；要换成别的账号，先点“更换账号”。</p>
           <p v-if="a.state === 'mismatch'" role="note" class="lb-warn is-red">现在登录的账号，和这个管理器最初登记的不是同一个。为了不把两个账号的会话混在一起，这个平台已暂停使用。要继续用，只能点“更换账号”：这个管理器上这个平台的全部会话会被归档，然后登记新的账号。</p>
+          <p v-if="a.enabled && a.state !== 'logged_in' && a.state !== 'mismatch' && netSummary(a.slot)?.tone !== 'ok'" class="lb-hint-amber">登录前请确认这台服务器能访问这个平台（看上面的连通性）。</p>
 
-          <div class="lb-inline">
-            <button v-if="canWrite && a.enabled && a.state !== 'mismatch' && methodsOf(a).length && login.slot !== a.slot" type="button" class="primary-button" :disabled="!!busy || !!device" :aria-label="`登录${a.label}`" @click="openLogin(a)">{{ a.state === 'logged_in' ? '重新登录' : '登录' }}</button>
-            <button type="button" class="secondary-button" :disabled="!!busy" :aria-label="`重新检查${a.label}`" @click="recheck(a)">{{ busy === `${a.slot}:refresh` ? '正在检查…' : '重新检查' }}</button>
+          <div class="lb-inline lb-account-actions">
+            <button v-if="canWrite && a.enabled && a.state !== 'mismatch' && methodsOf(a).length && login.slot !== a.slot" type="button" class="primary-button" :disabled="!!busy || !!device" :aria-label="`登录${a.label}`" @click="openLogin(a)">{{ a.state === 'logged_in' ? '重新登录' : '登录账号' }}</button>
+            <button v-if="canAsk && quotaOf(a.slot).some(q => q.quota.can_refresh)" type="button" class="secondary-button" :disabled="asking" @click="askQuota">{{ asking ? '正在查…' : '向平台查一次' }}</button>
+            <button type="button" class="secondary-button" :disabled="!!busy" :aria-label="`重新检查${a.label}`" @click="recheck(a)"><RefreshCw aria-hidden="true" />{{ busy === `${a.slot}:refresh` ? '正在检查…' : '重新检查' }}</button>
             <button v-if="canWrite && a.state === 'logged_in'" type="button" class="secondary-button" :disabled="!!busy" :aria-label="`退出登录${a.label}`" @click="logout(a)">退出登录</button>
             <button v-if="canWrite && (a.state === 'mismatch' || a.registered)" type="button" class="secondary-button lb-danger" :disabled="!!busy" :aria-label="`更换账号${a.label}`" @click="reset(a)">更换账号</button>
           </div>
@@ -230,22 +258,28 @@ function reset(account: Account) {
             </div>
           </form>
         </article>
+        <AccountQuota v-for="q in looseQuota" :key="q.platform" :platform="q.platform" :quota="q.quota" />
       </div>
       <p v-if="!accounts.length" class="ws-state-line">没有可以登录的账号：先在上面勾选要控制的平台。</p>
 
-      <h3>通道</h3>
-      <p class="form-help">通道 = 平台 + 用法，只列出这个管理器控制的平台。“开发”是在这个管理器的容器里的开发环境中干活；云端通道目前只是占位。</p>
-      <table class="asv-table lb-table" aria-label="通道">
-        <thead><tr><th scope="col">平台</th><th scope="col">用法</th><th scope="col">可用</th><th scope="col">说明</th></tr></thead>
-        <tbody>
-          <tr v-for="c in channels" :key="`${c.platform}.${c.mode}`">
-            <th scope="row">{{ platformName(c.platform) }}</th>
-            <td data-label="用法" class="lb-nowrap">{{ MODES[c.mode] ?? c.mode }}</td>
-            <td data-label="可用" class="lb-nowrap"><span class="asv-state" :class="c.available ? 'tone-green' : 'tone-muted'">{{ c.available ? '可用' : '不可用' }}</span></td>
-            <td data-label="说明" class="lb-full">{{ c.note || '—' }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <section class="lb-channels mg-section" aria-label="通道可用性">
+        <div class="lb-channels-head">
+          <h3>通道可用性</h3>
+          <button type="button" class="secondary-button" :disabled="netBusy || net.isFetching.value" @click="recheckNet"><RefreshCw aria-hidden="true" />{{ netBusy || net.isFetching.value ? '正在检测…' : '重新检测连通性' }}</button>
+        </div>
+        <table class="asv-table lb-table" aria-label="通道">
+          <thead><tr><th scope="col">平台</th><th scope="col">用法</th><th scope="col">当前可用性</th><th scope="col">说明</th></tr></thead>
+          <tbody>
+            <tr v-for="c in channels" :key="`${c.platform}.${c.mode}`">
+              <th scope="row"><span class="lb-table-mark" :data-platform="c.platform" aria-hidden="true">{{ PLATFORM_MARK[c.platform] ?? '?' }}</span>{{ platformName(c.platform) }}</th>
+              <td data-label="用法" class="lb-nowrap">{{ MODES[c.mode] ?? c.mode }}</td>
+              <td data-label="可用" class="lb-nowrap"><span class="lb-avail" :data-ok="c.available">{{ c.available ? '可用' : '不可用' }}</span></td>
+              <td data-label="说明" class="lb-full">{{ c.note || '—' }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="lb-channels-note">通道 = 平台 + 用法，只列出这个管理器控制的平台；可用性受平台控制、登录状态和连通性影响。“开发”是在这个管理器的容器里的开发环境中干活；云端通道目前只是占位。</p>
+      </section>
     </template>
-  </ManagementSection>
+  </section>
 </template>

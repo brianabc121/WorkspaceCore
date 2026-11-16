@@ -127,7 +127,7 @@ async function main() {
     await page.getByRole('heading', { name: '大模型客户端', level: 1 }).waitFor()
     await page.getByText('还没有 MCP 管理器。').waitFor()
     await page.getByRole('link', { name: '去添加 MCP 管理器' }).click()
-    await page.getByRole('heading', { name: '大模型客户端管理', level: 1 }).waitFor()
+    await page.getByRole('heading', { name: '管理器与账号', level: 2 }).waitFor()
     check(new URL(page.url()).searchParams.get('view') === 'manage', '“去添加”应打开管理视图')
     step('默认打开聊天；没有管理器时给出说明，并能去“管理器与账号”添加')
 

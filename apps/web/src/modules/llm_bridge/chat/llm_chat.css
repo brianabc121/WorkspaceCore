@@ -1,7 +1,6 @@
 /* 大模型聚合聊天（docs/v2/LLM_CHAT_PLAN.md）：左边会话列表、中间对话、右边会话详情，三张卡片。颜色只用主题变量。 */
 /* ---- 页头：图标、标题、说明，右边是四个视图 ---- */
-.lc-views { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 12px 24px; margin-bottom: 18px; }
-.lc-views.is-chat { justify-content: space-between; }
+.lc-views { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; margin-bottom: 18px; }
 .lc-hero { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .lc-hero-icon { flex: none; width: 50px; height: 50px; display: grid; place-items: center; border-radius: 14px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 70%, var(--surface)), var(--accent)); color: var(--accent-text); box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 28%, transparent); }
 .lc-hero-icon svg { width: 26px; height: 26px; }

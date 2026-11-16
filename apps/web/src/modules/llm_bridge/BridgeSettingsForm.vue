@@ -80,7 +80,7 @@ async function save() {
 </script>
 
 <template>
-  <ManagementSection title="设置" :label="`设置：${bridge.name}`" description="这些设置保存在这个 MCP 管理器里，对它控制的所有平台生效。">
+  <ManagementSection title="运行设置" :label="`运行设置：${bridge.name}`" description="这些设置保存在这个 MCP 管理器里，对它控制的所有平台生效。">
     <ActionFeedback :error="error" :notice="notice" />
     <p v-if="loading" role="status" class="data-state">正在读取设置…</p>
     <div v-else-if="!settings" class="data-state">
