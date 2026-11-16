@@ -92,18 +92,18 @@ describe('大模型聊天', () => {
   it('opens on the chat view, links to the management view and explains what to do without a manager', async () => {
     const { requests } = setup('owner', { bridges: [] })
     const { router } = await openApp('/llm_bridge')
-    expect(await screen.findByRole('heading', { level: 1, name: '大模型聊天' })).toBeVisible()
+    expect(await screen.findByRole('heading', { level: 1, name: '大模型客户端' })).toBeVisible()
     expect(await screen.findByText('还没有 MCP 管理器。')).toBeVisible()
     expect(screen.getByRole('link', { name: '去添加 MCP 管理器' })).toHaveAttribute('href', '/llm_bridge?view=manage')
     expect(requests.some(r => path(r).includes('/chat/'))).toBe(false)
 
     const views = screen.getByRole('navigation', { name: '大模型客户端的视图' })
-    expect(within(views).getByRole('link', { name: '聊天' })).toHaveAttribute('aria-current', 'page')
+    expect(within(views).getByRole('link', { name: '对话' })).toHaveAttribute('aria-current', 'page')
     await fireEvent.click(within(views).getByRole('link', { name: '管理器与账号' }))
     expect(await screen.findByRole('heading', { level: 1, name: '大模型客户端管理' })).toBeVisible()
     expect(router.currentRoute.value.query.view).toBe('manage')
-    await fireEvent.click(within(views).getByRole('link', { name: '聊天' }))
-    expect(await screen.findByRole('heading', { level: 1, name: '大模型聊天' })).toBeVisible()
+    await fireEvent.click(within(views).getByRole('link', { name: '对话' }))
+    expect(await screen.findByRole('heading', { level: 1, name: '大模型客户端' })).toBeVisible()
   })
 
   it('lists the sessions by day with who made them, and searches, filters and syncs', async () => {
@@ -121,6 +121,9 @@ describe('大模型聊天', () => {
     const yesterday = within(side).getByRole('region', { name: '昨天' })
     expect(within(yesterday).getByRole('button', { name: /修登录的测试/ })).toHaveTextContent('Codex · 开发 · 研究员')
     expect(within(yesterday).getByText('回答中')).toBeVisible()
+    // 列表里的时间：昨天的写“昨天 几点几分”；管理器旁边写着连接状态
+    expect(within(yesterday).getByRole('button', { name: /修登录的测试/ })).toHaveTextContent(/昨天 \d\d:\d\d/)
+    expect(await within(side).findByText('已连接')).toBeVisible()
     expect(within(within(side).getByRole('region', { name: '更早' })).getByRole('button', { name: /（没有标题）/ })).toHaveTextContent('ChatGPT · 对话 · 官方程序里已有')
     expect(listRequests(requests)[0]!.headers.get('X-Workspace-Id')).toBe('workspace-a')
     expect(query(listRequests(requests)[0]!).get('status')).toBe('active')
@@ -135,10 +138,13 @@ describe('大模型聊天', () => {
 
     await fireEvent.update(within(side).getByRole('searchbox', { name: '按标题搜索会话' }), ' 周报 ')
     await waitFor(() => expect(listRequests(requests).some(r => query(r).get('q') === '周报' && query(r).get('platform') === 'claude')).toBe(true))
-    await fireEvent.click(within(side).getByLabelText('看已归档的'))
+    const archived = within(side).getByRole('button', { name: '已归档' })
+    expect(archived).toHaveAttribute('aria-pressed', 'false')
+    await fireEvent.click(archived)
     await waitFor(() => expect(listRequests(requests).some(r => query(r).get('status') === 'archived')).toBe(true))
+    expect(archived).toHaveAttribute('aria-pressed', 'true')
 
-    await fireEvent.click(within(side).getByRole('button', { name: '同步官方程序里的会话' }))
+    await fireEvent.click(within(side).getByRole('button', { name: '同步官方会话' }))
     expect(await within(side).findByText('已同步；这些平台的会话读不到：workbuddy')).toBeVisible()
     expect(listRequests(requests).some(r => query(r).get('sync') === 'true')).toBe(true)
     expect(writes(requests)).toEqual([])
@@ -164,7 +170,19 @@ describe('大模型聊天', () => {
     const info = screen.getByRole('complementary', { name: '会话信息' })
     expect(within(info).getByText('sonnet-5')).toBeVisible()
     expect(within(info).getByText('主账号')).toBeVisible()
-    expect(within(info).getByText('回合（1）')).toBeVisible()
+    expect(within(info).getByText('执行记录（1）')).toBeVisible()
+    // 对话头部的标签：平台、模型、用法；会话详情的状态与两个标签页
+    const chips = screen.getByRole('list', { name: '会话的平台、模型与用法' })
+    expect(chips).toHaveTextContent('Claude')
+    expect(chips).toHaveTextContent('sonnet-5')
+    expect(chips).toHaveTextContent('对话模式')
+    expect(within(info).getByText('进行中')).toBeVisible()
+    await fireEvent.click(within(info).getByRole('tab', { name: '执行记录' }))
+    expect(within(info).getByRole('tab', { name: '执行记录' })).toHaveAttribute('aria-selected', 'true')
+    expect(within(info).getByText('第 1 回合')).toBeVisible()
+    expect(within(info).queryByRole('region', { name: '运行配置' })).not.toBeInTheDocument()
+    await fireEvent.click(within(info).getByRole('tab', { name: '概览' }))
+    expect(within(info).getByRole('region', { name: '运行配置' })).toBeVisible()
     // 没有额度数据的管理器（旧版本）不显示额度这一块
     expect(within(info).queryByRole('region', { name: /额度/ })).not.toBeInTheDocument()
     await fireEvent.click(within(info).getByRole('button', { name: '收起会话信息' }))
@@ -464,7 +482,7 @@ describe('大模型聊天', () => {
     })
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
     const box = await composer()
-    expect(box).toHaveAttribute('placeholder', expect.stringContaining('可以粘贴或拖入图片'))
+    expect(box).toHaveAttribute('placeholder', expect.stringContaining('粘贴、拖入图片'))
     // 粘贴截图：当附件加上，不往输入框里写东西
     await fireEvent.paste(box, { clipboardData: { files: [new File(['abcd'], 'image.png', { type: 'image/png' })] } })
     const pendingList = await screen.findByRole('list', { name: '要带上的附件' })
@@ -1185,7 +1203,7 @@ describe('大模型聊天', () => {
   it('keeps members out of the chat', async () => {
     const { requests } = setup('member')
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
-    await waitFor(() => expect(screen.queryByRole('heading', { level: 1, name: '大模型聊天' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('heading', { level: 1, name: '大模型客户端' })).not.toBeInTheDocument())
     expect(requests.some(r => path(r).startsWith('/api/v1/llm_bridge'))).toBe(false)
   })
 })

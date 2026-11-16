@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue'
-import { Archive, ArrowLeft, BookOpen, Download, Eraser, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
+import { Archive, ArrowLeft, BookOpen, Code2, Cpu, Download, Eraser, Layers, MessageSquare, PanelRight, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { CHAT_NO_TOOLS, MODES, platformName, seconds, type Bridge, type Platform, type Quota } from '../api'
-import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, hasContext, isClearCommand, needsTakeover, newRequestId, ownerText, slashCommand, type ChatAttachment, type ChatMessage as Message, type ChatNoteHit, type LlmChatApi } from './chatApi'
+import { ATTACHMENTS, IMAGE_ACCEPT, PLATFORM_MARK, chatError, fileSize, hasContext, isClearCommand, needsTakeover, newRequestId, ownerText, slashCommand, type ChatAttachment, type ChatMessage as Message, type ChatNoteHit, type LlmChatApi } from './chatApi'
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
 import ChatInfoPanel from './ChatInfoPanel.vue'
@@ -354,11 +354,6 @@ function archive() {
             <button type="button" class="secondary-button" :disabled="working" @click="renaming = false">取消</button>
           </form>
           <h2 v-else>{{ session ? session.title || '（没有标题）' : '会话' }}</h2>
-          <p v-if="session" class="lc-head-meta">
-            {{ platformName(session.platform) }} · {{ session.model || '平台默认模型' }} · {{ MODES[session.mode] ?? session.mode }}{{ session.environment ? `（${session.environment.name}）` : '' }} · {{ bridge.name }} · {{ ownerText(session) }}建的
-            <span v-if="session.mode === 'chat'" class="lc-tag" :title="CHAT_NO_TOOLS">不能执行命令</span>
-            <span v-if="session.status === 'archived'" class="lc-tag">已归档</span>
-          </p>
         </div>
         <div v-if="session" class="lc-head-actions">
           <button v-if="session.origin === 'external'" type="button" class="lc-icon" aria-label="重新导入" title="重新向官方程序读一次内容" :disabled="working" @click="reimport"><RefreshCw aria-hidden="true" /></button>
@@ -366,8 +361,16 @@ function archive() {
           <button v-if="canClear" type="button" class="lc-icon" aria-label="清空上下文" title="清空上下文：之后的消息从头开始，上面的记录保留（也可以在输入框里输入 /clear）" :disabled="clearing" @click="clearContext()"><Eraser aria-hidden="true" /></button>
           <button type="button" class="lc-icon" aria-label="导出会话" title="导出成 Markdown 文件" :disabled="working" @click="exportSession"><Download aria-hidden="true" /></button>
           <button v-if="session.status !== 'archived'" type="button" class="lc-icon" aria-label="归档会话" title="归档" :disabled="working" @click="archive"><Archive aria-hidden="true" /></button>
-          <button type="button" class="lc-icon" :aria-pressed="infoOpen" aria-label="会话信息" title="会话信息" @click="infoOpen = !infoOpen"><Info aria-hidden="true" /></button>
+          <button type="button" class="lc-icon" :aria-pressed="infoOpen" aria-label="会话信息" title="会话详情" @click="infoOpen = !infoOpen"><PanelRight aria-hidden="true" /></button>
         </div>
+        <ul v-if="session" class="lc-chips" aria-label="会话的平台、模型与用法" :title="`${bridge.name} · ${ownerText(session)}建的`">
+          <li class="lc-chip"><span class="lc-chip-mark" :data-platform="session.platform" aria-hidden="true">{{ PLATFORM_MARK[session.platform] ?? '?' }}</span>{{ platformName(session.platform) }}</li>
+          <li class="lc-chip"><Cpu aria-hidden="true" />{{ session.model || '平台默认模型' }}</li>
+          <li class="lc-chip"><component :is="session.mode === 'dev' ? Code2 : MessageSquare" aria-hidden="true" />{{ MODES[session.mode] ?? session.mode }}模式</li>
+          <li v-if="session.environment" class="lc-chip"><Layers aria-hidden="true" />{{ session.environment.name }}</li>
+          <li v-if="session.mode === 'chat'" class="lc-chip is-plain" :title="CHAT_NO_TOOLS">不能执行命令</li>
+          <li v-if="session.status === 'archived'" class="lc-chip is-warn">已归档</li>
+        </ul>
       </header>
       <p v-if="headError" class="lc-note is-red" role="alert">{{ headError }}</p>
       <p v-if="session?.purged_at" class="lc-note" role="note">这个会话的对话内容已经按保留期清除（{{ seconds(session.purged_at) }}）：只剩下每个回合的状态、用时和用量。</p>
@@ -377,7 +380,7 @@ function archive() {
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :no-tools="session.mode === 'chat'" :target="!!targetTurn && m.turn_id === targetTurn" :last="i === messages.length - 1" :busy-action="sending" :resuming="resuming" :source="source" @resume="resume" @again="again" @save="saveAnswer" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :platform-id="session.platform" :no-tools="session.mode === 'chat'" :target="!!targetTurn && m.turn_id === targetTurn" :last="i === messages.length - 1" :busy-action="sending" :resuming="resuming" :source="source" @resume="resume" @again="again" @save="saveAnswer" />
           </ol>
           <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
@@ -405,13 +408,17 @@ function archive() {
             <li v-if="uploading" role="status">正在上传 {{ uploading }} 个…</li>
           </ul>
           <ChatKnowledge ref="kbPanel" v-model:selected="picked" :chat="chat" :bridge-id="bridge.id" :session-id="sessionId" :draft="draft" :disabled="sending" />
-          <div class="lc-compose-row">
-            <button type="button" class="lc-icon" aria-label="参考知识库" title="参考知识库：挑笔记随这条消息带上" :disabled="sending" @click="kbPanel?.toggle()"><BookOpen aria-hidden="true" /></button>
-            <input ref="picker" type="file" multiple hidden :accept="imagesOnly ? IMAGE_ACCEPT : undefined" aria-label="选择要带上的图片或文件" @change="pick" />
-            <button type="button" class="lc-icon" :aria-label="imagesOnly ? '添加图片' : '添加图片或文件'" :title="imagesOnly ? '添加图片（对话会话只能带图片）' : '添加图片或文件（文件会放进工作目录）'" :disabled="sending" @click="picker?.click()"><Paperclip aria-hidden="true" /></button>
-            <textarea v-model="draft" rows="2" maxlength="100000" aria-label="消息内容" :placeholder="`输入消息：Enter 发送，Shift + Enter 换行；可以粘贴或拖入${imagesOnly ? '图片' : '图片、文件'}`" @keydown="onKey" @paste="onPaste" />
-            <button v-if="activeTurn" type="button" class="secondary-button" :disabled="stopping" @click="stop"><Square aria-hidden="true" />{{ stopping ? '正在停止…' : '停止' }}</button>
-            <button type="submit" class="primary-button" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : clearing ? '正在清空…' : isClearCommand(draft) ? '清空' : '发送' }}</button>
+          <div class="lc-compose-box">
+            <textarea v-model="draft" rows="2" maxlength="100000" aria-label="消息内容" :placeholder="`输入消息，或${imagesOnly ? '粘贴、拖入图片' : '粘贴、拖入图片与文件'}…`" @keydown="onKey" @paste="onPaste" />
+            <div class="lc-compose-tools">
+              <input ref="picker" type="file" multiple hidden :accept="imagesOnly ? IMAGE_ACCEPT : undefined" aria-label="选择要带上的图片或文件" @change="pick" />
+              <button type="button" class="lc-tool" :title="imagesOnly ? '添加图片（对话会话只能带图片）' : '添加图片或文件（文件会放进工作目录）'" :disabled="sending" @click="picker?.click()"><Paperclip aria-hidden="true" />附件</button>
+              <button type="button" class="lc-tool" title="参考知识库：挑笔记随这条消息带上" :disabled="sending" @click="kbPanel?.toggle()"><BookOpen aria-hidden="true" />知识库</button>
+              <span v-if="session.environment" class="lc-env-state" :title="`开发环境：${session.environment.name}`">{{ session.environment.name }}</span>
+              <span class="lc-compose-hint" aria-hidden="true">Enter 发送 · Shift + Enter 换行</span>
+              <button v-if="activeTurn" type="button" class="secondary-button lc-send" :disabled="stopping" @click="stop"><Square aria-hidden="true" />{{ stopping ? '正在停止…' : '停止' }}</button>
+              <button type="submit" class="primary-button lc-send" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : clearing ? '正在清空…' : isClearCommand(draft) ? '清空' : '发送' }}</button>
+            </div>
           </div>
           <p v-if="isClearCommand(draft)" class="lc-hint">发送后清空这个会话的上下文，不会发给模型：之后的消息从头开始，上面的记录保留。</p>
           <p v-else-if="slashCommand(draft)" class="lc-hint">以 / 开头的命令在这里不会执行，这段文字会原样发给模型。要清空上下文，只输入 /clear 发送，或点上面的“清空上下文”。</p>

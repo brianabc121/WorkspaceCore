@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
+import { BookmarkPlus, CheckCircle2, ChevronDown, CircleAlert, Copy, LoaderCircle, RefreshCw, RotateCcw } from '@lucide/vue'
 import { CHAT_NO_TOOLS, credits, duration, seconds } from '../api'
-import { TURN_KIND, splitText, tokens, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
+import { PLATFORM_MARK, TURN_KIND, TURN_STATUS, listTime, splitText, tokens, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
 import ChatAttachments from './ChatAttachments.vue'
 import { answerHtml } from './markdown'
 import '../../../features/kb/kb.css'
@@ -12,7 +13,7 @@ import '../../../features/kb/kb.css'
 // 被额度打断的回合（T-0237）显示什么时候自动继续，可以“现在就试”或“不要自动继续”。
 // source：从哪个管理器的哪个会话取附件的内容；不给就不显示附件。
 // noTools：对话模式的会话。模型有时把“调用工具”当成文字写出来，这里标明它并没有执行。
-const props = defineProps<{ message: ChatMessage; platform: string; noTools?: boolean; target?: boolean; last?: boolean; busyAction?: boolean; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
+const props = defineProps<{ message: ChatMessage; platform: string; platformId?: string; noTools?: boolean; target?: boolean; last?: boolean; busyAction?: boolean; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
 const emit = defineEmits<{ resume: [turn: string, now: boolean]; again: [turn: string]; save: [message: ChatMessage] }>()
 
 const STEP: Record<string, string> = { message: '说明', command: '命令', files: '改动的文件', notice: '提示', tool: '工具', tool_result: '结果', image: '图片', file: '文件', compaction: '压缩' }
@@ -26,6 +27,14 @@ const fakeCall = computed(() => !!props.noTools && props.message.role === 'assis
 const reply = computed(() => props.message.role === 'assistant')
 const status = computed(() => (reply.value ? props.message.status ?? 'completed' : ''))
 const pending = computed(() => status.value === 'queued' || status.value === 'running')
+// 头像：回答用平台的标记，提问用发消息的人名字的第一个字
+const avatar = computed(() => {
+  if (reply.value) return (props.platformId && PLATFORM_MARK[props.platformId]) || props.platform.slice(0, 1).toUpperCase() || '?'
+  return (props.message.by || '我').trim().slice(0, 1).toUpperCase() || '我'
+})
+// 过程那一栏的状态：图标和一句话
+const stepIcon = computed(() => (pending.value ? LoaderCircle : ['failed', 'unknown', 'cancelled', 'interrupted'].includes(status.value) ? CircleAlert : CheckCircle2))
+const ACTION_ICON = { copy: Copy, save: BookmarkPlus, again: RefreshCw, retry: RotateCcw } as const
 const who = computed(() => {
   if (reply.value) return props.platform
   if (props.message.mine) return '我'
@@ -134,57 +143,65 @@ const clearedText = computed(() => {
   <li v-if="compacted" class="lc-compacted" role="separator" :aria-label="compactedText"><span>{{ compactedText }}</span></li>
   <li v-else-if="cleared" class="lc-cleared" role="separator" :aria-label="clearedText"><span>{{ clearedText }}</span></li>
   <li v-else class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine, 'is-target': target }]" :data-status="status || undefined" :data-turn="message.turn_id || undefined">
-    <div class="lc-msg-head">
-      <strong>{{ who }}</strong>
-      <time v-if="message.at">{{ seconds(message.at) }}</time>
-      <span v-if="status === 'cancelled'" class="lc-tag">已停止</span>
-      <span v-if="status === 'interrupted'" class="lc-tag">已中断</span>
-      <span v-if="message.delivery === 'inserted'" class="lc-tag" title="在上一条还没答完时插进去的，进了正在处理的那一回合">插入</span>
-      <span v-if="message.delivery === 'merged'" class="lc-tag" title="插入时平台没有收下：中断了上一回合，这条消息带着“接着刚才的做”重新开始">插入（合并重发）</span>
-      <span v-if="message.imported" class="lc-tag" title="官方程序里原有的内容，第一次打开时导入的">导入的</span>
-      <span v-if="message.kind && TURN_KIND[message.kind]" class="lc-tag" :title="TURN_KIND[message.kind]!.title">{{ TURN_KIND[message.kind]!.label }}</span>
-    </div>
-    <details v-if="reply && message.steps?.length" class="lc-steps" :open="pending">
-      <summary>过程（{{ message.steps.length }} 步）</summary>
-      <ol>
-        <li v-for="(step, i) in message.steps" :key="i">
-          <span class="lc-step-kind" :class="{ 'is-error': step.error }">{{ stepLabel(step) }}{{ step.error ? '（出错）' : '' }}</span>
-          <code v-if="CODE_STEPS.includes(step.kind)">{{ step.text }}</code>
-          <span v-else>{{ step.text }}</span>
-          <span v-if="step.truncated" class="lc-tag">已截断</span>
-          <span v-if="step.exit_code != null && step.exit_code !== 0" class="lc-tag">退出码 {{ step.exit_code }}</span>
-          <pre v-if="step.output" class="lc-code lc-step-output" :aria-label="`${stepLabel(step)}的输出`"><code>{{ step.output }}</code></pre>
-        </li>
-      </ol>
-    </details>
-    <div v-if="parts.length || pending" class="lc-bubble">
-      <template v-for="(part, i) in parts" :key="i">
-        <div v-if="part.code" class="lc-codeblock">
-          <div class="lc-codehead"><span>{{ part.lang || '代码' }}</span><button type="button" class="asv-link" :aria-label="`复制这段${part.lang || '代码'}`" @click="copy(part.text, `c${i}`)">{{ copied === `c${i}` ? '已复制' : '复制' }}</button></div>
-          <pre class="lc-code"><code>{{ part.text }}</code></pre>
+    <span class="lc-avatar" :class="reply ? 'lc-mark' : 'is-person'" :data-platform="reply ? platformId : undefined" aria-hidden="true">{{ avatar }}</span>
+    <div class="lc-msg-body">
+      <div class="lc-msg-head">
+        <strong>{{ who }}</strong>
+        <time v-if="message.at" :datetime="new Date(message.at * 1000).toISOString()" :title="seconds(message.at)">{{ listTime(message.at) }}</time>
+        <span v-if="status === 'cancelled'" class="lc-tag">已停止</span>
+        <span v-if="status === 'interrupted'" class="lc-tag">已中断</span>
+        <span v-if="message.delivery === 'inserted'" class="lc-tag" title="在上一条还没答完时插进去的，进了正在处理的那一回合">插入</span>
+        <span v-if="message.delivery === 'merged'" class="lc-tag" title="插入时平台没有收下：中断了上一回合，这条消息带着“接着刚才的做”重新开始">插入（合并重发）</span>
+        <span v-if="message.imported" class="lc-tag" title="官方程序里原有的内容，第一次打开时导入的">导入的</span>
+        <span v-if="message.kind && TURN_KIND[message.kind]" class="lc-tag" :title="TURN_KIND[message.kind]!.title">{{ TURN_KIND[message.kind]!.label }}</span>
+      </div>
+      <details v-if="reply && message.steps?.length" class="lc-steps" :open="pending" :data-status="status">
+        <summary>
+          <component :is="stepIcon" class="lc-steps-icon" aria-hidden="true" />
+          <span class="lc-steps-state">{{ TURN_STATUS[status] ?? status }}</span>
+          <span>过程（{{ message.steps.length }} 步）</span>
+          <span class="lc-steps-toggle" aria-hidden="true"><span class="is-closed">查看过程</span><span class="is-open">收起</span><ChevronDown /></span>
+        </summary>
+        <ol>
+          <li v-for="(step, i) in message.steps" :key="i">
+            <span class="lc-step-kind" :class="{ 'is-error': step.error }">{{ stepLabel(step) }}{{ step.error ? '（出错）' : '' }}</span>
+            <code v-if="CODE_STEPS.includes(step.kind)">{{ step.text }}</code>
+            <span v-else>{{ step.text }}</span>
+            <span v-if="step.truncated" class="lc-tag">已截断</span>
+            <span v-if="step.exit_code != null && step.exit_code !== 0" class="lc-tag">退出码 {{ step.exit_code }}</span>
+            <pre v-if="step.output" class="lc-code lc-step-output" :aria-label="`${stepLabel(step)}的输出`"><code>{{ step.output }}</code></pre>
+          </li>
+        </ol>
+      </details>
+      <div v-if="parts.length || pending" class="lc-bubble">
+        <template v-for="(part, i) in parts" :key="i">
+          <div v-if="part.code" class="lc-codeblock">
+            <div class="lc-codehead"><span>{{ part.lang || '代码' }}</span><button type="button" class="asv-link" :aria-label="`复制这段${part.lang || '代码'}`" @click="copy(part.text, `c${i}`)">{{ copied === `c${i}` ? '已复制' : '复制' }}</button></div>
+            <pre class="lc-code"><code>{{ part.text }}</code></pre>
+          </div>
+          <!-- eslint-disable-next-line vue/no-v-html -- answerHtml 已用 DOMPurify 消毒，不允许原始 HTML（chat/markdown.ts） -->
+          <div v-else-if="reply" class="kb-md lc-md" v-html="answerHtml(part.text)"></div>
+          <p v-else class="lc-text">{{ part.text }}</p>
+        </template>
+        <p v-if="pending" class="lc-wait" role="status">{{ waiting }}</p>
+      </div>
+      <p v-else-if="reply && status === 'completed'" class="lc-bubble lc-muted">（没有文字回答）</p>
+      <p v-if="references.length" class="lc-refs" aria-label="参考了的知识库笔记">
+        参考了：<template v-for="r in references" :key="r.id || r.title"><RouterLink v-if="r.id" class="asv-link" :to="`/knowledge/notes/${r.id}`">《{{ r.title }}》</RouterLink><span v-else>《{{ r.title }}》</span><span v-if="r.truncated" class="lc-sub">（截断了）</span></template>
+      </p>
+      <ChatAttachments v-if="source && message.attachments?.length" :chat="source.chat" :bridge-id="source.bridgeId" :session-id="source.sessionId" :items="message.attachments" />
+      <div v-if="meta || actions.length" class="lc-meta">
+        <button v-for="a in actions" :key="a.key" type="button" class="lc-act" :title="a.title" :disabled="a.key !== 'copy' && busyAction" @click="act(a.key)"><component :is="ACTION_ICON[a.key === 'again' && a.label === '重试' ? 'retry' : a.key]" aria-hidden="true" />{{ a.key === 'copy' && copied === 'all' ? '已复制' : a.label }}</button>
+        <span v-if="meta" class="lc-meta-text">{{ meta }}</span>
+      </div>
+      <p v-if="fakeCall" class="lc-note" role="note">上面像“调用工具”的内容只是模型写出来的文字，并没有执行。{{ CHAT_NO_TOOLS }}</p>
+      <p v-if="failure" class="lc-failure" role="alert">{{ failure }}</p>
+      <div v-if="interrupted" class="lc-interrupted" role="note">
+        <p>{{ interrupted.text }}</p>
+        <div v-if="message.turn_id && (interrupted.canNow || interrupted.canCancel)" class="lc-interrupted-actions">
+          <button v-if="interrupted.canNow" type="button" class="secondary-button" :disabled="!!resuming" @click="emit('resume', message.turn_id, true)">{{ busy ? '正在处理…' : '现在就试' }}</button>
+          <button v-if="interrupted.canCancel" type="button" class="asv-link" :disabled="!!resuming" @click="emit('resume', message.turn_id, false)">不要自动继续</button>
         </div>
-        <!-- eslint-disable-next-line vue/no-v-html -- answerHtml 已用 DOMPurify 消毒，不允许原始 HTML（chat/markdown.ts） -->
-        <div v-else-if="reply" class="kb-md lc-md" v-html="answerHtml(part.text)"></div>
-        <p v-else class="lc-text">{{ part.text }}</p>
-      </template>
-      <p v-if="pending" class="lc-wait" role="status">{{ waiting }}</p>
-    </div>
-    <p v-else-if="reply && status === 'completed'" class="lc-bubble lc-muted">（没有文字回答）</p>
-    <p v-if="references.length" class="lc-refs" aria-label="参考了的知识库笔记">
-      参考了：<template v-for="r in references" :key="r.id || r.title"><RouterLink v-if="r.id" class="asv-link" :to="`/knowledge/notes/${r.id}`">《{{ r.title }}》</RouterLink><span v-else>《{{ r.title }}》</span><span v-if="r.truncated" class="lc-sub">（截断了）</span></template>
-    </p>
-    <ChatAttachments v-if="source && message.attachments?.length" :chat="source.chat" :bridge-id="source.bridgeId" :session-id="source.sessionId" :items="message.attachments" />
-    <p v-if="meta || actions.length" class="lc-meta">
-      <span v-if="meta">{{ meta }}</span>
-      <button v-for="a in actions" :key="a.key" type="button" class="asv-link" :title="a.title" :disabled="a.key !== 'copy' && busyAction" @click="act(a.key)">{{ a.key === 'copy' && copied === 'all' ? '已复制' : a.label }}</button>
-    </p>
-    <p v-if="fakeCall" class="lc-note" role="note">上面像“调用工具”的内容只是模型写出来的文字，并没有执行。{{ CHAT_NO_TOOLS }}</p>
-    <p v-if="failure" class="lc-failure" role="alert">{{ failure }}</p>
-    <div v-if="interrupted" class="lc-interrupted" role="note">
-      <p>{{ interrupted.text }}</p>
-      <div v-if="message.turn_id && (interrupted.canNow || interrupted.canCancel)" class="lc-interrupted-actions">
-        <button v-if="interrupted.canNow" type="button" class="secondary-button" :disabled="!!resuming" @click="emit('resume', message.turn_id, true)">{{ busy ? '正在处理…' : '现在就试' }}</button>
-        <button v-if="interrupted.canCancel" type="button" class="asv-link" :disabled="!!resuming" @click="emit('resume', message.turn_id, false)">不要自动继续</button>
       </div>
     </div>
   </li>

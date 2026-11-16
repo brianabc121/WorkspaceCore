@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { RouterLink } from 'vue-router'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { Columns3, Plus, RefreshCw, Search } from '@lucide/vue'
+import { Archive, Columns3, Plus, RefreshCw, Search } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { MODES, platformName, seconds, type Bridge, type Platform } from '../api'
-import { PLATFORM_MARK as MARK, groupByDay, ownerText, type ChatGroup, type ChatSession, type PlatformChoice, type SessionFilter } from './chatApi'
+import { PLATFORM_MARK as MARK, groupByDay, listTime, ownerText, type ChatGroup, type ChatSession, type PlatformChoice, type SessionFilter } from './chatApi'
 
 // 左栏：选 MCP 管理器、新建、按标题搜索、按平台筛选，会话按“今天 / 昨天 / 更早”分组。
 // 最上面是“同问”：多模型同问的分组，可以跨管理器，所以不随选中的管理器和平台筛选变（按标题搜索、看已归档的照常）。
@@ -17,12 +17,15 @@ const props = defineProps<{
   syncing: boolean; syncNotice: string; syncError: string
   // 后面还有没显示的会话：load 可以再读一批；records 是已经读到上限，更早的到“会话记录”里找
   more?: 'load' | 'records' | null
+  // 选中的管理器连得上吗：checking 还在读状态，off 是已停用
+  connection?: 'checking' | 'ok' | 'down' | 'off'
 }>()
 const emit = defineEmits<{ 'update:managerId': [id: string]; 'update:filter': [filter: SessionFilter]; select: [id: string]; create: []; sync: []; retry: []; compare: []; 'open-group': [id: string]; more: [] }>()
 
 const days = computed(() => groupByDay(props.sessions))
 const asked = computed(() => { const q = props.filter.q.toLowerCase(); return q ? props.groups.filter(g => g.title.toLowerCase().includes(q)) : props.groups })
 const set = (patch: Partial<SessionFilter>) => emit('update:filter', { ...props.filter, ...patch })
+const CONNECTION = { checking: '正在检查', ok: '已连接', down: '连不上', off: '已停用' } as const
 
 // 搜索框：停止输入一小会儿再查，不是每个字都发请求
 const q = ref(props.filter.q)
@@ -41,7 +44,10 @@ const emptyText = computed(() => {
 <template>
   <aside class="lc-side" aria-label="会话列表">
     <div class="lc-side-top">
-      <label class="lc-label" for="lc-manager">MCP 管理器</label>
+      <div class="lc-manager-head">
+        <label class="lc-label" for="lc-manager">MCP 管理器</label>
+        <span v-if="connection" class="lc-conn" :data-state="connection">{{ CONNECTION[connection] }}</span>
+      </div>
       <select id="lc-manager" :value="managerId ?? ''" @change="emit('update:managerId', ($event.target as HTMLSelectElement).value)">
         <option v-for="b in bridges" :key="b.id" :value="b.id">{{ b.name }}{{ b.enabled ? '' : '（已停用）' }}</option>
       </select>
@@ -83,9 +89,8 @@ const emptyText = computed(() => {
             <button type="button" class="lc-item" :aria-current="s.session_id === selected ? 'true' : undefined" @click="emit('select', s.session_id)">
               <span class="lc-mark" :data-platform="s.platform" aria-hidden="true">{{ MARK[s.platform] ?? '?' }}</span>
               <span class="lc-item-main">
-                <strong>{{ s.title || '（没有标题）' }}</strong>
-                <span class="lc-item-meta">{{ platformName(s.platform) }} · {{ MODES[s.mode] ?? s.mode }} · {{ ownerText(s) }}</span>
-                <span class="lc-item-meta"><time>{{ seconds(s.updated_at) }}</time><span v-if="s.busy" class="lc-busy">回答中</span></span>
+                <span class="lc-item-top"><strong>{{ s.title || '（没有标题）' }}</strong><time :datetime="new Date(s.updated_at * 1000).toISOString()" :title="seconds(s.updated_at)">{{ listTime(s.updated_at) }}</time></span>
+                <span class="lc-item-meta">{{ platformName(s.platform) }} · {{ MODES[s.mode] ?? s.mode }} · {{ ownerText(s) }}<span v-if="s.busy" class="lc-busy">回答中</span></span>
               </span>
             </button>
           </li>
@@ -98,8 +103,10 @@ const emptyText = computed(() => {
     </div>
 
     <div class="lc-side-foot">
-      <label class="check-field"><input type="checkbox" :checked="filter.status === 'archived'" @change="set({ status: ($event.target as HTMLInputElement).checked ? 'archived' : 'active' })" />看已归档的</label>
-      <button type="button" class="asv-link" :disabled="syncing || !managerId" @click="emit('sync')"><RefreshCw aria-hidden="true" />{{ syncing ? '正在同步…' : '同步官方程序里的会话' }}</button>
+      <div class="lc-foot-buttons">
+        <button type="button" class="lc-foot-btn" title="把官方程序里已有的会话同步到列表" :disabled="syncing || !managerId" @click="emit('sync')"><RefreshCw aria-hidden="true" />{{ syncing ? '正在同步…' : '同步官方会话' }}</button>
+        <button type="button" class="lc-foot-btn" :aria-pressed="filter.status === 'archived'" :title="filter.status === 'archived' ? '回到进行中的会话' : '看已归档的会话'" @click="set({ status: filter.status === 'archived' ? 'active' : 'archived' })"><Archive aria-hidden="true" />已归档</button>
+      </div>
       <p v-if="syncError" class="lc-note is-red" role="alert">{{ syncError }}</p>
       <p v-else-if="syncNotice" class="lc-note" role="status">{{ syncNotice }}</p>
     </div>

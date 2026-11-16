@@ -124,7 +124,7 @@ async function main() {
 
     // ---------------------------------------------------------------- 没有管理器时
     await page.goto(`${base}/llm_bridge`)
-    await page.getByRole('heading', { name: '大模型聊天', level: 1 }).waitFor()
+    await page.getByRole('heading', { name: '大模型客户端', level: 1 }).waitFor()
     await page.getByText('还没有 MCP 管理器。').waitFor()
     await page.getByRole('link', { name: '去添加 MCP 管理器' }).click()
     await page.getByRole('heading', { name: '大模型客户端管理', level: 1 }).waitFor()
@@ -141,7 +141,7 @@ async function main() {
     const state = await api(page, workspace, 'GET', `/api/v1/llm_bridge/bridges/${bridgeId}/status`)
     check(state.body?.accounts?.find((a) => a.slot === 'claude')?.state === 'logged_in', `Claude 应显示已登录：${JSON.stringify(state.body?.accounts)}`)
 
-    await page.getByRole('navigation', { name: '大模型客户端的视图' }).getByRole('link', { name: '聊天', exact: true }).click()
+    await page.getByRole('navigation', { name: '大模型客户端的视图' }).getByRole('link', { name: '对话', exact: true }).click()
     await side(page).waitFor()
     check((await side(page).getByLabel('MCP 管理器').locator('option:checked').innerText()) === MANAGER, '左栏应选中验收用的管理器')
     const filters = side(page).getByRole('group', { name: '按平台筛选' })
@@ -360,7 +360,7 @@ async function main() {
     // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条，粘贴和拖入图片的那一条；插入那一步的两条
     check((await countMessages(page)) === 28, `刷新后十四问十四答都还在：${await countMessages(page)}`)
     const info = page.getByRole('complementary', { name: '会话信息' })
-    await info.getByText('回合（14）').waitFor()
+    await info.getByText('执行记录（14）').waitFor()
     await info.getByText(MANAGER).waitFor()
     step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
 
@@ -447,12 +447,12 @@ async function main() {
     await page.getByText('这个会话已归档，不能再发送。').waitFor()
     check((await composer(page).count()) === 0, '归档后没有输入框')
     await side(page).getByRole('button', { name: new RegExp(TITLE) }).waitFor({ state: 'detached' })
-    await side(page).getByLabel('看已归档的').check()
+    await side(page).getByRole('button', { name: '已归档', exact: true }).click()
     await side(page).getByRole('button', { name: new RegExp(TITLE) }).waitFor()
-    await side(page).getByLabel('看已归档的').uncheck()
+    await side(page).getByRole('button', { name: '已归档', exact: true }).click()
     const archivedSend = await api(page, workspace, 'POST', `${chat}/sessions/${firstId}/messages`, { text: 'x', request_id: requestId() })
     check(archivedSend.status === 409, `归档后接口也应拒绝发送：${JSON.stringify(archivedSend)}`)
-    step('归档后不能再发（页面和接口都拒绝），在“看已归档的”里能找到')
+    step('归档后不能再发（页面和接口都拒绝），在“已归档”里能找到')
 
     // ---------------------------------------------------------------- 管理器停用：只能看
     const off = await api(page, workspace, 'PATCH', `/api/v1/llm_bridge/bridges/${bridgeId}`, { enabled: false })
