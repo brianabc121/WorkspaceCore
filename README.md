@@ -130,6 +130,10 @@ curl -fsSL https://raw.githubusercontent.com/brianabc121/WorkspaceCore/main/scri
 
 提示 `curl: command not found`（Debian 最小安装常见）时，先运行 `apt-get update && apt-get install -y curl ca-certificates`。
 
+需要在网页初始化智能体服务器时，在部署问题中选择配置 **OpenClaw 接入入口**，并填写**工作台服务器的真实公网 IP**。
+脚本自动保存直连地址；网站可以继续使用 Cloudflare。普通 Cloudflare / CDN 代理不能承载这里的双向证书接入，默认端口为 TCP 9443。
+云安全组仍须允许智能体服务器访问该端口；脚本的本机 TLS 检查不能代替远端连通性验证。
+
 按步骤的教程：**[`docs/deploy-guide.md`](docs/deploy-guide.md)**——准备服务器、安装 Docker、生成 `.env`、域名与自动 HTTPS、
 创建管理员、接入 GitHub / 监控 / OpenClaw、配置异地备份与恢复演练、升级与回滚、常见问题。
 

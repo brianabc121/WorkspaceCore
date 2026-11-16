@@ -146,13 +146,6 @@ FAKE_MAKE = '#!/usr/bin/env bash\necho "make $*" >> "$LOG"\n'
 # 测试里替换掉交互、握手检查与 root 操作
 OVERRIDES = r"""
 confirm() { echo "confirm $1" >> "$LOG"; return 0; }
-ask() {
-  case $1 in
-    *域名*) printf '%s\n' "${ANSWER_HOST:-$2}" ;;
-    *IP*) printf '%s\n' "${ANSWER_IP:-$2}" ;;
-    *) printf '%s\n' "$2" ;;
-  esac
-}
 check_agent_ingress() { echo "handshake $*" >> "$LOG"; }
 as_root() { echo "as_root $*" >> "$LOG"; }
 outbound_ip() { echo 10.0.0.9; }
@@ -190,8 +183,12 @@ def _ingress(
             "-c",
             functions
             + OVERRIDES
+            + f'\numask {umask}\nPY=python3\nROOT="$1"\n'
+            # 只记录测试明确给出的回答；其余走真实 ask 和默认值，不隐式注入 DNS。
+            + 'if [[ -v ANSWER_HOST ]]; then ANS[INGRESS_HOST]="$ANSWER_HOST"; fi\n'
+            + 'if [[ -v ANSWER_IP ]]; then ANS[INGRESS_ADDRESS]="$ANSWER_IP"; fi\n'
             + prelude
-            + f'\numask {umask}\nPY=python3\nROOT="$1"\nconnect_agent_ingress',
+            + "\nconnect_agent_ingress",
             "deploy",
             str(root),
         ],
@@ -203,6 +200,7 @@ def _ingress(
             **(answers or {}),
         },
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         text=True,
         check=True,
         timeout=60,
@@ -248,14 +246,18 @@ def test_ingress_without_a_domain_uses_the_internal_name_and_an_ip(tmp_path: Pat
 
 
 def test_ingress_with_a_domain_and_a_still_valid_certificate(tmp_path: Path) -> None:
-    _, calls, env = _ingress(tmp_path, "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n")
+    _, calls, env = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n",
+        answers={"ANSWER_IP": "-"},
+    )
     assert env["AGENT_PUBLIC_HOST"] == "ws.example.com"
     assert env["AGENT_PUBLIC_URL"] == "https://ws.example.com:9443"
     assert env.get("AGENT_PUBLIC_ADDRESS", "") == ""  # 域名在公网 DNS 里，不需要映射
     assert "issue-server --host ws.example.com" in calls
 
     # 再运行一次：证书仍然有效、变量没变 → 不重签、不重启
-    out, calls, again = _ingress(tmp_path, "", check="ok")
+    out, calls, again = _ingress(tmp_path, "", check="ok", answers={"ANSWER_IP": "-"})
     assert again == env
     assert "check-server --host ws.example.com" in calls
     assert "issue-server" not in calls and "up -d api worker" not in calls
@@ -281,6 +283,204 @@ def test_ingress_keeps_a_manually_configured_public_entry(tmp_path: Path) -> Non
     assert env == {"AGENT_PUBLIC_URL": "https://agent.example.com:9443"}
 
 
+def test_ingress_with_a_domain_uses_the_direct_address(tmp_path: Path) -> None:
+    out, _, env = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n",
+        answers={"ANSWER_IP": "203.0.113.7"},
+    )
+    assert env["AGENT_PUBLIC_ADDRESS"] == "203.0.113.7"
+    assert env["AGENT_PUBLIC_URL"] == "https://ws.example.com:9443"
+    assert "203.0.113.7:9443" in out
+    assert "外网连通性尚未验证" in out
+
+
+def test_ingress_ci_defaults_keep_the_private_outbound_address(tmp_path: Path) -> None:
+    # 与 ci-infra 的最后一次配置等价：真实 ask、DEVNULL、confirm=yes，无地址回答。
+    out, _, env = _ingress(tmp_path, "SITE_DOMAIN=\nAGENT_PUBLIC_URL=\n")
+    assert env["AGENT_PUBLIC_HOST"] == "agent-gateway.myworkspace.internal"
+    assert env["AGENT_PUBLIC_ADDRESS"] == "10.0.0.9"
+    assert env["AGENT_PUBLIC_URL"] == "https://agent-gateway.myworkspace.internal:9443"
+    assert "接入入口已就绪" in out
+    assert "本机 TLS 检查通过" in out and "外网连通性尚未验证" in out
+
+
+def test_ingress_ready_message_keeps_the_ci_contract(tmp_path: Path) -> None:
+    out, _, _ = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n",
+        answers={"ANSWER_IP": "203.0.113.7"},
+    )
+    assert "接入入口已就绪" in out and "本机 TLS 检查通过" in out
+
+
+@pytest.mark.parametrize("outbound", ["10.0.0.9", "8.8.8.8"])
+@pytest.mark.parametrize("mode", ["ASSUME_YES=1", "interactive() { return 1; }"])
+def test_existing_dns_ingress_does_not_block_unattended_components(
+    tmp_path: Path, outbound: str, mode: str
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    original = (
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_HOST=ws.example.com\n"
+        "AGENT_PUBLIC_URL=https://ws.example.com:9443\nAGENT_PUBLIC_INTERNAL_CA=true\n"
+        "AGENT_PUBLIC_ADDRESS=\n"
+    )
+    (root / ".env").write_text(original)
+    result = _shell(
+        tmp_path,
+        f"PHASE=plan\n{mode}\noutbound_ip() {{ echo {outbound}; }}\n"
+        "plan_ingress ws.example.com\nprintf 'other-components-can-continue\\n'\n",
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "other-components-can-continue" in result.stdout
+    assert "待办" in result.stderr and "保持" in result.stderr
+    assert (root / ".env").read_text() == original
+    out, calls, env = _ingress(
+        tmp_path, "", prelude=f"\nPHASE=run\noutbound_ip() {{ echo {outbound}; }}\n"
+    )
+    assert env["AGENT_PUBLIC_ADDRESS"] == ""
+    assert "agent_ca" not in calls and "up -d api worker" not in calls
+    assert "待办" in out and "保持" in out
+
+
+def test_ingress_preserves_the_existing_domain_address(tmp_path: Path) -> None:
+    _, _, env = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\nAGENT_PUBLIC_ADDRESS=203.0.113.7\n",
+    )
+    assert env["AGENT_PUBLIC_ADDRESS"] == "203.0.113.7"
+    _, calls, again = _ingress(tmp_path, "", check="ok")
+    assert again == env
+    assert "up -d api worker" not in calls and "issue-server" not in calls
+
+
+def test_domain_dns_mode_is_an_explicit_choice(tmp_path: Path) -> None:
+    out, _, env = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\nAGENT_PUBLIC_ADDRESS=203.0.113.7\n",
+        answers={"ANSWER_IP": "-"},
+    )
+    assert env["AGENT_PUBLIC_ADDRESS"] == ""
+    assert "DNS" in out and "Cloudflare" in out
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["bad-ip", "127.0.0.1", "0.0.0.0", "::1", "ff02::1", "255.255.255.255"],  # noqa: S104
+)
+def test_domain_ingress_rejects_an_unusable_direct_address(tmp_path: Path, address: str) -> None:
+    out, calls, env = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n",
+        answers={"ANSWER_IP": address},
+    )
+    assert "agent_ca" not in calls
+    assert env == {"SITE_DOMAIN": "ws.example.com", "AGENT_PUBLIC_URL": ""}
+    assert "IP" in out
+
+
+def test_domain_ingress_in_the_background_uses_the_recorded_address(tmp_path: Path) -> None:
+    prelude = (
+        "\nPHASE=run\nANS[INGRESS]=y\nANS[INGRESS_HOST]=ws.example.com\n"
+        "ANS[INGRESS_ADDRESS]=203.0.113.7\n"
+        "ask() { echo unexpected-question >&2; return 1; }\n"
+    )
+    out, calls, env = _ingress(
+        tmp_path, "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n", prelude=prelude
+    )
+    assert env["AGENT_PUBLIC_ADDRESS"] == "203.0.113.7"
+    assert "unexpected-question" not in out and "confirm" not in calls
+
+
+def test_ingress_plan_records_the_address_for_a_proxied_domain(tmp_path: Path) -> None:
+    result = _shell(
+        tmp_path,
+        "PHASE=plan\nANS[INGRESS]=y\ninteractive() { return 0; }\n"
+        "outbound_ip() { echo 10.0.0.9; }\n"
+        "plan_ingress ws.example.com\ndeploy_dir_init\nanswers_save\n",
+        stdin="\n203.0.113.7\n",
+    )
+    answers = (tmp_path / "root/.deploy/answers.env").read_text()
+    assert "INGRESS_HOST=ws.example.com\n" in answers
+    assert "INGRESS_ADDRESS=203.0.113.7\n" in answers
+    assert "Cloudflare" in result.stderr
+
+
+def test_old_background_answers_without_an_address_leave_a_todo(tmp_path: Path) -> None:
+    prelude = (
+        "\nPHASE=run\nANS[INGRESS]=y\nANS[INGRESS_HOST]=ws.example.com\n"
+        "unset 'ANS[INGRESS_ADDRESS]'\n"
+    )
+    out, calls, env = _ingress(
+        tmp_path, "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n", prelude=prelude
+    )
+    assert "agent_ca" not in calls and "待办" in out
+    assert env == {"SITE_DOMAIN": "ws.example.com", "AGENT_PUBLIC_URL": ""}
+
+
+def test_domain_ingress_accepts_an_explicit_ipv6_address(tmp_path: Path) -> None:
+    _, calls, env = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n",
+        answers={"ANSWER_IP": "2001:db8::7"},
+    )
+    assert env["AGENT_PUBLIC_ADDRESS"] == "2001:db8::7"
+    assert env["AGENT_PUBLIC_BIND"] == "[::]"
+    assert "agent-ca.pem ::1" in calls
+
+
+def test_old_background_answers_cannot_choose_an_outbound_public_ip(tmp_path: Path) -> None:
+    prelude = (
+        "\nPHASE=run\nANS[INGRESS]=y\nANS[INGRESS_HOST]=ws.example.com\n"
+        "unset 'ANS[INGRESS_ADDRESS]'\noutbound_ip() { echo 8.8.8.8; }\n"
+    )
+    out, calls, env = _ingress(
+        tmp_path, "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n", prelude=prelude
+    )
+    assert "agent_ca" not in calls and "待办" in out
+    assert env == {"SITE_DOMAIN": "ws.example.com", "AGENT_PUBLIC_URL": ""}
+
+
+def test_ingress_retries_applying_config_after_api_recreation_failed(tmp_path: Path) -> None:
+    out, _, env = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n",
+        answers={"ANSWER_IP": "203.0.113.7"},
+        prelude='\ncompose() { [[ $* != "up -d api worker" ]] && docker compose "$@"; }\n',
+    )
+    assert env["AGENT_PUBLIC_ADDRESS"] == "203.0.113.7"
+    assert "待办" in out and "本机 TLS 检查通过" not in out
+    out, calls, _ = _ingress(tmp_path, "", check="ok")
+    assert "compose up -d api worker" in calls
+    assert "本机 TLS 检查通过" in out
+    _, calls, _ = _ingress(tmp_path, "", check="ok")
+    assert "up -d api worker" not in calls
+
+
+def test_ingress_records_certificate_issuance_failure(tmp_path: Path) -> None:
+    out, calls, _ = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n",
+        answers={"ANSWER_IP": "203.0.113.7"},
+        prelude="\nissue_agent_cert() { return 1; }\n",
+    )
+    assert "待办" in out and "up -d api worker" not in calls
+    assert "本机 TLS 检查通过" not in out
+
+
+def test_ingress_does_not_report_ready_when_the_local_handshake_fails(tmp_path: Path) -> None:
+    out, _, _ = _ingress(
+        tmp_path,
+        "SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\n",
+        answers={"ANSWER_IP": "203.0.113.7"},
+        prelude="\ncheck_agent_ingress() { return 1; }\nsleep() { :; }\n",
+    )
+    assert "待办" in out
+    assert "本机 TLS 检查通过" not in out and "接入入口已就绪" not in out
+
+
 def test_ingress_refuses_an_invalid_address(tmp_path: Path) -> None:
     out, calls, env = _ingress(
         tmp_path, "AGENT_PUBLIC_URL=\n", answers={"ANSWER_HOST": "-", "ANSWER_IP": "not-an-ip"}
@@ -295,6 +495,7 @@ def test_ingress_creates_a_custom_tls_dir_the_gateway_can_enter(tmp_path: Path) 
     _ingress(
         tmp_path,
         f"SITE_DOMAIN=ws.example.com\nAGENT_PUBLIC_URL=\nAGENT_TLS_DIR={custom}\n",
+        answers={"ANSWER_IP": "-"},
         umask="077",
     )
     assert custom.stat().st_mode & 0o777 == 0o755

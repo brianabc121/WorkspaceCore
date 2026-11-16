@@ -591,7 +591,10 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
 （私钥 600、属主 root；没有 `intranet.crt` 时同时签一张内网入口的占位证书，否则 Caddy 起不来），
 设置下表的外网变量与 `AGENT_PUBLIC_INTERNAL_CA=true`，重启 api、worker，`make agents-up`，再检查握手。
 再次运行时证书还有 60 天以上且主机名没变就不重签；已经手动配置了外网入口（`AGENT_PUBLIC_URL` 有值且没有用内部 CA）的保持不变。
-主机名默认是 `SITE_DOMAIN`；没有域名时用 `agent-gateway.myworkspace.internal`，接入包在隧道容器里把它映射到 `AGENT_PUBLIC_ADDRESS`。
+主机名默认是 `SITE_DOMAIN`；没有域名时用 `agent-gateway.myworkspace.internal`。
+有域名和没有域名都会收集工作台的真实直连 IP，保存为 `AGENT_PUBLIC_ADDRESS`；网站走 Cloudflare / CDN 时接入包仍直连该 IP，
+证书继续按入口主机名校验。已有地址会保留，只有域名直接解析到源站时才可显式输入 `-` 使用 DNS。
+本机 TLS 握手通过不会被标为外网验证通过；云安全组和远端路径仍须验证，详见部署教程第 8.6 节。
 设计见 `docs/decisions/2026-11-03-openclaw-ssh-provisioning.md` 第 3 节。
 
 手动配置：
@@ -609,7 +612,7 @@ OpenClaw 实例在别的服务器上，**主动连回工作台**：内网模式�
    | `AGENT_INTRANET_ALLOWED_CIDRS` | `100.64.0.0/10` | 内网入口只接受的来源（空格分隔） |
    | `AGENT_INTRANET_URL` / `AGENT_PUBLIC_URL` | `https://ws.tailnet.example:8443` / `https://agent.example.com:9443` | 写进接入包的地址；没有配置的入口不能生成该模式的接入包 |
    | `AGENT_PUBLIC_INTERNAL_CA` | 默认 `false` | 外网入口证书由内部 CA 签发时为 `true`：外网接入包附带 `tls/ca.pem`，隧道加 `--cacert`（一键配置自动设置） |
-   | `AGENT_PUBLIC_ADDRESS` | `203.0.113.7` | 外网入口主机名不在公网 DNS 里时，OpenClaw 服务器访问工作台用的 IP；接入包的隧道容器把主机名映射到它（`extra_hosts`）。必须是 IP |
+   | `AGENT_PUBLIC_ADDRESS` | `203.0.113.7` | 智能体直连工作台的真实 IP；入口没有 DNS 或网站使用 Cloudflare / CDN 时设置。初始化检查和接入隧道都使用它，TLS 身份仍由 `AGENT_PUBLIC_URL` 的域名确定；一键脚本会询问并保留。必须是 IP |
    | `AGENT_INGRESS_NET` | 默认 `172.31.250` | `agent-ingress` 网络的网段前三段：子网 `<值>.0/29`，agent-gateway 固定在 `<值>.2`。同一台机器上有别的 Docker 网络占用了这个网段时改它；`make restore-verify` 的临时环境自动用 `172.31.251` |
    | `AGENT_INGRESS_TRUSTED_PROXIES` | 默认 `<AGENT_INGRESS_NET>.2` | API 只信任这个地址写入的入口与证书请求头；一般不用改 |
    | `AGENT_REFLECTION_CRON` / `AGENT_REFLECTION_TIMEZONE` | 默认 `0 22 * * *` / `Asia/Shanghai` | 每晚复盘定时任务的时间（5 段 cron 与 IANA 时区，启动时校验），生成接入包时写进 `setup-reflection.sh`（知识库，T-0100） |
