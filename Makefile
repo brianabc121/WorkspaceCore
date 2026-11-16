@@ -37,6 +37,7 @@ endef
 	agent-ca agents-up pull openim-pull \
 	openim-build openim-up openim-down openim-logs \
 	trendradar-pull trendradar-prompts trendradar-up trendradar-down trendradar-logs \
+	monitoring-pull monitoring-up monitoring-down monitoring-logs \
 	llm-bridge-check-n llm-bridge-up llm-bridge-token llm-bridge-down llm-bridge-logs
 
 help: ## 列出可用命令
@@ -144,6 +145,22 @@ trendradar-down: ## 停止新闻早报；保留抓到的数据
 
 trendradar-logs: ## 跟踪 TrendRadar 日志（Ctrl+C 退出）
 	$(TRENDRADAR_COMPOSE) logs -f --tail=100
+
+# 监控（Prometheus + Grafana，compose.yaml 的 --profile monitoring；docs/deployment.md 第 12 节）。一键脚本直接部署它（T-0274）
+monitoring-pull: env ## 拉取监控（Prometheus + Grafana）的镜像（锁定 digest）
+	$(COMPOSE) --profile monitoring pull prometheus grafana
+
+monitoring-up: env ## 启动监控（Prometheus + Grafana），等健康检查通过；需要先 make up（一键脚本：deploy.sh 自动部署）
+	$(COMPOSE) --profile monitoring up -d --wait --wait-timeout 300 prometheus grafana
+	@grep -q '^PROMETHEUS_URL=.' .env || { \
+		echo "监控已启动。第一次部署时在 .env 里设置 PROMETHEUS_URL=http://prometheus:9090、GRAFANA_URL=http://grafana:3000"; \
+		echo "与 GRAFANA_DASHBOARD_URL，再运行 make up 让 api、worker 生效；步骤见 docs/deploy-guide.md 第 8.4 节"; }
+
+monitoring-down: ## 停止监控；保留数据卷（指标与 Grafana 设置）
+	$(COMPOSE) --profile monitoring stop prometheus grafana
+
+monitoring-logs: ## 跟踪监控日志（Ctrl+C 退出）
+	$(COMPOSE) --profile monitoring logs -f --tail=100 prometheus grafana
 
 # 大模型客户端的 MCP 管理器（会话桥；可选，每个是独立的 Compose 项目）。和工作台在同一台服务器上时加入 core 的 integrations 网络。
 # N 是第几个管理器（默认 1）。N=2、3 …… 各有自己的项目、数据卷、令牌（.env 里的 LLM_BRIDGE_ADMIN_TOKEN_<N>）、

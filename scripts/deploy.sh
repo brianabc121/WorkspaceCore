@@ -10,11 +10,12 @@
 #
 # 部署、升级、接入组件分两段（T-0094）：
 #   1. 前台：把需要你回答的问题一次问完——SITE_DOMAIN、ACME_EMAIL、PUBLIC_BASE_URL（默认 https://<域名>），
-#      要不要部署 OpenIM / OpenClaw 接入入口及其参数、防火墙等；回答保存在 <代码目录>/.deploy/answers.env（不含密码）；
+#      要不要配置 OpenClaw 接入入口及其参数、防火墙等；回答保存在 <代码目录>/.deploy/answers.env（不含密码）；
+#      OpenIM、新闻早报（TrendRadar）、监控（Prometheus + Grafana）不再询问，直接部署（T-0274，人类 2026-11-16 要求）；
 #   2. 后台：作为系统服务（systemd-run，没有 systemd 时 setsid nohup）运行，不再提问，输出写进 .deploy/deploy.log：
 #      安装缺少的工具与 Docker → 生成 .env（随机密钥）→ 启用 HTTPS 与生产模式 → make up → 迁移 → 冒烟检查 → 检查 HTTPS →
-#      等你在浏览器完成「首次安装」创建管理员（自动检测，不用回终端按回车）→ 按第 1 段的选择部署 OpenIM、
-#      配置 OpenClaw 接入入口（T-0076、T-0088）。GitHub 在工作台「集成设置」页面上接入（T-0091）。
+#      等你在浏览器完成「首次安装」创建管理员（自动检测，不用回终端按回车）→ 部署 OpenIM、新闻早报与监控，
+#      按第 1 段的选择配置 OpenClaw 接入入口（T-0076、T-0088）。GitHub 在工作台「集成设置」页面上接入（T-0091）。
 # 前台接着显示日志；按 Ctrl+C、SSH 断开都不影响后台。之后查看：deploy.sh status（进度、安装凭据、失败原因）、
 # deploy.sh logs（日志）。失败后重新运行同样的命令，会问是否沿用上次的回答。
 #
@@ -937,23 +938,30 @@ openim_env() {
   (cd "$ROOT" && make -s up </dev/null)
 }
 
+# OpenIM 资源提醒：内存、Docker 所在磁盘不够时只提示，照样部署（不再询问，人类 2026-11-16 要求）
+openim_resource_notes() {
+  local free_kb mem_kb dir
+  mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  if (( mem_kb > 0 && mem_kb < 3800 * 1024 )); then
+    warn "内存 $((mem_kb / 1024)) MB：OpenIM 另外占用约 1 GB，建议总内存至少 4 GB（照样部署）"
+  fi
+  dir="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"; [[ -d $dir ]] || dir=/
+  free_kb="$(df -Pk "$dir" 2>/dev/null | awk 'NR==2 {print $4}')"
+  if [[ -n $free_kb ]] && (( free_kb < 12 * 1024 * 1024 )) && ! docker image inspect "$(openim_image)" >/dev/null 2>&1; then
+    warn "Docker 所在磁盘剩余 $((free_kb / 1024 / 1024)) GB：第一次构建要临时占用约 8 GB（照样部署，构建失败时跳过）"
+  fi
+  return 0
+}
+
 connect_openim() {
-  local state="$1" free_kb mem_kb default=y i
-  step "OpenIM（「消息」页：管理员之间、管理员与 OpenClaw 实例，可选）"
+  local state="$1" i
+  step "OpenIM（「消息」页：管理员之间、管理员与 OpenClaw 实例）"
   if [[ $state == ok ]]; then ok "已部署"; return 0; fi
   if [[ $state == unavailable ]]; then
     warn "已配置，但工作台现在连不上 OpenIM：重新启动一次"
   else
-    mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
-    if (( mem_kb > 0 && mem_kb < 3800 * 1024 )); then
-      warn "内存 $((mem_kb / 1024)) MB：OpenIM 另外占用约 1 GB，建议总内存至少 4 GB"; default=n
-    fi
-    free_kb="$(df -Pk "$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /)" 2>/dev/null | awk 'NR==2 {print $4}')"
-    if [[ -n $free_kb ]] && (( free_kb < 12 * 1024 * 1024 )) && ! docker image inspect "$(openim_image)" >/dev/null 2>&1; then
-      warn "Docker 所在磁盘剩余 $((free_kb / 1024 / 1024)) GB：第一次构建要临时占用约 8 GB"; default=n
-    fi
-    decide OPENIM "部署 OpenIM？（另外占用约 1 GB 内存；第一次要在服务器上构建镜像，约 5 ~ 15 分钟）" "$default" \
-      || { info "跳过；以后运行 deploy.sh connect"; return 0; }
+    openim_resource_notes
+    info "直接部署（另外占用约 1 GB 内存；第一次要在服务器上构建镜像，约 5 ~ 15 分钟）"
   fi
   build_openim || { warn "OpenIM 镜像没有构建成功（见上面的输出），跳过；以后重新运行 deploy.sh connect"; return 0; }
   pull_images openim-pull "OpenIM" || true
@@ -1206,12 +1214,11 @@ upgrade_openim() {
 # ---------------------------------------------------------------- 新闻早报（TrendRadar，T-0152）
 # 独立的 Compose 项目（infra/trendradar/compose.yaml）：TrendRadar 抓取、筛选、AI 简报、推送，MCP 给工作台查询。
 # 兴趣、大模型 Key、推送渠道都在网页「设置 → 新闻早报」里设置，这里只负责部署（docs/deployment.md 第 23 节）。
-NEWS_PROMPT="部署新闻早报（TrendRadar）？（每天定时把热榜与 RSS 整理成早报推到手机；另外占用约 300 MB 内存；兴趣与推送渠道在网页上设置）"
 news_running() { [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=${COMPOSE_PROJECT_NAME:-$PROJECT}-trendradar" 2>/dev/null)" ]]; }
 
 plan_news() {
   if news_running; then ok "新闻早报（TrendRadar）：已部署"; return 0; fi
-  decide NEWS "$NEWS_PROMPT" y || true
+  info "新闻早报（TrendRadar）：后台直接部署（每天定时把热榜与 RSS 整理成早报；另外占用约 300 MB 内存；兴趣与推送渠道在网页上设置）"
 }
 
 # 让 api、worker 连上 TrendRadar：.env 里的地址为空时填上，再重启 api、worker
@@ -1248,14 +1255,11 @@ news_enable() {
 }
 
 connect_news() {
-  step "新闻早报（TrendRadar：每天定时推送早报，可选）"
+  step "新闻早报（TrendRadar：每天定时推送早报）"
   if news_running && [[ -n $(env_get TRENDRADAR_MCP_URL) ]]; then
     ok "已部署"
     news_enable
     return 0
-  fi
-  if ! news_running; then
-    decide NEWS "$NEWS_PROMPT" y || { info "跳过；以后运行 deploy.sh connect"; return 0; }
   fi
   pull_images trendradar-pull "新闻早报（TrendRadar）" || true
   if ! (cd "$ROOT" && make -s trendradar-up </dev/null); then
@@ -1274,6 +1278,71 @@ upgrade_news() {
   step "新闻早报（TrendRadar）"
   pull_images trendradar-pull "新闻早报（TrendRadar）" || true
   (cd "$ROOT" && make -s trendradar-up </dev/null) || warn "TrendRadar 没有启动成功：运行 make trendradar-logs 查看日志"
+  return 0
+}
+
+# ---------------------------------------------------------------- 监控（Prometheus + Grafana）
+# compose.yaml 的 --profile monitoring（和工作台在同一个 Compose 项目）：「运维」页的指标、Grafana 仪表盘外链。
+# 不再询问，直接部署（T-0274，人类 2026-11-16 要求）；Grafana 默认只绑定服务器本机，管理员密码由 make env 生成
+monitoring_running() { compose ps --status running --services </dev/null 2>/dev/null | grep -qx grafana; }
+
+plan_monitoring() {
+  if monitoring_running; then ok "监控（Prometheus + Grafana）：已部署"; return 0; fi
+  info "监控（Prometheus + Grafana）：后台直接部署（「运维」页的指标与仪表盘；另外占用约 300 MB 内存；Grafana 只对服务器本机开放）"
+}
+
+# 让 api、worker 连上监控：.env 里三个地址为空时填上，有变化才重启 api、worker；手动改过的保持不变
+monitoring_env() {
+  local key want current changed=0 public
+  public="$(env_get GRAFANA_PUBLIC_URL)"; public="${public:-http://localhost:3000}"
+  for key in PROMETHEUS_URL GRAFANA_URL GRAFANA_DASHBOARD_URL; do
+    case "$key" in
+      PROMETHEUS_URL) want=http://prometheus:9090 ;;
+      GRAFANA_URL) want=http://grafana:3000 ;;
+      GRAFANA_DASHBOARD_URL) want="${public%/}/d/workspace-overview/my-workspace" ;;
+    esac
+    current="$(env_get "$key")"
+    if [[ -n $current ]]; then
+      [[ $current == "$want" ]] || info "$key 已经设置为 $current，保持不变"
+      continue
+    fi
+    env_set "$key" "$want"; changed=1
+  done
+  (( changed )) || return 0
+  info "已在 .env 里设置监控地址，重启 api、worker 让它生效"
+  (cd "$ROOT" && make -s up </dev/null)
+}
+
+monitoring_hint() {
+  local port
+  port="$(env_get GRAFANA_PORT)"; port="${port:-3000}"
+  info "Grafana 只绑定服务器本机：ssh -L $port:127.0.0.1:$port <用户>@<服务器> 后打开 http://localhost:$port，账号 admin，密码是 .env 里的 GRAFANA_ADMIN_PASSWORD"
+}
+
+connect_monitoring() {
+  step "监控（Prometheus + Grafana：「运维」页的指标与仪表盘）"
+  if monitoring_running && [[ -n $(env_get PROMETHEUS_URL) && -n $(env_get GRAFANA_URL) ]]; then
+    ok "已部署"
+    monitoring_hint
+    return 0
+  fi
+  pull_images monitoring-pull "监控（Prometheus + Grafana）" || true
+  if ! (cd "$ROOT" && make -s monitoring-up </dev/null); then
+    warn "监控没有启动成功（见上面的输出）：运行 make monitoring-logs 查看日志，之后重新运行 deploy.sh connect"
+    return 0
+  fi
+  monitoring_env || { warn "api、worker 没有重启成功（见上面的输出）"; return 0; }
+  ok "监控已部署：「运维」页里 Prometheus、Grafana 显示「正常」"
+  monitoring_hint
+  return 0
+}
+
+# 升级：已经部署了监控时，按新版本锁定的镜像重建（make up 只管核心服务，不碰 --profile monitoring）
+upgrade_monitoring() {
+  monitoring_running || return 0
+  step "监控（Prometheus + Grafana）"
+  pull_images monitoring-pull "监控（Prometheus + Grafana）" || true
+  (cd "$ROOT" && make -s monitoring-up </dev/null) || warn "监控没有启动成功：运行 make monitoring-logs 查看日志"
   return 0
 }
 
@@ -1387,7 +1456,7 @@ connect_storage() {
 }
 
 connect_components() {
-  step "接入组件：GitHub（只读）、OpenIM（消息）、OpenClaw 接入入口、知识库图片存储、新闻早报；项目与任务由工作台自己管理"
+  step "接入组件：GitHub（只读）、OpenIM（消息）、OpenClaw 接入入口、知识库图片存储、新闻早报、监控；项目与任务由工作台自己管理"
   compose ps --status running --services </dev/null 2>/dev/null | grep -qx api || { warn "api 没有运行，先部署（install）"; return 0; }
   wait_for_setup || return 0
   local status
@@ -1398,12 +1467,14 @@ connect_components() {
   connect_agent_ingress
   connect_storage
   connect_news
+  connect_monitoring
   status="$(connect_status)"
   step "接入状态"
   info "GitHub：$(status_label "$(status_of github "$status")")"
   info "OpenIM：$(openim_label "$(status_of openim "$status")")"
   info "OpenClaw 接入入口：$(public_url_of AGENT_PUBLIC_URL 未配置)"
   info "新闻早报：$(news_running && echo 已部署 || echo 未部署)"
+  info "监控（Prometheus + Grafana）：$(monitoring_running && echo 已部署 || echo 未部署)"
   info "以后要接入或重试：bash $ROOT/scripts/deploy.sh connect（GitHub 在工作台「集成设置」里接入）"
 }
 
@@ -1471,30 +1542,23 @@ api_running() { command -v docker >/dev/null && compose ps --status running --se
 domain_ok() { valid_domain "$1"; }
 email_ok() { valid_email "$1"; }
 
-# 可选组件：OpenIM、OpenClaw 接入入口
+# 组件：OpenIM、新闻早报、监控直接部署（不再询问，人类 2026-11-16 要求）；OpenClaw 接入入口按回答
 plan_components() {
-  local status="" state site default mem_kb free_kb dir
+  local status="" site
   api_running && status="$(connect_status)"
   site="${DOMAIN:-$(env_get SITE_DOMAIN)}"
-  step "可选组件：现在选好，后台按选择自动部署、接入"
-  state="$(status_of openim "$status")"
-  case "$state" in
+  step "组件：OpenIM、新闻早报、监控在后台直接部署；OpenClaw 接入入口按你的选择"
+  case "$(status_of openim "$status")" in
     ok) ok "OpenIM：已部署" ;;
     unavailable) info "OpenIM：已配置但工作台现在连不上，后台会重新启动它" ;;
     *)
-      default=y
-      mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
-      if (( mem_kb > 0 && mem_kb < 3800 * 1024 )); then warn "内存 $((mem_kb / 1024)) MB：OpenIM 另外占用约 1 GB，建议总内存至少 4 GB"; default=n; fi
-      dir="$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || true)"; [[ -d $dir ]] || dir=/
-      free_kb="$(df -Pk "$dir" 2>/dev/null | awk 'NR==2 {print $4}')"
-      if [[ -n $free_kb ]] && (( free_kb < 12 * 1024 * 1024 )) && ! docker image inspect "$(openim_image)" >/dev/null 2>&1; then
-        warn "Docker 所在磁盘剩余 $((free_kb / 1024 / 1024)) GB：第一次构建要临时占用约 8 GB"; default=n
-      fi
-      decide OPENIM "部署 OpenIM？（「消息」页；另外占用约 1 GB 内存；第一次要在服务器上构建镜像，约 5 ~ 15 分钟）" "$default" || true
+      info "OpenIM：后台直接部署（「消息」页；另外占用约 1 GB 内存；第一次要在服务器上构建镜像，约 5 ~ 15 分钟）"
+      openim_resource_notes
       ;;
   esac
-  plan_ingress "$site"
   plan_news
+  plan_monitoring
+  plan_ingress "$site"
 }
 
 plan_ingress() {
@@ -1577,7 +1641,6 @@ answer_label() {
     UFW_WEB) echo "防火墙放行 80 / 443" ;;
     REGENERATE_ENV) echo "重新生成 .env" ;;
     REUSE_BACKUP_PASSWORD) echo "沿用之前的 BACKUP_PASSWORD" ;;
-    OPENIM) echo "部署 OpenIM" ;;
     INGRESS) echo "配置 OpenClaw 接入入口" ;;
     INGRESS_HOST) echo "接入入口的域名（- 表示用 IP）" ;;
     INGRESS_ADDRESS) echo "接入入口直连 IP（- 表示按 DNS）" ;;
@@ -1594,7 +1657,7 @@ plan_summary() {
   step "确认设置（保存到 $(deploy_dir)/answers.env，权限 600，不含密码）"
   [[ -n $DOMAIN ]] && info "域名：$DOMAIN　证书邮箱：$EMAIL　访问地址：$BASE_URL"
   for key in DOCKER_INSTALL COMPOSE_INSTALL DNS_CONTINUE UFW_WEB REGENERATE_ENV REUSE_BACKUP_PASSWORD \
-    OPENIM INGRESS INGRESS_HOST INGRESS_ADDRESS UFW_AGENT UPGRADE UPGRADE_TO REBUILD; do
+    INGRESS INGRESS_HOST INGRESS_ADDRESS UFW_AGENT UPGRADE UPGRADE_TO REBUILD; do
     [[ -v ANS[$key] ]] || continue
     value="${ANS[$key]}"
     case "$value" in y) value=是 ;; n) value=否 ;; "") value="（不设置）" ;; esac
@@ -1695,6 +1758,7 @@ do_upgrade() {
   upgrade_openim
   upgrade_agent_gateway
   upgrade_news
+  upgrade_monitoring
   step "升级完成：$(git -C "$ROOT" log -1 --format='%h %cs %s')"
   if [[ $AFTER_PULL != "$(git -C "$ROOT" rev-parse HEAD)" ]]; then
     info "回滚：没有新迁移时 git -C $ROOT checkout $(git -C "$ROOT" rev-parse --short "$AFTER_PULL") 后再 make up；有新迁移见 docs/deployment.md 第 5.3 节"
@@ -1864,6 +1928,7 @@ do_status() {
   fi
   if api_running; then
     info "OpenIM：$(openim_label "$(status_of openim "$(connect_status)")")"
+    info "新闻早报：$(news_running && echo 已部署 || echo 未部署)　监控（Prometheus + Grafana）：$(monitoring_running && echo 已部署 || echo 未部署)"
   fi
   [[ $(state_get status) == waiting_setup ]] || show_setup
 }
@@ -1877,7 +1942,7 @@ ${C_B}My Workspace 部署脚本${C_0}（代码目录：$ROOT）
   2) 升级到最新版本（自动备份、迁移、检查）
   3) 清空项目（删除全部容器与数据，可选同时删除代码目录）
   4) 查看状态与后台任务的进度
-  5) 接入组件：OpenIM、OpenClaw 接入入口（GitHub 在网页上接入）
+  5) 接入组件：OpenIM、新闻早报、监控、OpenClaw 接入入口（GitHub 在网页上接入）
   6) 查看部署日志
   0) 退出
 EOF
