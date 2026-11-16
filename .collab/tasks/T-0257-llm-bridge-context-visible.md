@@ -33,3 +33,4 @@ updated: 2026-11-16
 - 2026-11-16 07:56 UTC · claude · 开始任务
 - 2026-11-16 08:10 UTC · claude · 第 1 期做完：管理器 pytest 77 passed 3 skipped；后端 llm_bridge、契约、模块测试 100 passed；前端 llm_chat 41 passed，lint、typecheck、build 通过。没有用真实账号验证。
 - 2026-11-16 08:10 UTC · claude · status in_progress → done：第 1 期代码完成；真实账号验证留给人类
+- 2026-11-16 08:25 UTC · claude · CI 的 workspace（浏览器验收）在“清空上下文”一步失败：清空后发的消息没有发出去。根因是 #223 留下的时序问题——清空还在重新读会话时按回车被悄悄丢掉；改成等清空做完再发，并加了一个没有修复就失败的前端测试（llm_chat 42 passed）。失败的那一项已重跑过一次。

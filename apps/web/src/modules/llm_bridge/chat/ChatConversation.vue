@@ -81,7 +81,10 @@ document.addEventListener('visibilitychange', unbadge)
 onBeforeUnmount(() => { document.removeEventListener('visibilitychange', unbadge); if (titleBefore !== null) document.title = titleBefore })
 async function submit() {
   const text = draft.value.trim()
-  if (!text || sending.value || clearing.value || blocked.value) return
+  if (!text || sending.value || blocked.value) return
+  // 正在清空上下文（还在重新读会话）：等它做完再发，不要把这次回车悄悄丢掉
+  if (clearingDone) await clearingDone
+  if (sending.value) return
   // 只输入 /clear：清空上下文，不发给模型（官方程序在这里不执行斜杠命令，T-0255）
   if (isClearCommand(text)) { await clearContext(true); return }
   if (foreign.value && !allowTakeover()) return
@@ -117,6 +120,7 @@ async function submit() {
 }
 // ---- 清空上下文（T-0255）：管理器给会话换一个新的官方会话，之后的消息从头开始，上面的记录保留 ----
 const clearing = ref(false)
+let clearingDone: Promise<void> | null = null
 const canClear = computed(() => !!session.value && session.value.origin === 'bridge' && session.value.status === 'active' && props.bridge.enabled)
 function clearText(other: boolean) {
   const s = session.value
@@ -131,6 +135,12 @@ function clearText(other: boolean) {
 // typed：在输入框里输入了 /clear。那是明确要清空，自己的会话不再问；按钮和别人的会话先确认
 async function clearContext(typed = false) {
   if (!session.value || clearing.value) return
+  const run = doClear(typed)
+  clearingDone = run.finally(() => { clearingDone = null })
+  await clearingDone
+}
+async function doClear(typed: boolean) {
+  if (!session.value) return
   sendError.value = sendNotice.value = ''
   if (activeTurn.value) { sendError.value = '还有消息在排队或进行中：等它们做完或停止后再清空。'; return }
   if (!hasContext(messages.value)) {

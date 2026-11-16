@@ -571,6 +571,35 @@ describe('大模型聊天', () => {
     expect(box).toHaveValue('第一问')
   })
 
+  it('sends a message typed while the context is still being cleared, instead of dropping it', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 5, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false }
+    let release = () => {}
+    const slow = new Promise<void>(resolve => { release = resolve })
+    const { requests } = setup('owner', {}, async (r, w) => {
+      if (path(r) === `${chat}/sessions/${S1}/clear` && r.method === 'POST') {
+        w.conversations[S1] = talk({}, [asked('写一个周报模板'), answered('好的，模板如下。'), divider])
+        return Response.json({ session: session(), cleared: true, cleared_at: now() })
+      }
+      // 清空之后重新读会话列表很慢：这段时间里页面还算“正在清空”
+      if (path(r) === `${chat}/sessions` && r.method === 'GET' && writes(requests).length) { await slow; return undefined }
+      if (path(r) === `${chat}/sessions/${S1}/messages` && r.method === 'POST') return Response.json(turn())
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const box = await composer()
+    await fireEvent.click(screen.getByRole('button', { name: '清空上下文' }))
+    await waitFor(() => expect(writes(requests).map(path)).toEqual([`${chat}/sessions/${S1}/clear`]))
+    // 还没清空完就输入并回车
+    await fireEvent.update(box, '清空之后的第一问')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    expect(writes(requests).map(path)).toEqual([`${chat}/sessions/${S1}/clear`])
+    release()
+    // 清空做完之后这条消息照样发出去
+    await waitFor(() => expect(writes(requests).map(path)).toEqual([`${chat}/sessions/${S1}/clear`, `${chat}/sessions/${S1}/messages`]))
+    await waitFor(() => expect(box).toHaveValue(''))
+  })
+
   const twoModels: Schema['LlmChatOptionsOut'] = { models: [{ id: 'sonnet', name: 'Sonnet', description: '', default: true, efforts: [] }, { id: 'opus', name: 'Opus', description: '', default: false, efforts: [] }], models_error: '', environments: [] }
 
   it('shows how full the context is, where the platform compacted it, and warns when it is nearly full', async () => {
