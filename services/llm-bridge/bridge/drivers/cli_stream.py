@@ -26,6 +26,7 @@ from typing import Any
 from bridge import quota
 from bridge.drivers.base import (
     AccountStatus,
+    ContextUsage,
     Driver,
     DriverError,
     ErrorKind,
@@ -37,6 +38,7 @@ from bridge.drivers.base import (
     NativeSession,
     SessionSpec,
     TurnOutcome,
+    positive_int,
 )
 from bridge.drivers.web_login import WebLogin
 from bridge.redact import redact
@@ -167,6 +169,71 @@ def _turn_usage(result: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+_CONTEXT_USED = "codebuddy.ai/contextUsed"
+_CONTEXT_WINDOW = "codebuddy.ai/contextWindow"
+
+
+def _message_context(message: Any) -> int | None:
+    """一次模型调用的 usage → 这时上下文里有多少 token（输入 + 缓存读写 + 输出）。
+
+    Claude Code 2.1.323 的 SessionStartHookInput 就是这样算“上一次回答的窗口”的
+    （input + cache_read + cache_creation + output，Agent SDK 0.3.323 的 sdk.d.ts）。"""
+    usage = message.get("usage") if isinstance(message, dict) else None
+    if not isinstance(usage, dict):
+        return None
+    parts = [
+        positive_int(usage.get(key)) or 0
+        for key in (
+            "input_tokens",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "output_tokens",
+        )
+    ]
+    return sum(parts) or None
+
+
+def _result_context(result: dict[str, Any], model: str | None, used: int | None) -> ContextUsage:
+    """回合结果里的上下文：用了多少、窗口多大。
+
+    - CodeBuddy Code：`result._meta["codebuddy.ai/contextUsed"]`、`["codebuddy.ai/contextWindow"]`
+      （官方文档 stream-json-turn-usage 第 9 节：“当前上下文占用快照”，2.184.0）；
+    - Claude Code：窗口在 `result.modelUsage[<模型>].contextWindow`
+      （Agent SDK 0.3.323 的 ModelUsage），用了多少取这一回合最后一次模型调用的 usage
+      （used，由调用方算好）。"""
+    meta = result.get("_meta")
+    if isinstance(meta, dict):
+        reported_used = positive_int(meta.get(_CONTEXT_USED))
+        reported_window = positive_int(meta.get(_CONTEXT_WINDOW))
+        if reported_used or reported_window:
+            return ContextUsage(reported_used or used, reported_window)
+    window = None
+    models = result.get("modelUsage")
+    if isinstance(models, dict):
+        windows = {
+            name: positive_int(item.get("contextWindow"))
+            for name, item in models.items()
+            if isinstance(item, dict)
+        }
+        window = windows.get(model or "") or max((w for w in windows.values() if w), default=None)
+    return ContextUsage(used, window)
+
+
+def _compaction(event: dict[str, Any]) -> dict[str, Any]:
+    """Claude Code 的 compact_boundary 事件 → 压缩记录（触发方式、压缩前后的 token 数）。
+
+    字段见 Agent SDK 0.3.323 的 SDKCompactBoundaryMessage：
+    compact_metadata.trigger（manual / auto）、pre_tokens、post_tokens（可能没有）。"""
+    meta = event.get("compact_metadata")
+    meta = meta if isinstance(meta, dict) else {}
+    trigger = meta.get("trigger")
+    return {
+        "trigger": trigger if trigger in ("manual", "auto") else None,
+        "pre_tokens": positive_int(meta.get("pre_tokens")),
+        "post_tokens": positive_int(meta.get("post_tokens")),
+    }
+
+
 def _error_kind(text: str) -> ErrorKind:
     low = text.lower()
     if any(hint in low for hint in _AUTH_HINTS):
@@ -219,6 +286,16 @@ def parse_transcript_line(record: dict[str, Any]) -> Message | None:
         text = _block_text(record.get("content"))
         return Message(record["role"], text, stamp) if text.strip() else None
     return None
+
+
+@dataclass
+class _Seen:
+    """跑一个回合时一路记下的：最后一次模型调用后的上下文、主模型、压缩。"""
+
+    used: int | None = None
+    model: str | None = None
+    compacting: bool = False
+    compactions: int = 0
 
 
 class CliStreamDriver(Driver):
@@ -427,6 +504,12 @@ class CliStreamDriver(Driver):
         return (json.dumps(message, ensure_ascii=False) + "\n").encode()
 
     async def run_turn(self, spec: SessionSpec, text: str, sink: EventSink) -> TurnOutcome:
+        return await self._turn(spec, text, sink, manual=False)
+
+    async def _turn(
+        self, spec: SessionSpec, text: str, sink: EventSink, *, manual: bool
+    ) -> TurnOutcome:
+        """起一次官方命令行跑一个回合。manual：这一回合是手动压缩（发的是 /compact）。"""
         if not spec.native_id:
             raise DriverError("invalid", "会话没有会话号")
         spec.workdir.mkdir(parents=True, exist_ok=True)
@@ -454,6 +537,7 @@ class CliStreamDriver(Driver):
             messages: list[str] = []
             limited: list[dict[str, Any]] = []
             result: dict[str, Any] | None = None
+            seen = _Seen()
             while line := await proc.stdout.readline():
                 try:
                     event = json.loads(line)
@@ -465,7 +549,14 @@ class CliStreamDriver(Driver):
                     delta = _text_delta(event)
                     if delta:
                         await sink("delta", {"text": delta})
+                elif event.get("type") == "system":
+                    await self._on_system(event, seen, sink, manual=manual)
                 elif event.get("type") == "assistant":
+                    if not event.get("parent_tool_use_id"):  # 子代理的调用不算主会话的上下文
+                        message = event.get("message")
+                        seen.used = _message_context(message) or seen.used
+                        if isinstance(message, dict) and isinstance(message.get("model"), str):
+                            seen.model = message["model"]
                     await self._on_assistant(event, messages, outcome, sink)
                 elif event.get("type") == "user":
                     await self._on_tool_results(event, sink)
@@ -482,6 +573,9 @@ class CliStreamDriver(Driver):
             if result is None:
                 tail = redact(stderr.strip()[-300:]) or f"退出码 {proc.returncode}"
                 raise DriverError(_error_kind(tail), f"{self.profile.label} 没有返回结果：{tail}")
+            if seen.compacting:  # 报了“正在压缩”却没等到结束：回合结束时也算压缩过一次
+                await self._compacted(seen, sink, {"trigger": "manual" if manual else "auto"})
+            outcome.context = _result_context(result, seen.model, seen.used)
             return self._finish(result, messages, outcome, limited)
         finally:
             self._procs.pop(spec.native_id, None)
@@ -489,6 +583,33 @@ class CliStreamDriver(Driver):
                 proc.kill()
                 with contextlib.suppress(ProcessLookupError):
                     await proc.wait()
+
+    async def _on_system(
+        self, event: dict[str, Any], seen: _Seen, sink: EventSink, *, manual: bool
+    ) -> None:
+        """官方程序的 system 事件里和压缩有关的两种。
+
+        - Claude Code：`subtype: compact_boundary`，带触发方式和压缩前后的 token 数；
+        - CodeBuddy Code：只有状态事件 `subtype: status`，`status: "compacting"` 表示开始压缩，
+          之后 `status: null` 表示结束（2.184.0 程序文件里的 StreamJsonView），没有前后的 token 数。
+        两种都报的话（以后的版本）只算一次。"""
+        subtype = event.get("subtype")
+        if subtype == "compact_boundary":
+            seen.compacting = False
+            await self._compacted(seen, sink, _compaction(event))
+        elif subtype == "status":
+            if event.get("status") == "compacting":
+                seen.compacting = True
+            elif seen.compacting:
+                seen.compacting = False
+                await self._compacted(seen, sink, {"trigger": "manual" if manual else "auto"})
+
+    @staticmethod
+    async def _compacted(seen: _Seen, sink: EventSink, info: dict[str, Any]) -> None:
+        seen.compactions += 1
+        if info.get("post_tokens"):
+            seen.used = info["post_tokens"]
+        await sink("compacted", info)
 
     async def _on_assistant(
         self, event: dict[str, Any], messages: list[str], outcome: TurnOutcome, sink: EventSink

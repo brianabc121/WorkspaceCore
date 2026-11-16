@@ -606,6 +606,19 @@ describe('大模型聊天', () => {
     expect(within(claude).getByText(/最近 5 小时经这个管理器用掉 4,321 个 token/)).toBeVisible()
   })
 
+  it('shows how much of the context is used, warns near the limit and marks where the platform compacted it', async () => {
+    const context = { used: 170000, window: 200000, percent: 85, compactions: 2, last_compacted_at: now() - 60, last_trigger: 'auto', near_limit: true, warn_percent: 80 }
+    const compactedAt: Message = { role: 'context_compacted', turn_id: T2, text: '', at: now() - 60, trigger: 'auto', pre_tokens: 150000, post_tokens: 9000, steps: [], attachments: [], imported: false }
+    setup('owner', { conversations: { [S1]: talk({ context }, [asked('第一问'), answered('第一答'), compactedAt, asked('第二问', T2), answered('第二答', T2, { steps: [{ kind: 'compaction', text: '上下文已压缩（平台自动压缩）：之前的内容变成了摘要', at: now() - 60, truncated: false, error: false }] })]) } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const line = await screen.findByRole('separator', { name: /这里之前的内容被压缩成了摘要（平台自动压缩/ })
+    expect(line).toHaveTextContent('压缩前约 150k、压缩后约 9k')
+    // 分隔线排在那一问前面
+    expect(messages().indexOf(line)).toBe(2)
+    expect(screen.getByText(/已用 85%（170k \/ 200k），压缩过 2 次/)).toBeVisible()
+    expect(screen.getByText(/上下文已用 85%，快到平台自动压缩的位置了/)).toBeVisible()
+  })
+
   it('says that CodeBuddy gives no quota instead of promising one after a turn', async () => {
     setup('owner', { conversations: { [S1]: talk({ platform: 'workbuddy' }) } }, withQuota)
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)

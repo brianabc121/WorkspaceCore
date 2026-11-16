@@ -854,3 +854,30 @@ async def test_chat_model_changes_between_turns(rig: Rig) -> None:  # noqa: F811
     archived = await rig.api("POST", f"{base}/archive")
     assert archived.status_code == 200
     assert (await rig.api("PUT", f"{base}/model", json={"model": "fake-1"})).status_code == 409
+
+
+async def test_chat_shows_context_usage_and_compactions(rig: Rig) -> None:  # noqa: F811
+    """上下文用了多少、压缩过几次；压缩的位置有一条分隔，导出里也有
+    （docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）。"""
+    session_id = (await new_chat(rig, "你好"))["session"]["session_id"]
+    base = chat(rig, f"/sessions/{session_id}")
+    await wait_idle(rig, session_id)
+    view = (await rig.api("GET", base)).json()
+    context = view["session"]["context"]
+    assert (context["used"], context["window"], context["percent"]) == (1000, 10000, 10)
+    assert context["compactions"] == 0 and context["near_limit"] is False
+    sent = await rig.api("POST", f"{base}/messages", json={"text": "compact", "request_id": "c1"})
+    assert sent.status_code == 200, sent.text
+    await wait_idle(rig, session_id)
+    view = (await rig.api("GET", base)).json()
+    assert view["session"]["context"]["compactions"] == 1
+    assert view["session"]["context"]["last_trigger"] == "auto"
+    roles = [m["role"] for m in view["messages"]]
+    divider = view["messages"][roles.index("context_compacted")]
+    assert divider["trigger"] == "auto" and divider["pre_tokens"] == 8000
+    assert view["messages"][roles.index("context_compacted") + 1]["text"] == "compact"
+    # 列表里也带着
+    listed = (await rig.api("GET", chat(rig, "/sessions"))).json()["sessions"]
+    assert listed[0]["context"]["compactions"] == 1
+    exported = await rig.api("GET", f"{base}/export")
+    assert exported.status_code == 200 and "上下文已压缩（平台自动压缩" in exported.text

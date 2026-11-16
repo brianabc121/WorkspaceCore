@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { CHAT_NO_TOOLS, credits, duration, seconds } from '../api'
-import { splitText, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
+import { splitText, tokens, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
 import ChatAttachments from './ChatAttachments.vue'
 import { answerHtml } from './markdown'
 import '../../../features/kb/kb.css'
@@ -14,7 +14,7 @@ import '../../../features/kb/kb.css'
 const props = defineProps<{ message: ChatMessage; platform: string; noTools?: boolean; target?: boolean; last?: boolean; busyAction?: boolean; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
 const emit = defineEmits<{ resume: [turn: string, now: boolean]; again: [turn: string] }>()
 
-const STEP: Record<string, string> = { message: '说明', command: '命令', files: '改动的文件', notice: '提示', tool: '工具', tool_result: '结果', image: '图片', file: '文件' }
+const STEP: Record<string, string> = { message: '说明', command: '命令', files: '改动的文件', notice: '提示', tool: '工具', tool_result: '结果', image: '图片', file: '文件', compaction: '压缩' }
 const stepLabel = (step: ChatStep) => `${STEP[step.kind] ?? step.kind}${step.name && (step.kind === 'tool' || step.kind === 'tool_result') ? ` ${step.name}` : ''}`
 const CODE_STEPS = ['command', 'files', 'tool', 'tool_result']
 const FAILURE: Record<string, string> = { failed: '这一回合失败了', unknown: '这一回合的结果未知' }
@@ -109,10 +109,18 @@ const interrupted = computed(() => {
   return { text, canNow: state !== 'done' && state !== 'forced', canCancel: state === 'pending' }
 })
 const busy = computed(() => !!props.resuming && props.resuming === props.message.turn_id)
+// 平台压缩了上下文的位置（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：这条线之前的内容在模型那里只剩摘要
+const compacted = computed(() => props.message.role === 'context_compacted')
+const compactedText = computed(() => {
+  const how = props.message.trigger === 'manual' ? '手动压缩' : '平台自动压缩'
+  const size = props.message.pre_tokens ? `，压缩前约 ${tokens(props.message.pre_tokens)}${props.message.post_tokens ? `、压缩后约 ${tokens(props.message.post_tokens)}` : ''}` : ''
+  return `这里之前的内容被压缩成了摘要（${how}${props.message.at ? `，${seconds(props.message.at)}` : ''}${size}）：模型只记得摘要里的要点`
+})
 </script>
 
 <template>
-  <li class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine, 'is-target': target }]" :data-status="status || undefined" :data-turn="message.turn_id || undefined">
+  <li v-if="compacted" class="lc-compacted" role="separator" :aria-label="compactedText"><span>{{ compactedText }}</span></li>
+  <li v-else class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine, 'is-target': target }]" :data-status="status || undefined" :data-turn="message.turn_id || undefined">
     <div class="lc-msg-head">
       <strong>{{ who }}</strong>
       <time v-if="message.at">{{ seconds(message.at) }}</time>

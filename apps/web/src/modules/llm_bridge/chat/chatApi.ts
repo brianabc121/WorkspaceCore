@@ -239,6 +239,22 @@ const MESSAGES: Record<string, string> = {
 }
 export const chatError = (error: unknown) => (error instanceof ApiError && MESSAGES[error.code]) || bridgeError(error)
 export const needsTakeover = (error: unknown) => error instanceof ApiError && error.code === 'TAKEOVER_REQUIRED'
+/** token 数写成 124k / 1.2M 这样，看得快 */
+export function tokens(count: number) {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(count >= 10_000_000 ? 0 : 1)}M`
+  if (count >= 1000) return `${Math.round(count / 1000)}k`
+  return String(count)
+}
+export type ChatContext = Schema['LlmChatContextOut']
+/** 会话的上下文用了多少、压缩过几次（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）；平台没报就说没有 */
+export function contextText(context: ChatContext | null | undefined) {
+  if (!context) return ''
+  const used = context.percent != null && context.used && context.window
+    ? `已用 ${context.percent}%（${tokens(context.used)} / ${tokens(context.window)}）`
+    : context.used ? `已用约 ${tokens(context.used)} token（平台没有报窗口大小）` : '还没有数据（跑过一个回合后显示）'
+  const times = context.compactions ? `，压缩过 ${context.compactions} 次` : ''
+  return `${used}${times}`
+}
 
 /** 这个管理器上能新建会话的平台：只列它控制的；带是否已登录、能用哪几种用法 */
 export function platformChoices(status: BridgeStatus | undefined) {

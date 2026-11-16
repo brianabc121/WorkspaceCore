@@ -26,6 +26,7 @@ from app.integrations.base import ConnectorError
 from app.models import User
 from app.modules.llm_bridge.chat_schemas import (
     LlmChatAttachmentOut,
+    LlmChatContextOut,
     LlmChatConversationOut,
     LlmChatCreatedOut,
     LlmChatCreateIn,
@@ -86,7 +87,16 @@ def session_out(session: dict[str, Any], me: str) -> LlmChatSessionOut:
         environment=LlmBridgeEnvironmentOut(**environment) if environment else None,
         source=session.get("source") if isinstance(session.get("source"), dict) else None,
         purged_at=session.get("purged_at"),
+        context=_context_out(session.get("context")),
     )
+
+
+def _context_out(raw: Any) -> LlmChatContextOut | None:
+    """管理器报的上下文；旧版本的管理器没有这一项，不给。"""
+    if not isinstance(raw, dict):
+        return None
+    keys = LlmChatContextOut.model_fields.keys()
+    return LlmChatContextOut.model_validate({k: v for k, v in raw.items() if k in keys})
 
 
 def _filename(response: httpx.Response) -> str:
@@ -232,6 +242,7 @@ class LlmChatService:
         messages = []
         for item in data.get("messages", []):
             is_user = item.get("role") == "user"
+            compacted = item.get("role") == "context_compacted"
             messages.append(
                 LlmChatMessageOut(
                     role=str(item.get("role")),
@@ -254,6 +265,9 @@ class LlmChatService:
                     attachments=item.get("attachments") or [],
                     imported=bool(item.get("imported")),
                     delivery=item.get("delivery") if is_user else None,
+                    trigger=item.get("trigger") if compacted else None,
+                    pre_tokens=item.get("pre_tokens") if compacted else None,
+                    post_tokens=item.get("post_tokens") if compacted else None,
                 )
             )
         return LlmChatConversationOut(
@@ -535,6 +549,15 @@ class LlmChatService:
                 if message.at
                 else ""
             )
+            if message.role == "context_compacted":
+                how = "手动压缩" if message.trigger == "manual" else "平台自动压缩"
+                lines += [
+                    "---",
+                    "",
+                    f"*上下文已压缩（{how}，{when}）：这里之前的内容在模型那里只剩摘要*",
+                    "",
+                ]
+                continue
             if message.role == "user":
                 lines += [f"## {message.by or '用户'}（{when}）", "", message.text, ""]
             else:

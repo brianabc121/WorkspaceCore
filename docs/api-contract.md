@@ -933,6 +933,13 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 - 执行记录（`GET /api/v1/ai/tool-executions`）里，`llm_bridge_*` 写工具成功时 `arguments.result` 带 `bridge_id`、`session_id`、`turn_id`：能从这条记录找到会话的那一回合。
 - **会话索引**：`GET /api/v1/llm_bridge/sessions`（admin）——所有 MCP 管理器上的会话，按最后活动倒序；`bridge_id`、`owner_kind`（`agent` / `user` / `external`）筛选，`limit` / `offset` 翻页，`sync=true` 先同步再读（连不上的管理器列在 `sync_failed`）。每条有 `bridge_id` / `bridge_name`、`session_id`、平台、用法、模型、`title`、`status`、`owner_kind` / `owner_id` / `owner`、`source`、`busy`、`turns_total` / `turns_failed` / `turns_interrupted`、`tokens`、三个时间。**不含提问和回答**。数据在工作台的 `llm_bridge_sessions` 表里，后台每分钟向每个启用的管理器取一次“变更序号之后变了的会话”（管理器的 `GET /admin/index?after=`）。
 
+**上下文用量与压缩**（T-0256，`docs/v2/LLM_BRIDGE_MEMORY_PLAN.md` 4.1；核验记录 `docs/decisions/2026-11-16-llm-bridge-context-verification.md`）：
+
+- 会话（聊天页的会话内容和列表、管理器的 `session_view`）多 `context`：`used`（上下文现在用了多少 token）、`window`（窗口多大）、`percent`、`compactions`（平台压缩过几次）、`last_compacted_at`、`last_trigger`（`auto` / `manual`）、`near_limit`（已用比例到了 `warn_percent`，现在是 80%）。数都是官方程序报的，没报为 `null`，不估算；旧版本的管理器没有 `context`。
+- 聊天页的会话内容里多一种 `role=context_compacted`：平台在这一回合压缩了上下文，排在那一问前面；带 `trigger`、`pre_tokens`、`post_tokens`（平台报了才有）。那一回合的“过程”里多一步 `kind=compaction`。导出的 Markdown 里有一行分隔。
+- 智能体：`llm_bridge_send`、`llm_bridge_turn_get` 的结果多 `data.context`；`llm_bridge_session_get` 的 `data.session.context` 同样，消息里压缩的位置是 `role=status`、`text=context_compacted`（带 `trigger`）。
+- 管理器的会话索引（`GET /admin/index`）每条多 `compactions`。这一期只记录和显示，不改任何行为、不多花 token。
+
 **聊天页的日常体验**（T-0253，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.3）：
 
 - `PUT .../chat/sessions/{session_id}/model`（admin，`{model}`）：换这个会话之后的回合用的模型，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换（每个回合起一次官方程序，模型是那一次的参数）；ChatGPT / Codex 的会话 422 `NOT_SUPPORTED`，已归档的 409。记审计 `chat_session_model_changed`。

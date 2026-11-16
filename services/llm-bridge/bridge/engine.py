@@ -30,7 +30,7 @@ from bridge import connectivity as net
 from bridge import quota
 from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
-from bridge.drivers.base import Driver, DriverError, Mode, SessionSpec
+from bridge.drivers.base import ContextUsage, Driver, DriverError, Mode, SessionSpec
 from bridge.redact import mask_identity, redact
 from bridge.store import Row, Store, message_of, new_id, usage_credits, usage_tokens
 
@@ -72,6 +72,9 @@ SETTING_LIMITS = {
     "auto_resume_max": (1, 10),
     "retention_days": (0, 3650),
 }
+# 上下文用到窗口的百分之多少时提醒“快到压缩的位置了”（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）。
+# 平台自己的自动压缩通常在 70%–92% 之间触发（CodeBuddy 文档），提醒放在这个区间里
+CONTEXT_WARN_PERCENT = 80
 MAX_WAIT_SECONDS = 50
 RETENTION_CHECK_SECONDS = 6 * 3600  # 多久按保留期清一次
 # 逐字的增量：攒到这么多字、或者过了这么久，就写成一条事件
@@ -772,7 +775,19 @@ class Engine:
                 raise from_driver(error) from error
             messages = [{"role": m.role, "text": redact(m.text), "at": m.at} for m in native]
         else:
+            compactions = self._compactions(session_id)
             for turn in self.store.list_turns(session_id=session_id, limit=10_000):
+                # 平台在这一回合里压缩了上下文：这条之前的内容在模型那里只剩摘要
+                messages += [
+                    {
+                        "role": "status",
+                        "text": "context_compacted",
+                        "at": item["at"],
+                        "turn_id": turn["id"],
+                        "trigger": (item["data"] or {}).get("trigger"),
+                    }
+                    for item in compactions.get(turn["id"], [])
+                ]
                 messages.append(
                     {
                         "role": "user",
@@ -1075,6 +1090,8 @@ class Engine:
             if kind == "image":  # 模型画的图：收进附件，事件里只留名字
                 self._collect_output(session, turn_id, Path(str(payload.get("path"))), image=True)
                 return
+            if kind == "compacted":  # 平台压缩了上下文：会话上记一次，内容里留一步（分隔线）
+                self._note_compaction(session_id, payload)
             clean = {k: redact(v) if isinstance(v, str) else v for k, v in payload.items()}
             self.store.add_event(session_id, turn_id, kind, clean)
             made = message_of(kind, clean)
@@ -1134,6 +1151,8 @@ class Engine:
         fields: Row = {"turn_count": session["turn_count"] + 1}
         if not session["title"]:
             fields["title"] = " ".join(turn["text"].split())[:120]
+        if outcome.context is not None:
+            fields["context"] = self._merged_context(session_id, outcome.context)
         self.store.update_session(session_id, **fields)
         if session["mode"] == "dev":  # 开发会话里改动、新建的文件收进附件
             for path in list(dict.fromkeys(outcome.files))[: files.MAX_OUTPUT_PER_TURN]:
@@ -1155,6 +1174,40 @@ class Engine:
             summary=summary,
             native_turn_id=outcome.native_turn_id,
         )
+
+    # ---- 上下文与压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）----
+    def _context(self, session_id: str) -> Row:
+        current = self.store.get_session(session_id)
+        return dict((current or {}).get("context") or {})
+
+    def _compactions(self, session_id: str) -> dict[str, list[Row]]:
+        """这个会话里每个回合发生过的压缩（messages 里 kind=compaction 的行）。"""
+        out: dict[str, list[Row]] = {}
+        for message in self.store.list_messages(session_id, imported=False):
+            if message["kind"] == "compaction" and message["turn_id"]:
+                out.setdefault(message["turn_id"], []).append(message)
+        return out
+
+    def _merged_context(self, session_id: str, usage: ContextUsage) -> Row:
+        """回合结束时官方程序报的上下文用量，并进会话现有的记录（压缩次数等不变）。"""
+        context = self._context(session_id)
+        if usage.used:
+            context["used"] = usage.used
+        if usage.window:
+            context["window"] = usage.window
+        context["observed_at"] = time.time()
+        return context
+
+    def _note_compaction(self, session_id: str, payload: Row) -> None:
+        context = self._context(session_id)
+        context["compactions"] = int(context.get("compactions") or 0) + 1
+        context["last_compacted_at"] = time.time()
+        trigger = payload.get("trigger")
+        context["last_trigger"] = trigger if trigger in ("auto", "manual") else None
+        if payload.get("post_tokens"):
+            context["used"] = payload["post_tokens"]
+        context["observed_at"] = time.time()
+        self.store.update_session(session_id, context=context)
 
     async def wait_turn(self, turn_id: str, wait_seconds: float = 0) -> Row:
         turn = self.store.get_turn(turn_id)
@@ -1268,6 +1321,8 @@ class Engine:
         }
         # 统一的回合状态（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.1）：三条链路都读这几项
         view["timing"] = _timing(turn)
+        if session:  # 会话现在的上下文：已用比例、压缩过几次（智能体据此决定要不要换会话）
+            view["context"] = context_view(session)
         if turn.get("source"):
             view["source"] = turn["source"]
         nxt = turn.get("superseded_by") or turn.get("resumed_by")
@@ -1404,6 +1459,9 @@ class Engine:
                 "turns_interrupted": row["turns_interrupted"],
                 "last_turn_at": row["last_turn_at"],
                 "tokens": self.store.session_tokens(row["id"]),
+                # 压缩过几次：工作台据此判断要不要更新会话纪要
+                # （docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）
+                "compactions": int((row.get("context") or {}).get("compactions") or 0),
             }
             for row in rows
         ]
@@ -1755,6 +1813,8 @@ class Engine:
         for turn in self.store.list_turns(session_id=session_id, limit=10_000):
             mine = by_turn.get(turn["id"], [])
             asked = next((m for m in mine if m["role"] == "user"), None)
+            # 平台在这一回合里压缩了上下文：在这一问前面画一条分隔线（4.1）
+            messages += [_compacted_view(turn["id"], m) for m in mine if m["kind"] == "compaction"]
             messages.append(
                 {
                     "role": "user",
@@ -2281,12 +2341,26 @@ def _event_view(event: Row) -> Row:
         "kind": event["kind"],
         "at": event["at"],
     }
-    for key in ("text", "command", "paths", "by"):
+    for key in ("text", "command", "paths", "by", "trigger"):
         if key in payload:
             view[key] = payload[key]
     if event["kind"] in ("failed", "unknown") and payload.get("kind"):
         view["reason"] = payload["kind"]
     return view
+
+
+def _compacted_view(turn_id: str, message: Row) -> Row:
+    """会话内容里的一条分隔：平台在这一回合压缩了上下文，前面的内容在模型那里只剩摘要。"""
+    data = message["data"] or {}
+    return {
+        "role": "context_compacted",
+        "turn_id": turn_id,
+        "text": "",
+        "at": message["at"],
+        "trigger": data.get("trigger"),
+        "pre_tokens": data.get("pre_tokens"),
+        "post_tokens": data.get("post_tokens"),
+    }
 
 
 def _step(message: Row) -> Row | None:
@@ -2368,7 +2442,28 @@ def session_view(session: Row, *, full: bool = False) -> Row:
         view["environment_id"] = session["environment_id"]
         view["turns"] = session["turn_count"]
         view["options"] = session["options"]
+        view["context"] = context_view(session)
     return view
+
+
+def context_view(session: Row) -> Row:
+    """会话的上下文：用了多少、窗口多大、已用比例、压缩过几次、最近一次什么时候、怎么触发的。
+
+    数都是官方程序报的；没报的为 null（例如还没跑过回合，或者平台不报窗口大小）。"""
+    context = session.get("context") or {}
+    used, window = context.get("used"), context.get("window")
+    percent = min(100, round(used * 100 / window)) if used and window else None
+    return {
+        "used": used,
+        "window": window,
+        "percent": percent,
+        "compactions": int(context.get("compactions") or 0),
+        "last_compacted_at": context.get("last_compacted_at"),
+        "last_trigger": context.get("last_trigger"),
+        "near_limit": percent is not None and percent >= CONTEXT_WARN_PERCENT,
+        "warn_percent": CONTEXT_WARN_PERCENT,
+        "observed_at": context.get("observed_at"),
+    }
 
 
 def valid_mode(mode: str) -> Mode:

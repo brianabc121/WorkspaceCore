@@ -92,6 +92,11 @@ def run_turn(state, thread_id, params):
                 reply = f"steered: {steer['input'][0]['text']}"
                 break
     if status == "completed":
+        if text == "compact-auto":
+            # 上下文满了，平台自动压缩：0.169.0 的 ContextCompactionThreadItem 只有 id
+            item = {"type": "contextCompaction", "id": "item_c"}
+            note("item/started", {"threadId": thread_id, "turnId": turn_id, "item": item})
+            note("item/completed", {"threadId": thread_id, "turnId": turn_id, "item": item})
         note(
             "item/completed",
             {
@@ -126,7 +131,17 @@ def run_turn(state, thread_id, params):
             {
                 "threadId": thread_id,
                 "turnId": turn_id,
-                "tokenUsage": {"last": {"inputTokens": 3, "outputTokens": 4, "totalTokens": 7}},
+                "tokenUsage": {
+                    "last": {
+                        "inputTokens": 3,
+                        "outputTokens": 4,
+                        "totalTokens": 7 + 1000 * len(state["threads"][thread_id]["turns"]),
+                        "reasoningOutputTokens": 2,
+                        "cachedInputTokens": 0,
+                    },
+                    "total": {"inputTokens": 3, "outputTokens": 4, "totalTokens": 7},
+                    "modelContextWindow": 200000,
+                },
             },
         )
         state["threads"][thread_id]["turns"].append({"user": text, "agent": reply})

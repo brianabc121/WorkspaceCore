@@ -100,7 +100,16 @@ CREATE INDEX IF NOT EXISTS events_session ON events (session_id, id);
 """
 
 Row = dict[str, Any]
-_JSON_COLUMNS = {"config", "options", "summary", "scopes", "payload", "data", "source"}
+_JSON_COLUMNS = {
+    "config",
+    "options",
+    "summary",
+    "scopes",
+    "payload",
+    "data",
+    "source",
+    "context",
+}
 
 
 # 工具结果等大段内容在 messages 里最多存这么多字符，超过的截断并注明
@@ -113,8 +122,19 @@ def clip(text: str) -> tuple[str, bool]:
     return text[:MAX_MESSAGE_CHARS] + "\n…（内容太长，后面的没有保存）", True
 
 
+COMPACTION_TEXT = {
+    "auto": "上下文已压缩（平台自动压缩）：之前的内容变成了摘要",
+    "manual": "上下文已压缩（手动压缩）：之前的内容变成了摘要",
+}
+
+
 def message_of(kind: str, payload: Row) -> tuple[str, str, str, Row] | None:
     """回合里的一条事件 → messages 里的一行（role, kind, text, data）；排队、完成这类不算内容。"""
+    if kind == "compacted":  # 平台压缩了上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）
+        trigger = payload.get("trigger")
+        text = COMPACTION_TEXT.get(str(trigger), "上下文已压缩：之前的内容变成了摘要")
+        keys = ("trigger", "pre_tokens", "post_tokens")
+        return "process", "compaction", text, {k: payload[k] for k in keys if payload.get(k)}
     if kind == "message" and payload.get("text"):
         return "assistant", "text", str(payload["text"]), {}
     if kind == "notice" and payload.get("text"):
@@ -221,9 +241,17 @@ class Store:
             """
         )
         self._migrate_messages()
+        self._migrate_memory()
         self._db.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),)
         )
+
+    def _migrate_memory(self) -> None:
+        """上下文与压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 4 节）：
+        会话上记上下文的用量和压缩次数。"""
+        columns = {row["name"] for row in self._db.execute("PRAGMA table_info(sessions)")}
+        if "context" not in columns:
+            self._db.execute("ALTER TABLE sessions ADD COLUMN context TEXT NOT NULL DEFAULT '{}'")
 
     def _migrate_messages(self) -> None:
         """会话内容落库（T-0236 第二步）：messages / attachments；已有的回合和事件回填进去。"""

@@ -289,6 +289,9 @@ function archive() {
         <p v-if="blocked" class="lc-note" role="note">{{ blocked }}</p>
         <template v-else>
           <p v-if="foreign" class="lc-note" role="note">{{ session.owner_kind === 'external' ? '这是官方程序里已有的会话' : `这是${session.owner_kind === 'agent' ? '智能体' : ''}「${ownerText(session)}」建的会话` }}：可以看；接着发消息前会让你确认一次。</p>
+          <p v-if="session.context?.near_limit && session.status === 'active'" class="lc-note lc-context-warn" role="note">
+            这个会话的上下文已用 {{ session.context.percent }}%，快到平台自动压缩的位置了：压缩后前面的细节会变成摘要。要接着做长任务，可以换一个新会话。
+          </p>
           <p v-if="dragging > 0" class="lc-note" role="status">松开鼠标，把{{ imagesOnly ? '图片' : '图片或文件' }}加到这条消息里。</p>
           <ul v-if="attached.length || uploading" class="lc-attached" aria-label="要带上的附件">
             <li v-for="a in attached" :key="a.id"><span class="lc-file-name">{{ a.name }}</span><span class="lc-file-size">{{ fileSize(a.size) }}</span><button type="button" class="lc-icon" :aria-label="`去掉附件：${a.name}`" @click="detach(a)"><X aria-hidden="true" /></button></li>

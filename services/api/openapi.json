@@ -15194,6 +15194,97 @@
         "title": "LlmChatAttachmentOut",
         "type": "object"
       },
+      "LlmChatContextOut": {
+        "description": "会话的上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：官方程序报的数，没报的为空。",
+        "properties": {
+          "compactions": {
+            "default": 0,
+            "description": "平台压缩过几次",
+            "title": "Compactions",
+            "type": "integer"
+          },
+          "last_compacted_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次压缩的时间",
+            "title": "Last Compacted At"
+          },
+          "last_trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次压缩怎么触发的：auto 平台自动 / manual 手动",
+            "title": "Last Trigger"
+          },
+          "near_limit": {
+            "default": false,
+            "description": "快到平台自动压缩的位置了（已用比例到了 warn_percent）",
+            "title": "Near Limit",
+            "type": "boolean"
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "已用百分比",
+            "title": "Percent"
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "上下文现在用了多少 token",
+            "title": "Used"
+          },
+          "warn_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "提醒的位置（已用百分比）",
+            "title": "Warn Percent"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "上下文窗口多大（token）",
+            "title": "Window"
+          }
+        },
+        "title": "LlmChatContextOut",
+        "type": "object"
+      },
       "LlmChatConversationOut": {
         "properties": {
           "last_event_id": {
@@ -15888,6 +15979,30 @@
             "description": "进行中：最后一段完整的话之后、已经写出来的增量文字",
             "title": "Partial"
           },
+          "post_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "context_compacted：压缩后的 token 数（平台报了才有）",
+            "title": "Post Tokens"
+          },
+          "pre_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "context_compacted：压缩前的 token 数（平台报了才有）",
+            "title": "Pre Tokens"
+          },
           "resume": {
             "anyOf": [
               {
@@ -15900,7 +16015,7 @@
             "description": "被额度打断的回合（status=interrupted）：什么时候自动继续"
           },
           "role": {
-            "description": "user / assistant",
+            "description": "user / assistant；context_compacted：平台在这一回合压缩了上下文，它前面的内容在模型那里只剩摘要",
             "title": "Role",
             "type": "string"
           },
@@ -15954,6 +16069,18 @@
             ],
             "description": "回答所在回合的 queued_at / started_at / finished_at、waited_seconds（排了多久）、ran_seconds（做了多久）",
             "title": "Timing"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "context_compacted：auto 平台自动压缩 / manual 手动压缩",
+            "title": "Trigger"
           },
           "turn_id": {
             "anyOf": [
@@ -16372,6 +16499,17 @@
             "description": "有排队中或进行中的回合",
             "title": "Busy",
             "type": "boolean"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LlmChatContextOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "上下文用了多少、压缩过几次；旧版本的管理器没有"
           },
           "created_at": {
             "title": "Created At",

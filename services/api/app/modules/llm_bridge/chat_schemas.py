@@ -18,6 +18,23 @@ class _In(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LlmChatContextOut(BaseModel):
+    """会话的上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：官方程序报的数，没报的为空。"""
+
+    used: int | None = Field(default=None, description="上下文现在用了多少 token")
+    window: int | None = Field(default=None, description="上下文窗口多大（token）")
+    percent: int | None = Field(default=None, description="已用百分比")
+    compactions: int = Field(default=0, description="平台压缩过几次")
+    last_compacted_at: float | None = Field(default=None, description="最近一次压缩的时间")
+    last_trigger: str | None = Field(
+        default=None, description="最近一次压缩怎么触发的：auto 平台自动 / manual 手动"
+    )
+    near_limit: bool = Field(
+        default=False, description="快到平台自动压缩的位置了（已用比例到了 warn_percent）"
+    )
+    warn_percent: int | None = Field(default=None, description="提醒的位置（已用百分比）")
+
+
 class LlmChatSessionOut(BaseModel):
     session_id: str
     platform: str
@@ -43,6 +60,9 @@ class LlmChatSessionOut(BaseModel):
     )
     purged_at: float | None = Field(
         default=None, description="对话内容按保留期清掉的时间；没清过为空"
+    )
+    context: LlmChatContextOut | None = Field(
+        default=None, description="上下文用了多少、压缩过几次；旧版本的管理器没有"
     )
 
 
@@ -90,7 +110,10 @@ class LlmChatResumeOut(BaseModel):
 
 
 class LlmChatMessageOut(BaseModel):
-    role: str = Field(description="user / assistant")
+    role: str = Field(
+        description="user / assistant；context_compacted：平台在这一回合压缩了上下文，"
+        "它前面的内容在模型那里只剩摘要"
+    )
     turn_id: str | None = None
     text: str
     at: float | None = None
@@ -135,6 +158,15 @@ class LlmChatMessageOut(BaseModel):
         default=[], description="提问带上的图片 / 文件，或这一回合模型产出的图片 / 文件"
     )
     imported: bool = Field(default=False, description="官方程序里原有的内容（第一次打开时导入的）")
+    trigger: str | None = Field(
+        default=None, description="context_compacted：auto 平台自动压缩 / manual 手动压缩"
+    )
+    pre_tokens: int | None = Field(
+        default=None, description="context_compacted：压缩前的 token 数（平台报了才有）"
+    )
+    post_tokens: int | None = Field(
+        default=None, description="context_compacted：压缩后的 token 数（平台报了才有）"
+    )
     delivery: str | None = Field(
         default=None,
         description="提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；"

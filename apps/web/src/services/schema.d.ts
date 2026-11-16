@@ -12807,6 +12807,54 @@ export interface components {
             /** Size */
             size: number;
         };
+        /**
+         * LlmChatContextOut
+         * @description 会话的上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：官方程序报的数，没报的为空。
+         */
+        LlmChatContextOut: {
+            /**
+             * Compactions
+             * @description 平台压缩过几次
+             * @default 0
+             */
+            compactions: number;
+            /**
+             * Last Compacted At
+             * @description 最近一次压缩的时间
+             */
+            last_compacted_at?: number | null;
+            /**
+             * Last Trigger
+             * @description 最近一次压缩怎么触发的：auto 平台自动 / manual 手动
+             */
+            last_trigger?: string | null;
+            /**
+             * Near Limit
+             * @description 快到平台自动压缩的位置了（已用比例到了 warn_percent）
+             * @default false
+             */
+            near_limit: boolean;
+            /**
+             * Percent
+             * @description 已用百分比
+             */
+            percent?: number | null;
+            /**
+             * Used
+             * @description 上下文现在用了多少 token
+             */
+            used?: number | null;
+            /**
+             * Warn Percent
+             * @description 提醒的位置（已用百分比）
+             */
+            warn_percent?: number | null;
+            /**
+             * Window
+             * @description 上下文窗口多大（token）
+             */
+            window?: number | null;
+        };
         /** LlmChatConversationOut */
         LlmChatConversationOut: {
             /**
@@ -13101,11 +13149,21 @@ export interface components {
              * @description 进行中：最后一段完整的话之后、已经写出来的增量文字
              */
             partial?: string | null;
+            /**
+             * Post Tokens
+             * @description context_compacted：压缩后的 token 数（平台报了才有）
+             */
+            post_tokens?: number | null;
+            /**
+             * Pre Tokens
+             * @description context_compacted：压缩前的 token 数（平台报了才有）
+             */
+            pre_tokens?: number | null;
             /** @description 被额度打断的回合（status=interrupted）：什么时候自动继续 */
             resume?: components["schemas"]["LlmChatResumeOut"] | null;
             /**
              * Role
-             * @description user / assistant
+             * @description user / assistant；context_compacted：平台在这一回合压缩了上下文，它前面的内容在模型那里只剩摘要
              */
             role: string;
             /**
@@ -13135,6 +13193,11 @@ export interface components {
             timing?: {
                 [key: string]: unknown;
             } | null;
+            /**
+             * Trigger
+             * @description context_compacted：auto 平台自动压缩 / manual 手动压缩
+             */
+            trigger?: string | null;
             /** Turn Id */
             turn_id?: string | null;
             /**
@@ -13334,6 +13397,8 @@ export interface components {
              * @description 有排队中或进行中的回合
              */
             busy: boolean;
+            /** @description 上下文用了多少、压缩过几次；旧版本的管理器没有 */
+            context?: components["schemas"]["LlmChatContextOut"] | null;
             /** Created At */
             created_at: number;
             /** @description 开发会话用的环境；只在会话内容里给出 */

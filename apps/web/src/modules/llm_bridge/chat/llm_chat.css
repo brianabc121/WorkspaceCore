@@ -229,3 +229,9 @@
 .lc-step-kind.is-error { color: var(--danger); }
 .lc-col .lc-files { max-width: 100%; }
 .lc-mode { display: flex; gap: 14px; margin: 0; padding: 0; border: 0; font-size: .82rem; }
+
+/* 平台压缩上下文的位置（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：一条横线，中间写明之前的内容只剩摘要 */
+.lc-compacted { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .78rem; text-align: center; }
+.lc-compacted::before, .lc-compacted::after { content: ""; flex: 1; min-width: 16px; border-top: 1px dotted var(--line); }
+.lc-compacted > span { max-width: 80%; overflow-wrap: anywhere; }
+.lc-context-warn { background: var(--warning-soft); color: var(--warning); }
