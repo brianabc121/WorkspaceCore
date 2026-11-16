@@ -3,6 +3,10 @@
 
 Only the platform can write these snapshots. OpenClaw reports remain useful for
 charts but never supply placement authority. No caller-provided shell fragments.
+
+The snapshot also carries `mounts` (local /dev disks from `df -PkTl`) for the
+server detail page (T-0271). It is display-only: placement never reads it, and an
+invalid list is dropped to [] instead of rejecting the snapshot.
 """
 
 import asyncio
@@ -15,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 import asyncssh
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
 
 from app.domain.agent_server_ssh import connect_agent_server
 from app.domain.credentials import CredentialBox
@@ -28,8 +32,9 @@ if TYPE_CHECKING:
     from app.core.config import Settings
 
 PROBE_TIMEOUT = 25.0
-MAX_OUTPUT = 8192
+MAX_OUTPUT = 16384
 MAX_AGE_SECONDS = 60
+MAX_MOUNTS = 16
 # Fixed, read-only Linux commands; both filesystem paths come from the host's
 # own Docker configuration / managed install root, and are always quoted.
 PROBE_SCRIPT = r"""set -eu
@@ -57,6 +62,9 @@ set -- $(df -Pk -- "$root" | awk 'END {printf "%.0f %.0f", $2*1024,$4*1024}')
 root_total=$1; root_free=$2
 set -- $(df -Pk -- "$HOME/myworkspace-openclaw" | awk 'END {printf "%.0f %.0f", $2*1024,$4*1024}')
 data_total=$1; data_free=$2
+# Display only: local /dev disks, one row per device, safe characters only; never fails the probe.
+# Mount points under /etc, /proc, /sys, /dev are container bind mounts of single files, not disks.
+mounts=$(timeout 5 df -PkTl 2>/dev/null | awk 'NR > 1 && NF == 7 && $2 != "squashfs" && $1 ~ /^\/dev\/[A-Za-z0-9._\/-]+$/ && $2 ~ /^[a-z0-9._-]+$/ && $7 ~ /^\/[A-Za-z0-9._\/@+-]*$/ && $7 !~ /^\/(etc|proc|sys|dev)(\/|$)/ && length($1) <= 128 && length($7) <= 256 && !seen[$1]++ && n < 16 {printf "%s{\"device\":\"%s\",\"fs_type\":\"%s\",\"mount\":\"%s\",\"total\":%.0f,\"used\":%.0f,\"available\":%.0f}", (n++ ? "," : ""), $1, $2, $7, $3*1024, $4*1024, $5*1024}') || mounts=''
 seq=$(awk '{printf "%.0f", $1*1000}' /proc/uptime)
 ids=$(docker ps --no-trunc --filter label=com.docker.compose.service=openclaw --format '{{.ID}}')
 identities='[]'; usage='[]'
@@ -66,7 +74,7 @@ if [ -n "$ids" ]; then
 fi
 latest_available=$(awk '/^MemAvailable:/ {printf "%.0f", $2*1024}' /proc/meminfo)
 mem_available=$(awk -v before="$mem_available" -v after="$latest_available" 'BEGIN {printf "%.0f", before<after?before:after}')
-printf '{"physical_host_id":"%s","generation":"%s","sequence":%s,"cores":%s,"cpu_percent":%s,"load1":%s,"mem_total":%s,"mem_available":%s,"root_total":%s,"root_free":%s,"data_total":%s,"data_free":%s,"runtime_ready":true,"network_ready":true,"managed_identities":%s,"managed_usage":%s}\n' "$physical" "$boot" "$seq" "$cores" "$cpu" "$load" "$mem_total" "$mem_available" "$root_total" "$root_free" "$data_total" "$data_free" "$identities" "$usage"
+printf '{"physical_host_id":"%s","generation":"%s","sequence":%s,"cores":%s,"cpu_percent":%s,"load1":%s,"mem_total":%s,"mem_available":%s,"root_total":%s,"root_free":%s,"data_total":%s,"data_free":%s,"runtime_ready":true,"network_ready":true,"managed_identities":%s,"managed_usage":%s,"mounts":[%s]}\n' "$physical" "$boot" "$seq" "$cores" "$cpu" "$load" "$mem_total" "$mem_available" "$root_total" "$root_free" "$data_total" "$data_free" "$identities" "$usage" "$mounts"
 """
 
 
@@ -90,6 +98,37 @@ def docker_memory_credit(raw: str) -> float | None:
     places = len(number.partition(".")[2])
     lower = max(Decimal(0), Decimal(number) - Decimal(10) ** -places)
     return float(lower * (1024 ** ("B", "KiB", "MiB", "GiB", "TiB", "PiB").index(unit)))
+
+
+class _Mount(BaseModel):
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    device: str = Field(max_length=128, pattern=r"^/dev/[A-Za-z0-9._/-]+$")
+    fs_type: str = Field(max_length=32, pattern=r"^[a-z0-9._-]+$")
+    mount: str = Field(max_length=256, pattern=r"^/[A-Za-z0-9._/@+-]*$")
+    total: int = Field(gt=0, le=1 << 56)
+    used: int = Field(ge=0, le=1 << 56)
+    available: int = Field(ge=0, le=1 << 56)
+
+    @model_validator(mode="after")
+    def _within_total(self) -> "_Mount":
+        if self.used > self.total or self.available > self.total:
+            raise ValueError("mount usage exceeds its size")
+        return self
+
+
+_MOUNTS = TypeAdapter(list[_Mount])
+
+
+def parse_mounts(raw: object) -> list[dict[str, Any]]:
+    """Display-only disk list: anything malformed yields [] (placement never uses it)."""
+    try:
+        mounts = _MOUNTS.validate_python(raw)
+    except ValidationError:
+        return []
+    devices = [item.device for item in mounts]
+    if len(mounts) > MAX_MOUNTS or len(set(devices)) != len(devices):
+        return []
+    return [item.model_dump() for item in mounts]
 
 
 class _Snapshot(BaseModel):
@@ -117,7 +156,9 @@ def parse_resources(raw: str, *, received_at: datetime) -> dict[str, Any]:
     try:
         if len(raw) > MAX_OUTPUT:
             raise ValueError
-        value = _Snapshot.model_validate(json.loads(raw))
+        data = json.loads(raw)
+        mounts = parse_mounts(data.pop("mounts", [])) if isinstance(data, dict) else []
+        value = _Snapshot.model_validate(data)
         ids = [item.id for item in value.managed_identities]
         samples = [item.id for item in value.managed_usage]
         if (
@@ -138,6 +179,7 @@ def parse_resources(raw: str, *, received_at: datetime) -> dict[str, Any]:
         raise ValueError("Invalid independent resource snapshot") from error
     return {
         **value.model_dump(mode="json"),
+        "mounts": mounts,
         "source": "trusted_ssh",
         "received_at": received_at.isoformat(),
         "sampled_at": received_at.isoformat(),

@@ -179,6 +179,22 @@ async function main() {
   check(await go.getAttribute('href') === `/agents?deploy=1&server_id=${serverId}`, `“前往部署智能体”应带上这台服务器：${await go.getAttribute('href')}`)
   step(`服务器详情“初始化服务器”：页面跟着 ${initSteps.length} 步（登录、检测、Docker、重新登录、部署目录、验证）直到成功`)
 
+  // 页头（T-0271）：“连接”格的刷新图标重新测试连接并显示延迟；“刷新资源”用 SSH 采样 CPU（核数、使用率）、内存（已用 / 可用）与硬盘
+  const meters = detail.getByRole('list', { name: '服务器概览' })
+  const statCell = (label) => meters.getByRole('listitem').filter({ has: page.locator('.asv-stat-label', { hasText: new RegExp(`^${label}$`) }) })
+  await statCell('连接').getByRole('button', { name: '重新检测连接' }).click()
+  check(await until(page, async () => /连接正常延迟 (<1|\d+(\.\d)?) ms/.test(await statCell('连接').textContent()), 90000),
+    `页头重新检测连接后应显示连接正常与延迟：${await statCell('连接').textContent()}`)
+  const resources = detail.getByRole('group', { name: '服务器资源' })
+  await resources.getByRole('button', { name: '刷新资源' }).click()
+  check(await until(page, async () => /最近采样/.test(await resources.textContent()) && /\d+ 核/.test(await statCell('CPU').textContent()), 90000),
+    `刷新资源后应显示采样时间与 CPU 核数：${await resources.textContent()} / ${await meters.textContent()}`)
+  check(/已用 [\d.]+% · 可用 [\d.]+ [KMGT]?B/.test(await statCell('内存').textContent()), `内存应分已用 / 可用：${await statCell('内存').textContent()}`)
+  check(/[\d.]+ [KMGT]?B \/ [\d.]+ [KMGT]?B可用 [\d.]+ [KMGT]?B/.test(await statCell('硬盘').textContent()), `硬盘应显示已用 / 总量与可用：${await statCell('硬盘').textContent()}`)
+  const disks = await resources.getByRole('listitem').allTextContents()
+  check(disks.every((d) => /^\/\S*\/dev\/\S+ · \S+已用 .+ · 可用 .+ · 共 .+$/.test(d)), `挂载的硬盘每行应有挂载点、设备、已用 / 可用 / 总量：${disks.join(' | ')}`)
+  step(`页头重新检测连接显示延迟；刷新资源显示 CPU、内存、硬盘${disks.length ? `与 ${disks.length} 个挂载盘` : ''}（平台用 SSH 采样）`)
+
   await page.goto(`${base}/agents?tab=servers&server=${serverId}`)
   await page.getByRole('region', { name: `服务器：${serverName}` }).waitFor()
   const moved = new URL(page.url())

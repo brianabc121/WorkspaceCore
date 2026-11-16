@@ -6,7 +6,7 @@ import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../services/api'
 import { formatTime } from '../time'
 import { useAgentAction } from './action'
-import { CONNECTION_HELP, CONNECTION_STATUS, endpoint, initStatus, putServerDetail, serversKey, type ServerDetail } from './servers'
+import { CONNECTION_HELP, CONNECTION_STATUS, canLogin as loginReady, connectionNotice, endpoint, initStatus, latencyText, putServerDetail, serversKey, type ServerDetail } from './servers'
 import { hostKeyCommand, sshError } from './ssh'
 import SshJob from './SshJob.vue'
 
@@ -30,9 +30,8 @@ watch(() => [server.value.id, ssh.value?.host_key_fingerprint] as const, () => {
 
 const init = computed(() => initStatus(server.value))
 const connection = computed(() => ssh.value ? CONNECTION_STATUS[ssh.value.connection_status] : null)
-const blocked = computed(() => !ssh.value || ['host_key_changed', 'credential_unreadable', 'credentials_required'].includes(ssh.value.connection_status))
 // 能用保存的密码登录：有密码、指纹已确认、没有明确的身份 / 凭证问题
-const canLogin = computed(() => !!ssh.value?.password_set && !!ssh.value.host_key_confirmed && !blocked.value)
+const canLogin = computed(() => loginReady(server.value))
 const hasDeployments = computed(() => server.value.managed_deployments > 0)
 const legacy = computed(() => ssh.value?.legacy_key_cleanup_state === 'pending' || ssh.value?.legacy_key_cleanup_state === 'manual_required')
 const verifying = computed(() => !!ssh.value?.password_set && !ssh.value.host_key_confirmed)
@@ -61,7 +60,7 @@ interface Check { key: 'address' | 'password' | 'fingerprint' | 'connection'; la
 const checks = computed<Check[]>(() => {
   const s = ssh.value
   if (!s) return []
-  const status = s.connection_status
+  const status = s.connection_status, latency = latencyText(s.connection_latency_ms)
   return [
     { key: 'address', label: '登录地址', value: `${s.username}@${endpoint(s.host, s.port)}`, note: s.address !== s.host ? s.address : undefined, tone: 'ok' },
     !s.password_set ? { key: 'password', label: '登录密码', value: '还没有保存', tone: 'warn' }
@@ -72,7 +71,7 @@ const checks = computed<Check[]>(() => {
       : s.host_key_confirmed ? { key: 'fingerprint', label: '主机指纹', value: '已确认', note: s.host_key_confirmed_at ? formatTime(s.host_key_confirmed_at) : undefined, tone: 'ok' }
         : { key: 'fingerprint', label: '主机指纹', value: '待核对', tone: 'warn' },
     {
-      key: 'connection', label: '连接测试', value: CONNECTION_STATUS[status].label,
+      key: 'connection', label: '连接测试', value: CONNECTION_STATUS[status].label + (latency ? ` · 延迟 ${latency}` : ''),
       note: s.last_connection_at ? formatTime(s.last_connection_at) : status === 'unknown' ? (s.host_key_confirmed ? '还没有测试' : '核对指纹后才能测试') : undefined,
       tone: status === 'connected' ? 'ok' : status === 'unknown' ? 'todo' : status === 'credentials_required' ? 'warn' : 'bad',
     },
@@ -119,7 +118,7 @@ async function test() {
     put(next)
   })
   const result = (next as ServerDetail | null)?.server.ssh
-  if (ok && result) notice.value = result.connection_status === 'connected' ? '连接正常：已用保存的密码登录服务器。' : `测试结果：${CONNECTION_STATUS[result.connection_status].label}。${CONNECTION_HELP[result.connection_status]}`
+  if (ok && result) notice.value = connectionNotice(result)
   settle()
 }
 async function prepare() {

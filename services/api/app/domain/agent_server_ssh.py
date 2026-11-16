@@ -7,12 +7,16 @@
   旧方案留下的专用私钥（client_key_ref）从不读取；
 - `check_agent_server`：“测试连接”——登录后只读检查发行版、架构、账号、Docker / Compose / sudo；
   需要 sudo 时用同一个密码（经标准输入）验证一次。不安装 Docker、不建容器、不写 authorized_keys。
+  登录成功时顺带读出这条连接的延迟（T-0271，`connection_latency_ms`：
+  内核 TCP_INFO 里的平滑往返时间，不另外建连接、不发额外的包）。
 
 初始化、部署、卸载与运维改用 `connect_agent_server` 在 T-0179（计划 Task 2）完成；
 运行服务器（Runner）的 SSH 流程不使用本模块。
 """
 
-from dataclasses import dataclass
+import socket
+import struct
+from dataclasses import dataclass, replace
 
 import asyncssh
 
@@ -25,6 +29,11 @@ from app.models import AgentSshTarget
 
 SUDO_CHECK_TIMEOUT = 30.0
 INSPECT_TIMEOUT = 60.0
+# Linux struct tcp_info：tcpi_rtt（微秒）在第 68 字节（8 个 u8 之后的第 16 个 u32），
+# 布局见内核 include/uapi/linux/tcp.h；读 104 字节，兼容老内核较短的结构
+_TCP_INFO_SIZE = 104
+_TCP_INFO_RTT_OFFSET = 68
+MAX_LATENCY_MS = 60_000.0
 
 
 async def connect_agent_server(
@@ -43,6 +52,28 @@ async def connect_agent_server(
     )
 
 
+def connection_latency_ms(conn: asyncssh.SSHClientConnection) -> float | None:
+    """这条 SSH 连接的往返延迟（毫秒，精确到微秒）；读不到返回 None。
+
+    读的是内核对这条 TCP 连接的平滑往返时间（TCP_INFO.tcpi_rtt）：登录过程已经来回了好几次，
+    不需要再发探测包，也不会再连一次 sshd。只在 Linux 上有；其他系统、拿不到套接字、
+    值不合理时返回 None（界面显示“延迟未知”），不影响连接结果。
+    """
+    option = getattr(socket, "TCP_INFO", None)
+    sock = conn.get_extra_info("socket")
+    if option is None or sock is None:
+        return None
+    try:
+        raw = sock.getsockopt(socket.IPPROTO_TCP, option, _TCP_INFO_SIZE)
+    except (OSError, TypeError, ValueError):
+        return None
+    if not isinstance(raw, bytes) or len(raw) < _TCP_INFO_RTT_OFFSET + 4:
+        return None
+    (rtt_us,) = struct.unpack_from("=I", raw, _TCP_INFO_RTT_OFFSET)
+    # 0 表示内核还没有测量值
+    return rtt_us / 1000 if 0 < rtt_us < MAX_LATENCY_MS * 1000 else None
+
+
 def connection_reason(error: ssh.SshError) -> str:
     """连接失败的类别（写进 last_connection_reason 的白名单值）。"""
     if error.reason in {"host_key_changed", "auth_failed"}:
@@ -57,6 +88,8 @@ class ConnectionCheck:
     reason: str
     warning: str | None = None
     info: HostInfo | None = None
+    # 登录成功时这条连接的往返延迟（毫秒）；登录失败或读不到为 None
+    latency_ms: float | None = None
 
 
 async def check_agent_server(
@@ -75,12 +108,14 @@ async def check_agent_server(
         raise
     except ssh.SshError as error:
         return ConnectionCheck(connection_reason(error), error.message)
+    latency = connection_latency_ms(conn)
     try:
-        return await _inspect(conn, target, box, expected_revision)
+        check = await _inspect(conn, target, box, expected_revision)
     except ssh.SshError as error:
-        return ConnectionCheck("connected", f"登录成功，但读取服务器信息失败：{error.message}")
+        check = ConnectionCheck("connected", f"登录成功，但读取服务器信息失败：{error.message}")
     finally:
         conn.close()
+    return replace(check, latency_ms=latency)
 
 
 async def _inspect(

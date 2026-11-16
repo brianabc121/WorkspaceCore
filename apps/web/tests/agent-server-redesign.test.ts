@@ -338,7 +338,7 @@ describe('agent servers page: connection and initialization', () => {
     expect(document.body.innerHTML).not.toContain('old-server-pw')
   })
 
-  it('shows real CPU and memory or “暂无上报”, and lists the deployed OpenClaw with links to each agent', async () => {
+  it('shows real CPU, memory and disk or why there is none, and lists the deployed OpenClaw with links to each agent', async () => {
     const s = readyServer({ managed_deployments: 2, successful_deployments: 1, allocated_cpus: null, allocated_mem_limit_mb: null, has_unlimited_limits: true, instances_total: 3 })
     const agents = [
       row('inst-a', '开发助手', { deployment_state: 'deployed', cpus: 2, mem_limit_mb: 4096, latest_job: job('install', 'succeeded') }),
@@ -352,10 +352,10 @@ describe('agent servers page: connection and initialization', () => {
     })
     const first = await openApp('/agent-servers?server=srv-1')
     const head = await screen.findByRole('region', { name: '服务器：香港节点 A' })
-    // 页头一行五格：连接、服务器环境、CPU、内存、部署智能体（T-0269）；没有上报写“暂无上报”，不画 0
+    // 页头一行：连接、服务器环境、CPU、内存、硬盘、部署智能体（T-0269，后加硬盘）；初始化了但还没有采样也没有上报：写“等待采样”，不画 0
     const meters = within(head).getByRole('list', { name: '服务器概览' })
-    expect(within(meters).getAllByRole('listitem').map(li => li.querySelector('.asv-stat-label')?.textContent)).toEqual(['连接', '服务器环境', 'CPU', '内存', '部署智能体'])
-    expect(within(meters).getAllByText('暂无上报')).toHaveLength(2)
+    expect(within(meters).getAllByRole('listitem').map(li => li.querySelector('.asv-stat-label')?.textContent)).toEqual(['连接', '服务器环境', 'CPU', '内存', '硬盘', '部署智能体'])
+    expect(within(meters).getAllByText('等待采样')).toHaveLength(3)
     expect(meters).not.toHaveTextContent('0%')
     expect(meters).toHaveTextContent('连接连接正常')
     expect(meters).toHaveTextContent('服务器环境已就绪')
@@ -381,8 +381,10 @@ describe('agent servers page: connection and initialization', () => {
     reported = true
     await openApp('/agent-servers?server=srv-1')
     const live = await screen.findByRole('list', { name: '服务器概览' })
+    // 没有平台采样时退回智能体上报
     await vi.waitFor(() => expect(live).toHaveTextContent('CPU60%'))
     expect(live).toHaveTextContent('内存12.0 GB / 16.0 GB')
+    expect(live).toHaveTextContent('硬盘50.0 GB / 100 GB')
   })
 })
 

@@ -12,6 +12,8 @@ export type ServerSsh = Schema['ServerSshOut']
 export type ServerDetail = Schema['AgentServerDetail']
 export type ServerList = Schema['AgentServerList']
 export type AgentRow = Schema['ServerAgentRow']
+export type ServerResources = Schema['ServerResourcesOut']
+export type ServerDisk = Schema['ServerDiskOut']
 const REFRESH_MS = 60_000
 
 function context(scope: string) {
@@ -96,6 +98,20 @@ export function connectionStatus(server: Server): { label: string; tone: Tone } 
   if (!server.reported_at) return { label: '没有上报', tone: 'muted' }
   return server.stale ? { label: '上报过期', tone: 'amber' } : { label: '上报正常', tone: 'green' }
 }
+/** 能用保存的密码登录：有密码、指纹已确认、没有明确的身份 / 凭证问题（测试连接、初始化、刷新资源的前提） */
+export function canLogin(server: Server): boolean {
+  const s = server.ssh
+  return !!s && s.password_set && s.host_key_confirmed && !['host_key_changed', 'credential_unreadable', 'credentials_required'].includes(s.connection_status)
+}
+
+// 连接延迟（T-0271）：测试连接时从同一条 SSH 连接读出的往返时间（服务端只在连接正常时给出）
+export function latencyText(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined) return ''
+  if (ms < 1) return '<1 ms'
+  return `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`
+}
+export const latencyTone = (ms: number): Tone => ms < 100 ? 'green' : ms < 300 ? 'amber' : 'red'
+
 export const CONNECTION_HELP: Record<ServerSsh['connection_status'], string> = {
   unknown: '还没有检测过（或刚换过密码 / 地址）。点“测试连接”用保存的密码登录检查一次。',
   connected: '最近一次检测用保存的密码登录成功。',
@@ -105,6 +121,21 @@ export const CONNECTION_HELP: Record<ServerSsh['connection_status'], string> = {
   credential_unreadable: '保存的密码无法解密（工作台的加密密钥可能换过）：重新填写登录密码。',
   credentials_required: '这台服务器还没有保存登录密码（旧服务器）：补充密码后才能初始化、部署与运维；上面已有的智能体照常运行。',
 }
+
+/** 测试连接之后的一句话结果（页头的刷新按钮与“连接与初始化”共用） */
+export function connectionNotice(ssh: ServerSsh): string {
+  if (ssh.connection_status !== 'connected') return `测试结果：${CONNECTION_STATUS[ssh.connection_status].label}。${CONNECTION_HELP[ssh.connection_status]}`
+  const ms = latencyText(ssh.connection_latency_ms)
+  return `连接正常：已用保存的密码登录服务器${ms ? `，延迟 ${ms}` : ''}。`
+}
+
+// 资源采样（T-0271；平台用 SSH 只读采样 CPU、内存、硬盘；worker 约每分钟一次，也可以手动刷新）
+export const RESOURCE_ERROR: Record<NonNullable<ServerResources['error']>, string> = {
+  unavailable: '最近一次采样失败：连不上服务器、登录失败或命令出错',
+  physical_host_conflict: '这台机器已经在别处登记过（例如容器服务器），平台不重复采样它的资源',
+}
+/** 已用百分比；总量为 0 时为 null */
+export const usedPercent = (used: number, total: number) => total > 0 ? (100 * used) / total : null
 
 export const BLOCK_REASON: Record<NonNullable<Server['deploy_block_reason']>, string> = {
   not_ssh: '自动识别的服务器，工作台不能登录部署',
@@ -145,9 +176,11 @@ export function limitText(cpus: number | null | undefined, mem: number | null | 
   if ((cpus === null || cpus === undefined) && (mem === null || mem === undefined)) return '不限制'
   return `${cpus === null || cpus === undefined ? 'CPU 不限' : `${cpus} 核`} · ${mem === null || mem === undefined ? '内存不限' : mib(mem)}`
 }
-/** 系统 / 资源：只用上报得到的核心数与内存；没有上报写 — */
+/** 系统 / 资源：平台的 SSH 采样优先，其次智能体上报的核心数与内存；都没有写 — */
 export function resources(server: Server): string {
-  const parts = [server.cores ? `${server.cores} 核` : '', server.mem_total ? `${Math.round(server.mem_total / 1024 ** 3)} GB` : ''].filter(Boolean)
+  const sample = server.resources?.sample
+  const cores = sample?.cores ?? server.cores, mem = sample?.mem_total ?? server.mem_total
+  const parts = [cores ? `${cores} 核` : '', mem ? `${Math.round(mem / 1024 ** 3)} GB` : ''].filter(Boolean)
   return parts.length ? parts.join(' / ') : '—'
 }
 
