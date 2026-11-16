@@ -513,7 +513,7 @@ async function main() {
     check(retoken.status === 409 && retoken.body.error.code === 'BRIDGE_MANAGED', `本机管理器的令牌不能在页面上改：${JSON.stringify(retoken)}`)
     await api(page, workspace, 'PUT', `/api/v1/llm_bridge/bridges/${localId}/settings`, { platforms: ALL_PLATFORMS })
     acceptNext(page)
-    await card(page, '本机').getByRole('button', { name: '删除本机' }).click()
+    await (await manage(page, '本机')).getByRole('button', { name: '删除本机' }).click()
     await page.getByText('已删除「本机」。').waitFor()
     step('本机部署：默认选中“本机”，不选服务器、不填地址令牌密码，点一下就添加好并连得上；页面和接口给出各平台的连通性与延迟；只能添加一次，令牌不能在页面上改')
 
