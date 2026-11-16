@@ -52,6 +52,7 @@ _STATUS = {
     "NOT_SUPPORTED": 422,
     "NOT_LOGGED_IN": 409,
     "ACCOUNT_MISMATCH": 409,
+    "NOT_OWNER": 409,
     # 平台那边没有成功（连不上平台、平台拒绝、超时）：管理器自己是好的，所以不用 5xx——
     # 工作台把 5xx 当成“管理器连不上”，会把真正的原因盖住，还会计入熔断
     "UNAVAILABLE": 424,
@@ -184,6 +185,15 @@ class SessionPatchBody(_Body):
 
 class SessionModelBody(_Body):
     model: str = Field(min_length=1, max_length=100)
+
+
+class SessionClearBody(_Body):
+    by: str | None = Field(default=None, max_length=120, description="谁清空的（显示在分隔线上）")
+    owner: str | None = Field(
+        default=None,
+        max_length=200,
+        description="只清这个调用方自己建的会话，别人的 409 NOT_OWNER（工作台据此先确认）",
+    )
 
 
 class TurnEditBody(_Body):
@@ -456,6 +466,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         """换这个会话之后用的模型（命令行类平台；从下一回合起）。"""
         return await engine_of(request).set_model(session_id, body.model)
+
+    @app.post("/admin/sessions/{session_id}/clear")
+    async def admin_session_clear(
+        request: Request, session_id: str, body: SessionClearBody, _: Admin
+    ) -> dict[str, Any]:
+        """清空上下文：换一个新的官方会话，之后的回合从零开始，之前的记录保留（T-0255）。"""
+        return await engine_of(request).clear_context(session_id, body.by, owner=body.owner)
 
     @app.post("/admin/sessions/{session_id}/reimport")
     async def admin_session_reimport(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
