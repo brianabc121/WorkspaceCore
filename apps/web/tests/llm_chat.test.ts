@@ -631,7 +631,7 @@ describe('大模型聊天', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const sends: Schema['LlmChatSendIn'][] = []
     let finish: (() => void) | undefined
-    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 5, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false }
+    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 5, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false, references: [] }
     setup('owner', {}, async (r, w) => {
       const p = path(r)
       if (p === `${chat}/sessions/${S1}/clear`) {
