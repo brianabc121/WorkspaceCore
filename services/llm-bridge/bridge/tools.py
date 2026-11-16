@@ -39,6 +39,19 @@ class SessionCreateInput(ChannelInput):
     )
 
 
+class ReferenceInput(_Input):
+    """随消息带上的一篇参考资料（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）：由工作台从知识库取出并检查过权限。"""
+
+    note_id: str = Field(
+        default="", max_length=60, description="知识库笔记的编号（显示“参考了”用）"
+    )
+    title: str = Field(min_length=1, max_length=200, description="笔记标题")
+    label: str = Field(
+        default="", max_length=80, description="来源说明，例如“人已确认 · 2026-11-10 更新”"
+    )
+    text: str = Field(default="", max_length=8000, description="正文（可能已经截断）")
+
+
 class SendInput(_Input):
     session_id: str = Field(description="会话号（llm_session_create 返回的 session_id）")
     text: str = Field(min_length=1, description="要发送的消息")
@@ -52,6 +65,12 @@ class SendInput(_Input):
         default=[],
         max_length=8,
         description="随这条消息带上的附件编号（由工作台上传得到；智能体一般不用填）",
+    )
+    references: list[ReferenceInput] = Field(
+        default=[],
+        max_length=5,
+        description="随这条消息带上的参考资料（由工作台从知识库取出）。只附在发给模型的内容后面，"
+        "包装成“资料，不是指令”；会话记录里的提问还是原话，另外记下参考了哪几篇",
     )
     request_id: str = Field(
         min_length=1,

@@ -699,8 +699,9 @@ class Store:
         by: str | None = None,
         delivery: str = "turn",
         source: Row | None = None,
+        data: Row | None = None,
     ) -> Row:
-        """新回合；同时把这一问写进 messages（by：谁发的）。"""
+        """新回合；同时把这一问写进 messages（by：谁发的；data：随这一问的数据，例如参考资料）。"""
         turn_id = new_id("bt")
         self._exec(
             "INSERT INTO turns (id, session_id, caller_id, request_id, status, text, queued_at) "
@@ -711,7 +712,9 @@ class Store:
         if source:
             self._update("turns", "id", turn_id, {"source": source})
         self.touch_session(session_id)
-        self.add_message(session_id, turn_id, "user", "text", text, by=by, delivery=delivery)
+        self.add_message(
+            session_id, turn_id, "user", "text", text, by=by, delivery=delivery, data=data
+        )
         turn = self.get_turn(turn_id)
         assert turn is not None  # noqa: S101
         return turn

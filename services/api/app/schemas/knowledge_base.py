@@ -46,6 +46,7 @@ NoteType = Literal[
     "template",
     "correction",
     "readme",
+    "digest",
 ]
 SourceKind = Literal["human", "observation", "task", "conversation", "external", "system"]
 ChangeKind = Literal["create", "update", "delete", "restore", "revert", "rename"]
@@ -107,6 +108,11 @@ class SpaceOut(BaseModel):
         description="公共库：所有智能体的权限；智能体库：其他智能体的权限；项目库看 agents"
     )
     writes_enabled: bool = Field(description="智能体库：这个智能体能否写入和删除")
+    external_llm_allowed: bool = Field(
+        default=True,
+        description="笔记能不能附在发给外部大模型平台（OpenAI、Anthropic、腾讯）的消息里；"
+        "关掉后它的笔记不出现在“参考知识库”的候选里，智能体带它也被拒绝",
+    )
     deletes_paused_at: datetime | None = Field(
         description="智能体库：删除超过上限被自动暂停的时间（方案 3.8 第 4 条）"
     )
@@ -130,6 +136,9 @@ class SpaceUpdate(_Strict):
     )
     writes_enabled: bool | None = Field(default=None, description="只对智能体库")
     resume_deletes: bool | None = Field(default=None, description="true：解除自动暂停的删除")
+    external_llm_allowed: bool | None = Field(
+        default=None, description="笔记能不能附在发给外部大模型平台的消息里（默认允许）"
+    )
 
 
 class ParticipantPut(_Strict):

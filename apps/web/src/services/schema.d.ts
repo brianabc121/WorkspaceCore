@@ -2891,7 +2891,7 @@ export interface paths {
         head?: never;
         /**
          * 修改知识库设置（admin）
-         * @description 说明、智能体权限（公共库三种，智能体库 read / none）、智能体的写入开关、解除被自动暂停的删除。version 不一致时 409。
+         * @description 说明、智能体权限（公共库三种，智能体库 read / none）、智能体的写入开关、解除被自动暂停的删除、能不能附在发给外部大模型平台的消息里。version 不一致时 409。
          */
         patch: operations["update_space"];
         trace?: never;
@@ -3094,6 +3094,26 @@ export interface paths {
          * @description 读不到模型（例如还没登录）时 models 为空、models_error 说明原因。
          */
         get: operations["llm_chat_options"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/related": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 聊天：知识库和以前的会话里相近的内容（admin）
+         * @description 输入框里停顿一下时用：按输入的文字在知识库（不含会话纪要）和所有 MCP 管理器的会话标题里找相近的。只在工作台里找，不发给任何平台。notes 也是“参考知识库”的候选：external_allowed=false 的不能带上。session_id：不列出当前这个会话。
+         */
+        get: operations["llm_chat_related"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3783,6 +3803,90 @@ export interface paths {
         get: operations["llm_bridge_get_deployment"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/digests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 会话纪要列表（admin）
+         * @description 每个大模型会话一篇，工作台按会话记录整理（不调模型），写在知识库的“会话纪要”文件夹，标为未确认。state 筛选：active / off / converted / edited / deleted / purged。
+         */
+        get: operations["llm_bridge_digests"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/digests/{bridge_id}/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * 关掉或重新打开一个会话的纪要（admin）
+         * @description enabled=false：之后不再为这个会话写纪要，已有的那篇不动（要删就用 DELETE）；enabled=true：重新打开（转成正式笔记、删掉的也会重新开始，下次触发时新写一篇）。
+         */
+        put: operations["llm_bridge_digest_toggle"];
+        post?: never;
+        /**
+         * 删除会话纪要（admin）
+         * @description 纪要笔记放进知识库的回收站（30 天内可以恢复），之后不再为这个会话写纪要。
+         */
+        delete: operations["llm_bridge_digest_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/digests/{bridge_id}/{session_id}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 把会话纪要转成正式笔记（admin）
+         * @description 由人确认：改成普通笔记（默认 record，放到根目录），作者记成这个人；之后不再自动更新。纪要已经不是纪要（转过了）时 409。
+         */
+        post: operations["llm_bridge_digest_promote"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/digests/{bridge_id}/{session_id}/write": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 现在整理一次这个会话的纪要（admin）
+         * @description 不等触发条件，按管理器现在的记录整理一次（不调模型、不花 token）。关掉了、已转成正式笔记、人改过的 409；管理器设置里关掉了纪要也 409。
+         */
+        post: operations["llm_bridge_digest_write"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9893,7 +9997,7 @@ export interface components {
             /** Title */
             title: string;
             /** Type */
-            type: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme") | null;
+            type: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme" | "digest") | null;
         };
         /** GraphOut */
         GraphOut: {
@@ -11858,6 +11962,92 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** LlmBridgeDigestItem */
+        LlmBridgeDigestItem: {
+            /**
+             * Bridge Id
+             * Format: uuid
+             */
+            bridge_id: string;
+            /** Bridge Name */
+            bridge_name: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Note Id
+             * @description 纪要笔记；还没写过为空
+             */
+            note_id: string | null;
+            /** Note Title */
+            note_title?: string | null;
+            /**
+             * Owner
+             * @description 会话是谁建的
+             */
+            owner: string;
+            /** Owner Kind */
+            owner_kind: string;
+            /** Reason */
+            reason?: string | null;
+            /** Session Id */
+            session_id: string;
+            /** Session Title */
+            session_title: string;
+            /** Space Id */
+            space_id?: string | null;
+            /** Space Name */
+            space_name?: string | null;
+            /**
+             * State
+             * @description active 照常更新；off 关掉了；converted 已转成正式笔记；edited 人改过，不再自动覆盖；deleted 删进了回收站；purged 随会话内容按保留期清掉
+             */
+            state: string;
+            /**
+             * Turns Written
+             * @default 0
+             */
+            turns_written: number;
+            /** Written At */
+            written_at?: string | null;
+        };
+        /** LlmBridgeDigestList */
+        LlmBridgeDigestList: {
+            /** Digests */
+            digests: components["schemas"]["LlmBridgeDigestItem"][];
+            /** Next Offset */
+            next_offset?: number | null;
+        };
+        /** LlmBridgeDigestPromoteIn */
+        LlmBridgeDigestPromoteIn: {
+            /**
+             * Folder
+             * @description 放到哪个文件夹；默认根目录
+             */
+            folder?: string | null;
+            /**
+             * Title
+             * @description 新标题
+             */
+            title?: string | null;
+            /**
+             * Type
+             * @description 转成哪种笔记
+             * @default record
+             * @enum {string}
+             */
+            type: "record" | "decision" | "lesson" | "process" | "runbook" | "design" | "plan";
+        };
+        /** LlmBridgeDigestToggleIn */
+        LlmBridgeDigestToggleIn: {
+            /**
+             * Enabled
+             * @description false：关掉这个会话的纪要（已有的那篇不动）；true：重新打开
+             */
+            enabled: boolean;
+        };
         /** LlmBridgeEnvironmentIn */
         LlmBridgeEnvironmentIn: {
             /** Branch */
@@ -12572,6 +12762,18 @@ export interface components {
              * @description 每个平台同时进行的会话数（超过的排队等名额）
              */
             concurrency: number;
+            /**
+             * Digest Enabled
+             * @description 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：工作台按会话记录整理纪要，写进知识库的“会话纪要”文件夹（未确认）。默认开；旧版本的管理器没有这一项
+             * @default true
+             */
+            digest_enabled: boolean;
+            /**
+             * Digest Follow Retention
+             * @description 会话内容按保留期清掉时，纪要一起放进回收站（默认开）
+             * @default true
+             */
+            digest_follow_retention: boolean;
             /** Max Text Chars */
             max_text_chars: number;
             /**
@@ -12621,6 +12823,10 @@ export interface components {
             claude_subscription_ack?: boolean | null;
             /** Concurrency */
             concurrency?: number | null;
+            /** Digest Enabled */
+            digest_enabled?: boolean | null;
+            /** Digest Follow Retention */
+            digest_follow_retention?: boolean | null;
             /** Max Text Chars */
             max_text_chars?: number | null;
             /** Min Start Interval Seconds */
@@ -12900,6 +13106,8 @@ export interface components {
         };
         /** LlmChatConversationOut */
         LlmChatConversationOut: {
+            /** @description 这个会话的纪要；没写过、也没关掉时为空 */
+            digest?: components["schemas"]["LlmChatDigestOut"] | null;
             /**
              * Last Event Id
              * @description 读事件时从它之后开始
@@ -12957,6 +13165,37 @@ export interface components {
             send_error: string;
             session: components["schemas"]["LlmChatSessionOut"];
             turn?: components["schemas"]["LlmChatTurnOut"] | null;
+        };
+        /**
+         * LlmChatDigestOut
+         * @description 这个会话的纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）。
+         */
+        LlmChatDigestOut: {
+            /**
+             * Note Id
+             * @description 纪要笔记；还没写过为空
+             */
+            note_id: string | null;
+            /** Note Title */
+            note_title?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Space Id */
+            space_id?: string | null;
+            /** Space Name */
+            space_name?: string | null;
+            /**
+             * State
+             * @description active 照常更新；off 关掉了；converted 已转成正式笔记；edited 人改过，不再自动覆盖；deleted 删进了回收站；purged 随会话内容按保留期清掉
+             */
+            state: string;
+            /**
+             * Turns Written
+             * @default 0
+             */
+            turns_written: number;
+            /** Written At */
+            written_at?: string | null;
         };
         /** LlmChatEventOut */
         LlmChatEventOut: {
@@ -13207,6 +13446,14 @@ export interface components {
              * @description context_compacted：压缩前的 token 数（平台报了才有）
              */
             pre_tokens?: number | null;
+            /**
+             * References
+             * @description user 消息：随这一问带上的知识库笔记（note_id、title、label、truncated）
+             * @default []
+             */
+            references: {
+                [key: string]: unknown;
+            }[];
             /** @description 被额度打断的回合（status=interrupted）：什么时候自动继续 */
             resume?: components["schemas"]["LlmChatResumeOut"] | null;
             /**
@@ -13296,6 +13543,38 @@ export interface components {
              */
             name: string;
         };
+        /** LlmChatNoteHit */
+        LlmChatNoteHit: {
+            /**
+             * Excerpt
+             * @description 正文开头一小段
+             */
+            excerpt: string;
+            /**
+             * External Allowed
+             * @description 所在知识库允许发给外部大模型平台
+             */
+            external_allowed: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Label
+             * @description 来源说明：人已确认 / 智能体写入 / 外部资料，和更新日期
+             */
+            label: string;
+            /**
+             * Space Id
+             * Format: uuid
+             */
+            space_id: string;
+            /** Space Name */
+            space_name: string;
+            /** Title */
+            title: string;
+        };
         /** LlmChatOptionsOut */
         LlmChatOptionsOut: {
             /**
@@ -13364,6 +13643,16 @@ export interface components {
             /** Session Id */
             session_id: string;
         };
+        /**
+         * LlmChatRelatedOut
+         * @description 输入框里的文字在知识库和以前的会话里找到的相近内容（只在工作台里找，不发给任何平台）。
+         */
+        LlmChatRelatedOut: {
+            /** Notes */
+            notes: components["schemas"]["LlmChatNoteHit"][];
+            /** Sessions */
+            sessions: components["schemas"]["LlmChatSimilarSession"][];
+        };
         /** LlmChatRenameIn */
         LlmChatRenameIn: {
             /** Title */
@@ -13404,6 +13693,12 @@ export interface components {
              * @default []
              */
             attachments: string[];
+            /**
+             * Knowledge Notes
+             * @description 随这条消息带上的知识库笔记（人挑的，最多 3 篇；docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）。只附在发给模型的内容后面，包装成资料；合计最多 6000 字，超出的截断。所在知识库不允许发给外部平台时 403
+             * @default []
+             */
+            knowledge_notes: string[];
             /**
              * Mode
              * @description 会话正在处理别的消息时：queue 排队（不打断）；insert 插入——送进正在处理的回合，平台做不到时中断它、合并重发
@@ -13501,6 +13796,26 @@ export interface components {
             turns: number;
             /** Updated At */
             updated_at: number;
+        };
+        /** LlmChatSimilarSession */
+        LlmChatSimilarSession: {
+            /**
+             * Bridge Id
+             * Format: uuid
+             */
+            bridge_id: string;
+            /** Bridge Name */
+            bridge_name: string;
+            /** Last Turn At */
+            last_turn_at: string | null;
+            /** Owner */
+            owner: string;
+            /** Platform */
+            platform: string;
+            /** Session Id */
+            session_id: string;
+            /** Title */
+            title: string;
         };
         /** LlmChatStepOut */
         LlmChatStepOut: {
@@ -15856,7 +16171,7 @@ export interface components {
              * @default record
              * @enum {string}
              */
-            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme";
+            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme" | "digest";
         };
         /** NoteOut */
         NoteOut: {
@@ -15931,7 +16246,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme";
+            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme" | "digest";
             /**
              * Updated At
              * Format: date-time
@@ -16022,7 +16337,7 @@ export interface components {
              * Type
              * @enum {string}
              */
-            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme";
+            type: "overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme" | "digest";
             /**
              * Updated At
              * Format: date-time
@@ -16060,7 +16375,7 @@ export interface components {
             /** Title */
             title?: string | null;
             /** Type */
-            type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme") | null;
+            type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme" | "digest") | null;
             /** Version */
             version: number;
         };
@@ -19632,6 +19947,12 @@ export interface components {
             /** Description */
             description: string;
             /**
+             * External Llm Allowed
+             * @description 笔记能不能附在发给外部大模型平台（OpenAI、Anthropic、腾讯）的消息里；关掉后它的笔记不出现在“参考知识库”的候选里，智能体带它也被拒绝
+             * @default true
+             */
+            external_llm_allowed: boolean;
+            /**
              * Id
              * Format: uuid
              */
@@ -19671,6 +19992,11 @@ export interface components {
             agent_access?: ("read_write" | "read" | "none") | null;
             /** Description */
             description?: string | null;
+            /**
+             * External Llm Allowed
+             * @description 笔记能不能附在发给外部大模型平台的消息里（默认允许）
+             */
+            external_llm_allowed?: boolean | null;
             /**
              * Resume Deletes
              * @description true：解除自动暂停的删除
@@ -32301,6 +32627,8 @@ export interface operations {
                 files?: boolean;
                 /** @description 显示任务 README（数量多，默认不显示，T-0122） */
                 task_readmes?: boolean;
+                /** @description 显示会话纪要（未经确认，默认不显示；LLM_BRIDGE_MEMORY_PLAN.md 5.3） */
+                digests?: boolean;
             };
             header: {
                 /** @description 当前工作空间；不是成员时返回 404 */
@@ -32354,7 +32682,7 @@ export interface operations {
             query?: {
                 space_id?: string | null;
                 folder?: string | null;
-                type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme") | null;
+                type?: ("overview" | "brief" | "decision" | "rule" | "process" | "runbook" | "lesson" | "review" | "preference" | "glossary" | "record" | "plan" | "risk" | "design" | "template" | "correction" | "readme" | "digest") | null;
                 tag?: string | null;
                 author?: string | null;
                 q?: string | null;
@@ -34683,6 +35011,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmChatOptionsOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_related: {
+        parameters: {
+            query: {
+                q: string;
+                session_id?: string | null;
+                limit?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatRelatedOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
@@ -38077,6 +38479,413 @@ export interface operations {
             };
             /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_digests: {
+        parameters: {
+            query?: {
+                state?: string | null;
+                bridge_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeDigestList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_digest_toggle: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeDigestToggleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatDigestOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_digest_delete: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_digest_promote: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeDigestPromoteIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatDigestOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_digest_write: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatDigestOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

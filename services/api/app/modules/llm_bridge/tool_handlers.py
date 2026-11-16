@@ -22,13 +22,14 @@ from app.domain import agent_ops, notifications, secret_scan
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
 from app.domain.audit import AuditTrail
 from app.domain.connectors import ConnectorRuntime
+from app.domain.knowledge_views import KnowledgeService
 from app.integrations.base import ConnectorError
-from app.models import AgentInstance
+from app.models import AgentInstance, KnowledgeNote
 from app.models.task import Task
 from app.models.timeline import TaskRun
-from app.modules.llm_bridge import watches
+from app.modules.llm_bridge import memory, watches
 from app.modules.llm_bridge.client import BridgeCaller, BridgeCallError, BridgeClient
-from app.modules.llm_bridge.models import LlmBridge, LlmBridgeGrant
+from app.modules.llm_bridge.models import LlmBridge, LlmBridgeDigest, LlmBridgeGrant
 from app.modules.llm_bridge.service import LlmBridgeService
 from app.modules.llm_bridge.tool_schemas import BridgeToolOutput
 from app.modules.llm_bridge.tools import SPECS, WRITE_TOOL_NAMES
@@ -239,6 +240,7 @@ async def _forward(
     max_chars = arguments.pop("max_chars", None)
     result_offset = arguments.pop("result_offset", 0)
     arguments.pop("notify", None)
+    note_ids = [uuid.UUID(str(n)) for n in arguments.pop("knowledge_notes", None) or []]
     # 发送时没给会话：先新建一个（要有平台）
     create: dict[str, Any] | None = None
     if tool == "llm_bridge_send":
@@ -279,6 +281,18 @@ async def _forward(
             "FORBIDDEN_CAPABILITY",
             "管理员没有给你开这个开发环境；能用的见 llm_bridge_environments",
         )
+    # 带上的知识库笔记（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）：按这个实例自己的读权限、
+    # 知识库的外发开关检查，再排成参考资料交给会话桥（只附在发给模型的内容后面）
+    references: memory.References | None = None
+    if note_ids:
+        try:
+            references = await memory.build(
+                db, settings, instance.workspace_id, note_ids, instance=instance
+            )
+        except memory.ReferenceProblem as problem:
+            raise ToolCallError(problem.code, problem.message) from None
+        if references is not None:
+            arguments["references"] = references.items
     bridges = await _candidates(service, instance, grant)
     source = await _source(db, instance) if tool in WRITE_TOOL_NAMES else None
     # 平台的限制一并带给会话桥：发送、取回合、读会话这些调用不带 platform 参数，
@@ -319,6 +333,10 @@ async def _forward(
         raise ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥返回了无法识别的结果")
     if create is not None:
         data["created_session"] = True
+    if references is not None:
+        data["knowledge_notes"] = references.note_ids
+        data["knowledge_truncated"] = references.truncated
+    await _memory_hints(db, settings, instance, tool, bridge_id, data, create, arguments)
     if tool in ("llm_bridge_send", "llm_bridge_turn_get") and max_chars:
         _trim_result(data, int(max_chars), int(result_offset))
     if tool == "llm_bridge_session_get" and max_chars:
@@ -328,6 +346,63 @@ async def _forward(
             e for e in data["environments"] if isinstance(e, dict) and e.get("id") in environments
         ]
     return BridgeToolOutput(bridge=bridge_label, data=data), bridge_id
+
+
+async def _memory_hints(
+    db: AsyncSession,
+    settings: Settings,
+    instance: AgentInstance,
+    tool: str,
+    bridge_id: str,
+    data: dict[str, Any],
+    create: dict[str, Any] | None,
+    arguments: dict[str, Any],
+) -> None:
+    """结果里带上和知识库有关的两样（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2、6.1）：
+
+    - 新建会话时：这个实例以前建过的、标题相近的会话（也许不用再问一遍）；
+    - 读会话、取回合、发送时：工作台为这个会话整理的会话纪要的编号（它能读的话）。"""
+    session_id = data.get("session_id") or arguments.get("session_id")
+    if not isinstance(session_id, str):
+        return
+    if tool == "llm_bridge_session_create" or create is not None:
+        text = str((create or arguments).get("title") or arguments.get("text") or "")
+        similar = await memory.similar_sessions(
+            db,
+            instance.workspace_id,
+            text,
+            limit=3,
+            owner_id=str(instance.id),
+            exclude=session_id,
+        )
+        if similar:
+            data["similar_sessions"] = [
+                {
+                    "session_id": row.session_id,
+                    "title": row.title,
+                    "platform": row.platform,
+                    "last_turn_at": row.last_turn_at.isoformat() if row.last_turn_at else None,
+                }
+                for row, _ in similar
+            ]
+    if tool in ("llm_bridge_session_get", "llm_bridge_turn_get", "llm_bridge_send") and bridge_id:
+        note_id = await db.scalar(
+            select(LlmBridgeDigest.note_id).where(
+                LlmBridgeDigest.bridge_id == uuid.UUID(bridge_id),
+                LlmBridgeDigest.session_id == session_id,
+                LlmBridgeDigest.note_id.is_not(None),
+                LlmBridgeDigest.state.in_(("active", "edited", "off")),
+            )
+        )
+        if note_id is not None:
+            note = await db.get(KnowledgeNote, note_id)
+            readable = {
+                state.space.id
+                for state, _ in await KnowledgeService(db, settings).readable_spaces(instance)
+            }
+            if note is not None and note.deleted_at is None and note.space_id in readable:
+                data["digest_note_id"] = str(note_id)
+    await db.commit()
 
 
 def _read_handler(tool: str) -> Callable[[ReadCall, BaseModel], Awaitable[BaseModel]]:
@@ -511,6 +586,24 @@ async def run(
             body=f"{data.get('platform')}.{data.get('mode')}（{output.bridge}）",
             link=_session_link(bridge_id, data.get("session_id"), data.get("turn_id")),
             key=str(data.get("turn_id")),
+        )
+    if spec.name == "llm_bridge_send" and output.data.get("knowledge_notes"):
+        # 知识库的内容离开了工作台：记下带了哪几篇、发到哪个平台的哪个会话、谁挑的（6.2、第 7 节）
+        await AuditTrail(service.db, service.settings).record(
+            "llm_bridge.knowledge_attached",
+            workspace_ids=[current.workspace_id],
+            actor_id=None,
+            resource_type="llm_bridge",
+            resource_id=uuid.UUID(bridge_id),
+            metadata={
+                "instance": current.name,
+                "instance_id": str(current.id),
+                "bridge": output.bridge,
+                "platform": output.data.get("platform"),
+                "notes": output.data.get("knowledge_notes"),
+                "picked_by": "agent",
+                **_result_ref(bridge_id, output.data),
+            },
         )
     # 智能体的写操作也进审计日志（内容不进：只有是谁、哪个会话、哪一回合）
     action = _AUDIT_ACTIONS[spec.name]

@@ -21,6 +21,7 @@ from app.domain.connectors import ConnectorRuntime
 from app.domain.sync import SyncContext
 from app.integrations.base import ConnectorError
 from app.modules import service as modules
+from app.modules.llm_bridge import digests
 from app.modules.llm_bridge.client import BridgeCallError
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeSession
 from app.modules.llm_bridge.service import LlmBridgeService
@@ -64,6 +65,8 @@ def _row(bridge: LlmBridge, item: dict[str, Any]) -> dict[str, Any]:
         "turns_failed": int(item.get("turns_failed") or 0),
         "turns_interrupted": int(item.get("turns_interrupted") or 0),
         "tokens": int(item.get("tokens") or 0),
+        "compactions": int(item.get("compactions") or 0),
+        "purged_at": _time(item.get("purged_at")),
         "created_at": created,
         "updated_at": _time(item.get("updated_at")) or created,
         "last_turn_at": _time(item.get("last_turn_at")),
@@ -146,6 +149,24 @@ async def _notify_pauses(db: AsyncSession, bridge_id: uuid.UUID, pauses: Any) ->
         await db.commit()
 
 
+async def _save_digest_settings(db: AsyncSession, bridge_id: uuid.UUID, digest: Any) -> None:
+    """管理器设置里会话纪要的开关（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）；旧版本的管理器没有。"""
+    if not isinstance(digest, dict):
+        return
+    values = {
+        "enabled": bool(digest.get("enabled", True)),
+        "follow_retention": bool(digest.get("follow_retention", True)),
+    }
+    bridge = await db.get(LlmBridge, bridge_id)
+    if bridge is not None and (bridge.digest_settings or {}) != values:
+        await db.execute(
+            update(LlmBridge)
+            .where(LlmBridge.id == bridge_id)
+            .values(digest_settings=values, updated_at=LlmBridge.updated_at)
+        )
+        await db.commit()
+
+
 async def sync_bridge(
     db: AsyncSession, settings: Settings, runtime: ConnectorRuntime, bridge_id: uuid.UUID
 ) -> int:
@@ -161,6 +182,7 @@ async def sync_bridge(
         data = await client.admin("GET", f"/index?after={rev}&limit={PAGE}")
         if page == 0 and isinstance(data, dict):
             await _notify_pauses(db, bridge_id, data.get("pauses"))
+            await _save_digest_settings(db, bridge_id, data.get("digest"))
         items = data.get("sessions") if isinstance(data, dict) else None
         if not isinstance(items, list) or not items:
             break
@@ -211,4 +233,11 @@ async def index_tick(ctx: dict[str, Any]) -> int:
                 logger.info(
                     "llm_bridge index: bridge %s skipped: %s", bridge_id, type(error).__name__
                 )
+                continue
+            # 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：索引更新后，该写的写一批
+            try:
+                await digests.tick(db, context.settings, context.runtime, bridge_id)
+            except Exception:
+                await db.rollback()
+                logger.exception("llm_bridge digests: bridge %s failed", bridge_id)
     return total

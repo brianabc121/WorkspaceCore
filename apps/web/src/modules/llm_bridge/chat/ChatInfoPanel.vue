@@ -3,13 +3,15 @@ import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { X } from '@lucide/vue'
 import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, originName, platformName, quotaKind, quotaUsage, recentUse, seconds, sourceTasks, type Quota } from '../api'
-import { TURN_STATUS, contextText, ownerText, type ChatMessage, type ChatSession } from './chatApi'
+import { DIGEST_REASON, DIGEST_STATE, TURN_STATUS, contextText, ownerText, type ChatDigest, type ChatMessage, type ChatSession } from './chatApi'
 
 // 右栏：这个会话的信息、这个平台的额度（T-0242）和回合列表。只显示。
 // quota 来自管理器的状态；旧版本的管理器没有，这一块不显示。
 // models：这个会话能换成哪些模型（Claude / CodeBuddy 的会话才给；不给就只显示现在的）
-const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; managerName: string; quota?: Quota | null; models?: { id: string; name: string }[]; changing?: boolean }>()
-defineEmits<{ close: []; model: [id: string] }>()
+const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; managerName: string; quota?: Quota | null; models?: { id: string; name: string }[]; changing?: boolean; digest?: ChatDigest | null; canWrite?: boolean }>()
+defineEmits<{ close: []; model: [id: string]; digest: [action: 'on' | 'off' | 'write' | 'promote' | 'delete'] }>()
+// 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2、5.3）：写在知识库里、标为未确认；可以关掉、现在整理、转成正式笔记、删除
+const digestNote = computed(() => (props.digest?.note_id && !['deleted', 'purged'].includes(props.digest.state) ? props.digest : null))
 
 const turns = computed(() => props.messages.filter(m => m.role === 'assistant' && m.turn_id))
 // 出处：智能体建这个会话时正在执行的任务（工作台记的，不保证就是引起这个会话的那一个）
@@ -69,6 +71,22 @@ const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
         <dt>重置时间</dt><dd>{{ w.resets_at ? seconds(w.resets_at) : '平台没有给出' }}</dd>
       </dl>
       <p class="lc-note">{{ recentUse(quota) }}</p>
+    </section>
+    <section v-if="session.origin !== 'external'" class="lc-digest" aria-label="会话纪要">
+      <h4>会话纪要</h4>
+      <p v-if="digestNote" class="lc-note">
+        <RouterLink class="asv-link" :to="`/knowledge/notes/${digestNote.note_id}`">《{{ digestNote.note_title }}》</RouterLink>
+        <span class="lc-sub">{{ digestNote.space_name }} · {{ DIGEST_STATE[digestNote.state] ?? digestNote.state }}{{ digestNote.state === 'active' ? '（未确认）' : '' }}{{ digestNote.written_at ? ` · ${seconds(new Date(digestNote.written_at).getTime() / 1000)} 整理` : '' }}{{ digestNote.reason ? `（${DIGEST_REASON[digestNote.reason] ?? digestNote.reason}）` : '' }}</span>
+      </p>
+      <p v-else-if="digest?.state === 'off'" class="lc-note">这个会话的纪要已关掉。</p>
+      <p v-else class="lc-note">还没有整理过。会话有 3 个以上回合，并且平台压缩了上下文、会话归档、或者 24 小时没有新回合时，自动整理进知识库（不调模型、不花 token）。</p>
+      <div v-if="canWrite" class="lc-digest-actions">
+        <button v-if="digest?.state !== 'off' && digest?.state !== 'converted' && digest?.state !== 'edited'" type="button" class="asv-link" :disabled="changing" @click="$emit('digest', 'write')">现在整理一次</button>
+        <button v-if="digestNote && digestNote.state === 'active'" type="button" class="asv-link" :disabled="changing" @click="$emit('digest', 'promote')">转成正式笔记</button>
+        <button v-if="digestNote && digestNote.state !== 'converted'" type="button" class="asv-link" :disabled="changing" @click="$emit('digest', 'delete')">删除纪要</button>
+        <button v-if="digest?.state === 'off'" type="button" class="asv-link" :disabled="changing" @click="$emit('digest', 'on')">重新打开纪要</button>
+        <button v-else-if="!digest || digest.state === 'active'" type="button" class="asv-link" :disabled="changing" @click="$emit('digest', 'off')">关掉这个会话的纪要</button>
+      </div>
     </section>
     <template v-if="session.origin === 'external'">
       <p class="lc-note">这是官方程序里已有的会话：这里读到的是它的文字记录，没有回合列表。</p>

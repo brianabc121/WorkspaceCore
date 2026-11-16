@@ -26,7 +26,7 @@ export const SPACE_KIND_LABELS: Record<SpaceKind, string> = { public: '公共', 
 export const NOTE_TYPE_LABELS: Record<NoteType, string> = {
   overview: '概述', brief: '项目简报', decision: '决策', rule: '规范', process: '流程', runbook: '操作手册', lesson: '经验',
   review: '复盘', preference: '偏好', glossary: '术语', record: '记录', plan: '计划', risk: '风险', design: '设计', template: '模板',
-  correction: '收到的纠正', readme: 'README',
+  correction: '收到的纠正', readme: 'README', digest: '会话纪要',
 }
 // 图谱按类型着色（T-0102，docs/v2/TIMELINE_PLAN.md 3.1）：16 种类型按用途分 6 组，一组一个颜色。
 // 超过 8 种颜色人眼分不清，所以颜色只区分组；具体类型看图例、悬停提示与列表视图。
@@ -36,13 +36,13 @@ export const TYPE_GROUPS: readonly { key: TypeGroup; label: string; types: reado
   { key: 'decision', label: '决策与计划', types: ['decision', 'plan', 'design'] },
   { key: 'lesson', label: '经验与复盘', types: ['lesson', 'review', 'correction'] },
   { key: 'project', label: '项目', types: ['brief', 'readme', 'risk'] },
-  { key: 'knowledge', label: '知识', types: ['overview', 'glossary', 'record'] },
+  { key: 'knowledge', label: '知识', types: ['overview', 'glossary', 'record', 'digest'] },
   { key: 'preference', label: '偏好', types: ['preference'] },
 ]
 const GROUP_OF = new Map(TYPE_GROUPS.flatMap(g => g.types.map(t => [t, g.key] as const)))
 export const typeGroupOf = (type: NoteType | null | undefined): TypeGroup => (type && GROUP_OF.get(type)) || 'knowledge'
-// 人能新建的类型：项目简报只在项目库里建一篇，《收到的纠正》与 README 由工作台维护
-export const EDITABLE_TYPES = (Object.keys(NOTE_TYPE_LABELS) as NoteType[]).filter(t => t !== 'correction' && t !== 'readme')
+// 人能新建的类型：项目简报只在项目库里建一篇，《收到的纠正》、README、会话纪要由工作台维护
+export const EDITABLE_TYPES = (Object.keys(NOTE_TYPE_LABELS) as NoteType[]).filter(t => t !== 'correction' && t !== 'readme' && t !== 'digest')
 export const CHANGE_LABELS: Record<NonNullable<Change['change']>, string> = { create: '新建', update: '修改', delete: '删除', restore: '恢复', revert: '撤销', rename: '改名' }
 export const GUARD_LABELS: Record<NonNullable<Change['guard']>, string> = { secret_blocked: '拦下写入', delete_paused: '暂停删除', rate_limited: '写入限流', writes_disabled: '写入已关闭' }
 

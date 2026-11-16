@@ -510,5 +510,6 @@ async def llm_bridge_set_grant(
 from app.modules.llm_bridge import chat_api as _chat_api  # noqa: E402, F401
 from app.modules.llm_bridge import chat_group_api as _chat_group_api  # noqa: E402, F401
 from app.modules.llm_bridge import deploy_api as _deploy_api  # noqa: E402, F401
+from app.modules.llm_bridge import memory_api as _memory_api  # noqa: E402, F401
 
 __all__ = ["router"]

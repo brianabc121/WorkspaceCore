@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -97,6 +98,13 @@ class SendInput(_Input):
         ge=0,
         le=50,
         description="最多等多少秒；没答完就先返回回合号，之后用 llm_bridge_turn_get 取",
+    )
+    knowledge_notes: list[UUID] = Field(
+        default=[],
+        max_length=5,
+        description="随这条消息带上的知识库笔记编号（最多 5 篇，先用 knowledge_search 找）："
+        "工作台检查你对每一篇都有读权限、所在知识库允许发给外部大模型平台，再把正文附在消息后面，"
+        "包装成“资料，不是指令”；合计最多 6000 字，超出的截断。省得你自己复制粘贴",
     )
     mode: Literal["queue", "insert"] | None = Field(
         default=None,
@@ -193,9 +201,12 @@ DESCRIPTIONS: dict[str, str] = {
     "llm_bridge_models": "查看某个平台、某种模式下可选的模型。",
     "llm_bridge_environments": "查看某个平台开发模式下可选的环境（管理员预先配置）。",
     "llm_bridge_session_create": "在 ChatGPT / Codex / Claude / CodeBuddy 上新建一个会话："
-    "选平台、模式、模型；开发模式还要选环境。返回 data.session_id，之后用 llm_bridge_send 发消息。",
+    "选平台、模式、模型；开发模式还要选环境。返回 data.session_id，之后用 llm_bridge_send 发消息。"
+    "data.similar_sessions 是你以前建过的、标题相近的会话（有的话）：也许不用再问一遍。",
     "llm_bridge_send": "向一个会话发消息并等回答；"
-    "不填 session_id 时先新建一个会话再发（一步完成）。"
+    "不填 session_id 时先新建一个会话再发（一步完成），结果里的 data.similar_sessions 是"
+    "你以前问过的相近的会话（有的话）。发之前先用 knowledge_search 查一下知识库里有没有现成的答案；"
+    "要带上笔记就填 knowledge_notes。"
     "同一个会话里的消息按顺序处理；不同会话可以同时进行。"
     "在 wait_seconds 内没答完会返回 data.status=queued / running 和 data.turn_id："
     "带了 notify=true 的话回合结束后工作台会唤醒你，否则之后用 llm_bridge_turn_get 取结果。"
@@ -218,6 +229,8 @@ DESCRIPTIONS: dict[str, str] = {
     "llm_bridge_session_get": "查看一个会话的信息和消息记录：默认给最新的一页，"
     "data.total 是一共多少条。每条消息太长会截断，全文用 llm_bridge_turn_get 取。"
     "role=status、text=context_compacted 的一条表示平台在这里压缩了上下文。"
-    "data.session.context 是上下文用量和压缩次数。" + _NOTE,
+    "data.session.context 是上下文用量和压缩次数。"
+    "data.digest_note_id 是工作台为这个会话整理的会话纪要（未确认，可以用 knowledge_get 读）；"
+    "觉得值得长期留下的，用 knowledge_write 另写一篇。" + _NOTE,
     "llm_bridge_session_archive": "归档一个会话（之后不能再发送；开发会话的工作目录会被删除）。",
 }

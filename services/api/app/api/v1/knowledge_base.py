@@ -116,7 +116,7 @@ async def get_space(access: Viewer, service: Service, space_id: UUID) -> SpaceOu
     "/spaces/{space_id}",
     summary="修改知识库设置（admin）",
     description="说明、智能体权限（公共库三种，智能体库 read / none）、智能体的写入开关、"
-    "解除被自动暂停的删除。version 不一致时 409。",
+    "解除被自动暂停的删除、能不能附在发给外部大模型平台的消息里。version 不一致时 409。",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -151,6 +151,9 @@ async def update_space(
     if body.resume_deletes:
         space.deletes_paused_at = None
         changed.append("resume_deletes")
+    if body.external_llm_allowed is not None:
+        space.external_llm_allowed = body.external_llm_allowed
+        changed.append("external_llm_allowed")
     space.version += 1
     await service.audit.record(
         "knowledge_space.updated",
@@ -488,6 +491,10 @@ async def graph(
     task_readmes: Annotated[
         bool, Query(description="显示任务 README（数量多，默认不显示，T-0122）")
     ] = False,
+    digests: Annotated[
+        bool,
+        Query(description="显示会话纪要（未经确认，默认不显示；LLM_BRIDGE_MEMORY_PLAN.md 5.3）"),
+    ] = False,
 ) -> GraphOut:
     return await service.graph(
         access.workspace.id,
@@ -495,6 +502,7 @@ async def graph(
         include_resources=resources,
         include_files=files,
         include_task_readmes=task_readmes,
+        include_digests=digests,
     )
 
 

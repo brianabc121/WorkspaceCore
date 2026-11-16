@@ -59,6 +59,11 @@ class LlmBridge(Base):
     pause_notified: Mapped[dict[str, Any]] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb")
     )
+    # 管理器设置里会话纪要的开关（enabled、follow_retention），同步会话索引时带回来
+    # （docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2、5.3）；没同步过为空，按默认（开）处理
+    digest_settings: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -106,6 +111,9 @@ class LlmBridgeSession(Base):
     turns_failed: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     turns_interrupted: Mapped[int] = mapped_column(Integer, server_default=text("0"))
     tokens: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
+    # 平台压缩过几次；对话内容按保留期清掉的时间（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2、5.3）
+    compactions: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_turn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -359,3 +367,51 @@ class LlmBridgeTurnWatch(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     done_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+DIGEST_STATES = ("active", "off", "converted", "edited", "deleted", "purged")
+
+
+class LlmBridgeDigest(Base):
+    """会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：一个会话一篇，
+    写在知识库的“会话纪要”文件夹里。
+
+    内容由工作台按管理器的记录整理（不调模型），每次合并进同一篇、留一个版本。state：
+    active 照常更新；off 有人关掉了这个会话的纪要；converted 已转成正式笔记；
+    edited 人改过纪要（不再自动覆盖）；deleted 纪要被删进了回收站；
+    purged 会话内容按保留期清掉，纪要随之放进回收站。"""
+
+    __tablename__ = "llm_bridge_digests"
+    __table_args__ = (
+        UniqueConstraint("bridge_id", "session_id"),
+        CheckConstraint(f"state IN {DIGEST_STATES}", name="state"),
+        Index("ix_llm_bridge_digests_note", "note_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    bridge_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.llm_bridge_bridges.id", ondelete="CASCADE")
+    )
+    session_id: Mapped[str] = mapped_column(Text)
+    note_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.knowledge_notes.id", ondelete="SET NULL"), nullable=True
+    )
+    space_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.knowledge_spaces.id", ondelete="SET NULL"), nullable=True
+    )
+    state: Mapped[str] = mapped_column(Text, server_default=text("'active'"))
+    # 写进去的时候会话有几个回合、压缩过几次：有新的才再写
+    turns_written: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    compactions_seen: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    # 最近一次为什么写：compaction / archived / idle / continued
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    written_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

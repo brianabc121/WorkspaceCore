@@ -26,7 +26,7 @@ const path = (r: Request) => new URL(r.url).pathname
 const params = (r: Request) => new URL(r.url).searchParams
 const user = { kind: 'user' as const, id: 'user-a', name: '测试用户' }
 const agent = { kind: 'agent' as const, id: 'inst-a', name: '设计助手' }
-const publicSpace: Schema['SpaceOut'] = { id: 'space-public', kind: 'public', name: '公共知识库', description: '', project_id: null, instance_id: null, archived: false, agent_access: 'read_write', writes_enabled: true, deletes_paused_at: null, notes: 2, last_updated_at: '2026-11-09T02:00:00Z', brief_note_id: null, brief_version: null, agents: [], version: 1 }
+const publicSpace: Schema['SpaceOut'] = { id: 'space-public', kind: 'public', name: '公共知识库', description: '', project_id: null, instance_id: null, archived: false, agent_access: 'read_write', writes_enabled: true, external_llm_allowed: true, deletes_paused_at: null, notes: 2, last_updated_at: '2026-11-09T02:00:00Z', brief_note_id: null, brief_version: null, agents: [], version: 1 }
 const projectSpace: Schema['SpaceOut'] = { ...publicSpace, id: 'space-p1', kind: 'project', name: '工作台改版', project_id: 'project-a', agent_access: 'none', notes: 1 }
 const archivedSpace: Schema['SpaceOut'] = { ...publicSpace, id: 'space-old', kind: 'project', name: '旧项目', project_id: 'project-old', archived: true, agent_access: 'none', notes: 1 }
 const spaces = { items: [publicSpace, projectSpace, archivedSpace] }

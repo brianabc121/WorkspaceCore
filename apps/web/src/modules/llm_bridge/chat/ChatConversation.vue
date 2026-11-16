@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue'
-import { Archive, ArrowLeft, Download, Eraser, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
+import { Archive, ArrowLeft, BookOpen, Download, Eraser, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { CHAT_NO_TOOLS, MODES, platformName, seconds, type Bridge, type Platform, type Quota } from '../api'
-import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, hasContext, isClearCommand, needsTakeover, newRequestId, ownerText, slashCommand, type ChatAttachment, type LlmChatApi } from './chatApi'
+import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, hasContext, isClearCommand, needsTakeover, newRequestId, ownerText, slashCommand, type ChatAttachment, type ChatMessage as Message, type ChatNoteHit, type LlmChatApi } from './chatApi'
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
 import ChatInfoPanel from './ChatInfoPanel.vue'
 import ChatQueue from './ChatQueue.vue'
+import ChatKnowledge from './ChatKnowledge.vue'
+import ChatSaveNote from './ChatSaveNote.vue'
 
 // 中间一栏：一个会话的对话。父组件按“管理器 + 会话”给 key，换会话时整个重建。
 // 内容和进度（长轮询读事件）在 useLiveConversation 里。
@@ -87,8 +89,8 @@ async function submit() {
   if (foreign.value && !allowTakeover()) return
   if (uploading.value) { sendError.value = '附件还在上传，传完再发。'; return }
   if (pending?.text !== text) pending = { text, id: newRequestId() }
-  const files = [...attached.value]
-  const body = { text, request_id: pending.id, ...(files.length ? { attachments: files.map(a => a.id) } : {}), ...(inserting.value ? { mode: 'insert' as const } : {}) }
+  const files = [...attached.value], notes = [...picked.value]
+  const body = { text, request_id: pending.id, ...(files.length ? { attachments: files.map(a => a.id) } : {}), ...(notes.length ? { knowledge_notes: notes.map(n => n.id) } : {}), ...(inserting.value ? { mode: 'insert' as const } : {}) }
   sending.value = true; sendError.value = sendNotice.value = ''
   try {
     let turn
@@ -98,7 +100,7 @@ async function submit() {
       if (!needsTakeover(e) || !allowTakeover()) throw e
       turn = await props.chat.send(props.bridge.id, props.sessionId, { ...body, takeover: true })
     }
-    pending = null; draft.value = ''; attached.value = []; sendMode.value = 'queue'
+    pending = null; draft.value = ''; attached.value = []; picked.value = []; sendMode.value = 'queue'
     stick = true
     if (turn.delivered === 'inserted') {
       // 没有新回合：消息进了正在处理的那一回合，重新读一次把它显示在那一问后面
@@ -106,7 +108,7 @@ async function submit() {
       await reload()
     } else {
       if (turn.delivered === 'merged') sendNotice.value = '平台没有收下插入的消息：已中断上一回合，这条消息会带着“接着刚才没做完的继续”重新开始。'
-      sent(turn, text, files)
+      sent(turn, text, files, notes.map(n => ({ note_id: n.id, title: n.title })))
       if (turn.delivered === 'merged') void reload()
     }
     emit('changed')
@@ -158,6 +160,22 @@ async function clearContext(typed = false) {
   } finally { clearing.value = false }
 }
 
+// ---- 提问前用上知识库（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 6 节）：相近内容的提示、挑选笔记带上 ----
+const picked = ref<ChatNoteHit[]>([])
+const kbPanel = ref<InstanceType<typeof ChatKnowledge> | null>(null)
+// 存进知识库（5.2）：一条回答 → 人确认后的正式笔记
+const saving = ref<{ question: string; answer: string; link: string } | null>(null)
+function saveAnswer(message: Message) {
+  const question = messages.value.find(m => m.role === 'user' && m.turn_id === message.turn_id)?.text ?? ''
+  const link = `/llm_bridge?m=${props.bridge.id}&s=${props.sessionId}${message.turn_id ? `&t=${message.turn_id}` : ''}`
+  saving.value = { question, answer: message.text, link }
+}
+// 会话纪要的操作（5.2、5.3）：在会话信息里
+async function digestAction(action: 'on' | 'off' | 'write' | 'promote' | 'delete') {
+  if (action === 'delete' && !window.confirm('删除这个会话的纪要？\n\n纪要放进知识库的回收站（30 天内可以恢复），之后不再为这个会话整理纪要。')) return
+  if (action === 'promote' && !window.confirm('把这篇会话纪要转成正式笔记？\n\n转成后它就是你确认过的普通笔记，放到知识库的根目录，之后不再自动更新。')) return
+  await act(() => props.chat.digest(props.bridge.id, props.sessionId, action))
+}
 // ---- 附件：先上传到管理器，发送时带上编号；对话会话只能带图片 ----
 const attached = ref<ChatAttachment[]>([]), uploading = ref(0), picker = ref<HTMLInputElement | null>(null)
 const imagesOnly = computed(() => session.value?.mode !== 'dev')
@@ -320,7 +338,7 @@ function archive() {
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :no-tools="session.mode === 'chat'" :target="!!targetTurn && m.turn_id === targetTurn" :last="i === messages.length - 1" :busy-action="sending" :resuming="resuming" :source="source" @resume="resume" @again="again" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :no-tools="session.mode === 'chat'" :target="!!targetTurn && m.turn_id === targetTurn" :last="i === messages.length - 1" :busy-action="sending" :resuming="resuming" :source="source" @resume="resume" @again="again" @save="saveAnswer" />
           </ol>
           <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
@@ -343,7 +361,9 @@ function archive() {
             <li v-for="a in attached" :key="a.id"><span class="lc-file-name">{{ a.name }}</span><span class="lc-file-size">{{ fileSize(a.size) }}</span><button type="button" class="lc-icon" :aria-label="`去掉附件：${a.name}`" @click="detach(a)"><X aria-hidden="true" /></button></li>
             <li v-if="uploading" role="status">正在上传 {{ uploading }} 个…</li>
           </ul>
+          <ChatKnowledge ref="kbPanel" v-model:selected="picked" :chat="chat" :bridge-id="bridge.id" :session-id="sessionId" :draft="draft" :disabled="sending" />
           <div class="lc-compose-row">
+            <button type="button" class="lc-icon" aria-label="参考知识库" title="参考知识库：挑笔记随这条消息带上" :disabled="sending" @click="kbPanel?.toggle()"><BookOpen aria-hidden="true" /></button>
             <input ref="picker" type="file" multiple hidden :accept="imagesOnly ? IMAGE_ACCEPT : undefined" aria-label="选择要带上的图片或文件" @change="pick" />
             <button type="button" class="lc-icon" :aria-label="imagesOnly ? '添加图片' : '添加图片或文件'" :title="imagesOnly ? '添加图片（对话会话只能带图片）' : '添加图片或文件（文件会放进工作目录）'" :disabled="sending" @click="picker?.click()"><Paperclip aria-hidden="true" /></button>
             <textarea v-model="draft" rows="2" maxlength="100000" aria-label="消息内容" :placeholder="`输入消息：Enter 发送，Shift + Enter 换行；可以粘贴或拖入${imagesOnly ? '图片' : '图片、文件'}`" @keydown="onKey" @paste="onPaste" />
@@ -362,6 +382,7 @@ function archive() {
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>
       </form>
     </div>
-    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" :quota="quotas?.[session.platform] ?? null" :models="models" :changing="working" @model="setModel" @close="infoOpen = false" />
+    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" :quota="quotas?.[session.platform] ?? null" :models="models" :changing="working" :digest="conversation.data.value?.digest ?? null" :can-write="bridge.enabled" @model="setModel" @digest="digestAction" @close="infoOpen = false" />
+    <ChatSaveNote v-if="saving && session" :chat="chat" :question="saving.question" :answer="saving.answer" :session-title="session.title" :link="saving.link" @close="saving = null" />
   </div>
 </template>

@@ -431,7 +431,8 @@ async def test_source_is_kept_and_index_feed_follows_changes(bridge: Bridge) -> 
     assert "机密的内容" not in json.dumps(page, ensure_ascii=False)
     # 没有新的变化：下一页是空的，序号不动
     again = (await bridge.admin("GET", "/admin/index", params={"after": page["last_rev"]})).json()
-    assert again == {"sessions": [], "last_rev": page["last_rev"], "pauses": []}
+    assert again["sessions"] == [] and again["last_rev"] == page["last_rev"]
+    assert again["pauses"] == []
     # 回合换了状态（失败）也算变化
     await tool(
         "llm_send",
