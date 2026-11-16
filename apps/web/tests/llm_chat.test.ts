@@ -656,6 +656,34 @@ describe('大模型聊天', () => {
     await waitFor(() => expect(bodies).toEqual([{ takeover: true }]))
   })
 
+  it('sends a message typed while the clear is still finishing once the clear is done, instead of dropping it', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const sends: Schema['LlmChatSendIn'][] = []
+    let finish: (() => void) | undefined
+    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 5, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false }
+    setup('owner', {}, async (r, w) => {
+      const p = path(r)
+      if (p === `${chat}/sessions/${S1}/clear`) {
+        w.conversations[S1] = talk({}, [asked('写一个周报模板'), answered('好的，模板如下。'), divider])
+        // 清空已经做完、页面也能读到分隔线，但这次请求的回答迟一点才到
+        await new Promise<void>(resolve => { finish = resolve })
+        return Response.json({ session: session(), cleared: true, cleared_at: now() })
+      }
+      if (p === `${chat}/sessions/${S1}/messages`) { sends.push(await r.json() as Schema['LlmChatSendIn']); return Response.json(turn(T2, 'completed')) }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const box = await composer()
+    await fireEvent.click(screen.getByRole('button', { name: '清空上下文' }))
+    await waitFor(() => expect(finish).toBeDefined())
+    await fireEvent.update(box, '从头问一句')
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    expect(sends).toEqual([])
+    finish!()
+    await waitFor(() => expect(sends.map(b => b.text)).toEqual(['从头问一句']))
+    await waitFor(() => expect(box).toHaveValue(''))
+  })
+
   it('does not clear while a turn is still running', async () => {
     const running = [asked('跑一下测试'), answered('', T1, { status: 'running' })]
     const { requests } = setup('owner', { conversations: { [S1]: talk({ busy: true }, running) }, events: [new Promise<Events>(() => {})] })
