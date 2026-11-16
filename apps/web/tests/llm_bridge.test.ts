@@ -555,6 +555,38 @@ describe('大模型客户端管理', () => {
     expect(body).not.toHaveProperty('autocompact_codex_tokens')
   })
 
+  it('turns the compaction hooks on (off by default) and hides the switch for an older manager', async () => {
+    const withHooks = { ...settings, hooks_enabled: false }
+    const requests = setup('owner', async r => {
+      if (path(r) === `${base}/settings`) return Response.json({ ...withHooks, ...(await r.clone().json()) })
+      if (path(r) === `${base}/status`) return Response.json({ ...status(), settings: withHooks })
+      return undefined
+    })
+    await openApp('/llm_bridge?view=manage')
+    const set = await openTab('设置')
+    const group = await within(set).findByRole('group', { name: '压缩时的钩子' })
+    const box = within(group).getByLabelText(/压缩上下文时，提醒它保留要紧的内容/)
+    expect(box).not.toBeChecked()
+    expect(within(group).getByText(/默认关/)).toBeVisible()
+    // 没改就不提交这一项
+    await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(writes(requests)).toHaveLength(1))
+    expect(await writes(requests)[0]!.clone().json()).not.toHaveProperty('hooks_enabled')
+    const save = await within(set).findByRole('button', { name: '保存设置' })
+    await fireEvent.click(within(set).getByLabelText(/压缩上下文时，提醒它保留要紧的内容/))
+    await fireEvent.click(save)
+    await waitFor(() => expect(writes(requests)).toHaveLength(2))
+    expect(await writes(requests)[1]!.clone().json()).toMatchObject({ hooks_enabled: true })
+  })
+
+  it('shows no hooks switch for a manager that does not know it', async () => {
+    setup('owner', async r => (path(r) === `${base}/status` ? Response.json({ ...status(), settings }) : undefined))
+    await openApp('/llm_bridge?view=manage')
+    const set = await openTab('设置')
+    await within(set).findByRole('button', { name: '保存设置' })
+    expect(within(set).queryByRole('group', { name: '压缩时的钩子' })).toBeNull()
+  })
+
   it('saves settings within the backend limits and environments in dev mode with an exec warning', async () => {
     const requests = setup('owner', async r => {
       if (path(r) === `${base}/settings`) return Response.json({ ...settings, ...(await r.clone().json()) })

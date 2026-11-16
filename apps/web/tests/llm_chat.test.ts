@@ -34,7 +34,7 @@ const status = (): Schema['LlmBridgeStatusOut'] => ({
   accounts: [account('openai', 'logged_in'), account('claude', 'logged_in'), account('workbuddy', 'logged_out')],
   channels: [channel('chatgpt', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
 })
-const session = (over: Partial<Session> = {}): Session => ({ session_id: S1, platform: 'claude', mode: 'chat', model: 'sonnet', title: '周报怎么写', status: 'active', origin: 'bridge', owner: '测试用户', owner_kind: 'me', busy: false, turns: 1, created_at: now() - 600, updated_at: now(), environment: null, ...over })
+const session = (over: Partial<Session> = {}): Session => ({ session_id: S1, platform: 'claude', mode: 'chat', model: 'sonnet', title: '周报怎么写', status: 'active', origin: 'bridge', owner: '测试用户', owner_kind: 'me', busy: false, turns: 1, created_at: now() - 600, updated_at: now(), environment: null, pinned: [], ...over })
 const asked = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'user', turn_id: turn, text, at: now() - 100, by: '测试用户', mine: true, steps: [], attachments: [], imported: false, references: [], ...over })
 const answered = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'assistant', turn_id: turn, text, at: now() - 90, status: 'completed', steps: [], attachments: [], imported: false, references: [], ...over })
 const talk = (over: Partial<Session> = {}, messages: Message[] = [asked('写一个周报模板'), answered('好的，模板如下。')], last = 10): Conversation => ({ session: session(over), messages, last_event_id: last })
@@ -816,10 +816,22 @@ describe('大模型聊天', () => {
     await waitFor(() => expect(calls).toHaveLength(2))
     expect(calls[0]).toEqual(['compact', { instructions: '', request_id: expect.stringMatching(/^web-/), takeover: false }])
     expect(calls[1]).toEqual(['continue', { request_id: expect.stringMatching(/^web-/), takeover: false }])
-    expect(await screen.findByText(/已排上“带着摘要另开会话”/)).toBeVisible()
+    expect(await screen.findByText(/已排上“带着摘要另开会话”：先要摘要/)).toBeVisible()
     // 特殊的回合带着标记
     expect(screen.getByText('要交接摘要')).toBeVisible()
     expect(screen.getByText('手动压缩')).toBeVisible()
+  })
+
+  it('says when continuing reuses the summary the platform wrote while compacting', async () => {
+    const context = { used: 170000, window: 200000, percent: 85, compactions: 1, last_compacted_at: now() - 60, last_trigger: 'auto', near_limit: true, warn_percent: 80 }
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    setup('owner', { conversations: { [S1]: talk({ context }) } }, async r => (
+      path(r) === `${chat}/sessions/${S1}/continue` ? Response.json({ session: session({ context }), summary_turn_id: null, handoff_turn_id: T2, summary_from: 'compaction' }) : undefined
+    ))
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const hint = await screen.findByText(/快到平台自动压缩的位置了/)
+    await fireEvent.click(within(hint.closest('[role="note"]') as HTMLElement).getByRole('button', { name: '带着摘要另开会话' }))
+    expect(await screen.findByText(/直接用平台压缩时写的摘要/)).toBeVisible()
   })
 
   it('says that CodeBuddy gives no quota instead of promising one after a turn', async () => {
@@ -1013,9 +1025,52 @@ describe('大模型聊天', () => {
     await fireEvent.update(await within(form).findByLabelText('推理强度'), 'high')
     await fireEvent.click(within(form).getByRole('button', { name: '新建并发送' }))
     expect(await screen.findByRole('heading', { level: 2, name: '修一下测试' })).toBeVisible()
-    expect(bodies).toEqual([{ platform: 'codex', mode: 'dev', title: '', model: 'gpt-5', effort: 'high', environment: ENV, text: '修一下测试', request_id: expect.stringMatching(/^web-/) }])
+    expect(bodies).toEqual([{ platform: 'codex', mode: 'dev', title: '', model: 'gpt-5', effort: 'high', environment: ENV, text: '修一下测试', request_id: expect.stringMatching(/^web-/), pinned_notes: [] }])
     expect(router.currentRoute.value.query).toEqual({ m: ONE, s: S2 })
     expect(await screen.findByText('排队中…')).toBeVisible()
+  })
+
+  it('creates a session with notes pinned for the whole session, and shows them in the session info', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const NOTE = '33333333-3333-4333-8333-333333333333', LOCKED = '44444444-4444-4444-8444-444444444444'
+    const related: Schema['LlmChatRelatedOut'] = {
+      notes: [
+        { id: NOTE, title: '项目约定', space_id: 'sp', space_name: '公共知识库', label: '2026-11-10 更新', excerpt: '接口都要幂等', external_allowed: true },
+        { id: LOCKED, title: '内部安排', space_id: 'sp2', space_name: '秘密项目', label: '2026-11-09 更新', excerpt: '', external_allowed: false },
+      ],
+      sessions: [],
+    }
+    const bodies: Schema['LlmChatCreateIn'][] = []
+    const { requests } = setup('owner', {}, async (r, w) => {
+      if (path(r) === `${chat}/related`) return Response.json(related)
+      if (path(r) !== `${chat}/sessions` || r.method !== 'POST') return undefined
+      bodies.push(await r.json() as Schema['LlmChatCreateIn'])
+      const made = session({ session_id: S2, title: '新会话', turns: 0, pinned: [{ note_id: NOTE, title: '项目约定' }] })
+      w.conversations[S2] = { session: made, messages: [], last_event_id: 0 }
+      return Response.json({ session: made, turn: null, send_error: '' }, { status: 201 })
+    })
+    await openApp('/llm_bridge')
+    await fireEvent.click(await screen.findByRole('button', { name: '新建会话' }))
+    const form = await screen.findByRole('form', { name: '新建会话' })
+    const pinned = await within(form).findByRole('group', { name: '固定带着的笔记' })
+    expect(within(pinned).getByText(/平台压缩上下文之后也还在/)).toBeVisible()
+    await fireEvent.click(within(pinned).getByRole('button', { name: '从知识库里挑' }))
+    await fireEvent.update(within(pinned).getByLabelText('找笔记'), '约定')
+    await vi.advanceTimersByTimeAsync(500)
+    const lookup = await waitFor(() => { const r = requests.find(x => path(x) === `${chat}/related`); expect(r).toBeTruthy(); return r! })
+    expect(query(lookup).get('q')).toBe('约定')
+    expect(query(lookup).get('limit')).toBe('10')
+    expect(query(lookup).has('session_id')).toBe(false)
+    expect(await within(pinned).findByRole('checkbox', { name: '固定带着《内部安排》' })).toBeDisabled()
+    await fireEvent.click(within(pinned).getByRole('checkbox', { name: '固定带着《项目约定》' }))
+    expect(within(pinned).getByRole('list', { name: '固定带着的笔记' })).toHaveTextContent('固定带着：《项目约定》')
+    await fireEvent.click(within(form).getByRole('button', { name: '新建会话' }))
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toMatchObject({ platform: 'chatgpt', mode: 'chat', pinned_notes: [NOTE] })
+    vi.useRealTimers()
+    const info = await screen.findByRole('complementary', { name: '会话信息' })
+    expect(await within(info).findByText('固定带着')).toBeVisible()
+    expect(within(info).getByText('《项目约定》')).toBeVisible()
   })
 
   it('opens the new session with the unsent first message when sending it failed', async () => {

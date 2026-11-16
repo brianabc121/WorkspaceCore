@@ -241,6 +241,7 @@ async def _forward(
     result_offset = arguments.pop("result_offset", 0)
     arguments.pop("notify", None)
     note_ids = [uuid.UUID(str(n)) for n in arguments.pop("knowledge_notes", None) or []]
+    pinned_ids = [uuid.UUID(str(n)) for n in arguments.pop("pinned_notes", None) or []]
     # 带着摘要另开会话（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2，复用清空上下文）：发到 continue_from
     continue_from = arguments.pop("continue_from", None)
     if continue_from is not None:
@@ -307,6 +308,27 @@ async def _forward(
             raise ToolCallError(problem.code, problem.message) from None
         if references is not None:
             arguments["references"] = references.items
+    # 固定带着的参考资料（6.3）：只在新建会话时
+    pinned: memory.References | None = None
+    if pinned_ids:
+        if tool != "llm_bridge_session_create" and create is None:
+            raise ToolCallError(
+                "VALIDATION_FAILED", "pinned_notes 只在新建会话时用：已有的会话不能再加"
+            )
+        try:
+            pinned = await memory.build(
+                db,
+                settings,
+                instance.workspace_id,
+                pinned_ids,
+                instance=instance,
+                limit=memory.PINNED_MAX_NOTES,
+                max_chars=memory.PINNED_MAX_CHARS,
+            )
+        except memory.ReferenceProblem as problem:
+            raise ToolCallError(problem.code, problem.message) from None
+        if pinned is not None:
+            (create if create is not None else arguments)["pinned"] = pinned.items
     bridges = await _candidates(service, instance, grant)
     source = await _source(db, instance) if tool in WRITE_TOOL_NAMES else None
     # 平台的限制一并带给会话桥：发送、取回合、读会话这些调用不带 platform 参数，
@@ -359,12 +381,15 @@ async def _forward(
         data["continued"] = {
             "summary_turn_id": continued.get("summary_turn_id"),
             "handoff_turn_id": continued.get("handoff_turn_id"),
+            "summary_from": continued.get("summary_from") or "asked",
         }
         # 老的上下文到这里告一段落：整理一次会话纪要（5.2 的时机之一；连不上就算了）
         await digests.write_for(db, settings, runtime, uuid.UUID(bridge_id), str(continue_from))
     if references is not None:
         data["knowledge_notes"] = references.note_ids
         data["knowledge_truncated"] = references.truncated
+    if pinned is not None:
+        data["pinned_notes"] = pinned.note_ids
     await _memory_hints(db, settings, instance, tool, bridge_id, data, create, arguments)
     if tool in ("llm_bridge_send", "llm_bridge_turn_get") and max_chars:
         _trim_result(data, int(max_chars), int(result_offset))
@@ -620,7 +645,7 @@ async def run(
             link=_session_link(bridge_id, data.get("session_id"), data.get("turn_id")),
             key=str(data.get("turn_id")),
         )
-    if spec.name == "llm_bridge_send" and output.data.get("knowledge_notes"):
+    if output.data.get("knowledge_notes") or output.data.get("pinned_notes"):
         # 知识库的内容离开了工作台：记下带了哪几篇、发到哪个平台的哪个会话、谁挑的（6.2、第 7 节）
         await AuditTrail(service.db, service.settings).record(
             "llm_bridge.knowledge_attached",
@@ -633,7 +658,8 @@ async def run(
                 "instance_id": str(current.id),
                 "bridge": output.bridge,
                 "platform": output.data.get("platform"),
-                "notes": output.data.get("knowledge_notes"),
+                "notes": output.data.get("knowledge_notes") or output.data.get("pinned_notes"),
+                "pinned": bool(output.data.get("pinned_notes")),
                 "picked_by": "agent",
                 **_result_ref(bridge_id, output.data),
             },

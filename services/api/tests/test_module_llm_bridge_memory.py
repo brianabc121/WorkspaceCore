@@ -399,7 +399,8 @@ async def test_chat_compacts_and_continues_with_a_summary(rig: Rig) -> None:  # 
 
 async def test_agent_compacts_and_continues_from_a_session(rig: Rig) -> None:  # noqa: F811
     """智能体：llm_bridge_session_compact（直接执行、记执行记录和审计）；
-    llm_bridge_send 的 continue_from：先要摘要、清空、发出摘要，这条消息排在后面，会话还是同一个。"""
+    llm_bridge_send 的 continue_from：先要摘要、清空、发出摘要，这条消息排在后面，
+    会话还是同一个。"""
     env = rig.env
     token = await rig.agent("openclaw-1", can_write=True)
     session = ok(await agent_send(env, token, platform="claude", text="第一问"))["session_id"]
@@ -441,3 +442,110 @@ async def test_autocompact_settings_round_trip(rig: Rig) -> None:  # noqa: F811
         "PUT", f"/bridges/{rig.bridge_id}/settings", json={"autocompact_claude_percent": 101}
     )
     assert bad.status_code == 422
+
+
+# ------------------------------------------------------ 钩子与固定带着的参考资料（4.3、6.3）
+
+
+def test_platform_summary_is_split_into_the_digest_sections() -> None:
+    """平台压缩时写的摘要按四栏拆开；拆不开整段放进“结论和决定”；像有密钥的不用。"""
+    text = "## 结论和决定\n- 先备份再升级\n## 没解决的问题\n- 回滚脚本还没写\n后续要做的：写回滚"
+    decided, open_items, source = digests.platform_summary(
+        [{"at": 1_800_000_000, "trigger": "auto", "summary": text}]
+    )
+    assert decided == "- 先备份再升级" and open_items == "- 回滚脚本还没写"
+    assert "平台压缩上下文时写的摘要（自动压缩" in source
+    plain, nothing, _ = digests.platform_summary([{"summary": "随便写的一段"}])
+    assert (plain, nothing) == ("随便写的一段", "")
+    secret = "ghp_" + "a" * 36
+    assert digests.platform_summary([{"summary": f"令牌 {secret}"}]) == ("", "", "")
+    assert digests.platform_summary([]) == ("", "", "")
+
+
+async def test_hooks_put_the_platform_summary_into_the_digest(rig: Rig) -> None:  # noqa: F811
+    """管理器设置里打开钩子（默认关）：平台压缩时写的摘要并进纪要的“结论和决定”“没解决的问题”。"""
+    env = rig.env
+    status = (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).json()
+    assert status["settings"]["hooks_enabled"] is False
+    on = await rig.api("PUT", f"/bridges/{rig.bridge_id}/settings", json={"hooks_enabled": True})
+    assert on.status_code == 200 and on.json()["hooks_enabled"] is True
+    token = await rig.agent("openclaw-1", can_write=True)
+    session = ok(await agent_send(env, token, platform="claude", text="部署方案"))["session_id"]
+    for text in ("第二问", "compact"):
+        ok(await agent_send(env, token, session_id=session, text=text))
+    await jobs.index_tick({"sync": env.sync})
+    (item,) = (await rig.api("GET", "/digests")).json()["digests"]
+    body = (await kb(rig, "GET", f"/notes/{item['note_id']}"))["body"]
+    decided = body.split("## 结论和决定", 1)[1].split("## 没解决的问题", 1)[0]
+    unresolved = body.split("## 没解决的问题", 1)[1].split("## 涉及的文件和命令", 1)[0]
+    assert "以下摘自平台压缩上下文时写的摘要" in decided and "先备份再升级" in decided
+    assert "回滚脚本还没写" in unresolved
+    # 带着摘要另开会话：直接用平台压缩时写的摘要，不再先问一次
+    sent = ok(await agent_send(env, token, continue_from=session, text="接着做"))
+    assert sent["continued"]["summary_from"] == "compaction"
+    assert sent["continued"]["summary_turn_id"] is None
+    handoff = await wait_turn(rig, token, sent["continued"]["handoff_turn_id"])
+    assert handoff["status"] == "completed" and handoff["kind"] == "handoff"
+    # 人在聊天页上：上一次另开之后平台还没压缩过，就先在老的上下文里问一次
+    asked = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/chat/sessions/{session}/continue",
+        json={"request_id": "h1", "takeover": True},
+    )
+    assert asked.status_code == 200, asked.text
+    assert asked.json()["summary_from"] == "asked" and asked.json()["summary_turn_id"]
+
+
+async def test_pinned_notes_ride_along_with_a_new_session(rig: Rig) -> None:  # noqa: F811
+    """新建会话时固定带着的笔记：检查外发开关和读权限，整个会话一直带着；会话内容里给标题；
+    已有的会话不能再加。"""
+    env = rig.env
+    public = await space(rig, "public")
+    brief = await note(rig, public["id"], "项目约定", "接口都要幂等")
+    created = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/chat/sessions",
+        json={
+            "platform": "claude",
+            "mode": "chat",
+            "text": "开始吧",
+            "request_id": "c1",
+            "pinned_notes": [brief],
+        },
+    )
+    assert created.status_code == 201, created.text
+    session = created.json()["session"]["session_id"]
+    view = (await rig.api("GET", f"/bridges/{rig.bridge_id}/chat/sessions/{session}")).json()
+    assert view["session"]["pinned"] == [{"note_id": brief, "title": "项目约定"}]
+    fake = rig.bridge_app.state.engine.drivers["claude"]
+    assert any("接口都要幂等" in spec.pinned for spec in fake.specs)
+    assert "llm_bridge.knowledge_attached" in await actions(rig)
+    # 智能体：新建会话时带；发到已有的会话时不能加
+    token = await rig.agent("openclaw-1", can_write=True)
+    made = ok(
+        await call(
+            env,
+            token,
+            "llm_bridge_session_create",
+            {"platform": "claude", "mode": "chat", "pinned_notes": [brief]},
+        )
+    )
+    assert made["pinned_notes"] == [brief] and made["pinned"][0]["title"] == "项目约定"
+    refused = await agent_send(
+        env, token, session_id=made["session_id"], text="x", pinned_notes=[brief]
+    )
+    assert tool_error(refused)["code"] == "VALIDATION_FAILED"
+    # 不允许外发的知识库：带不上
+    current = await kb(rig, "GET", f"/spaces/{public['id']}")
+    await kb(
+        rig,
+        "PATCH",
+        f"/spaces/{public['id']}",
+        json={"version": current["version"], "external_llm_allowed": False},
+    )
+    blocked = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/chat/sessions",
+        json={"platform": "claude", "mode": "chat", "pinned_notes": [brief]},
+    )
+    assert blocked.status_code == 403

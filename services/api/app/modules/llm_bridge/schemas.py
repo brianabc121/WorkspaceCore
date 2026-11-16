@@ -171,6 +171,12 @@ class LlmBridgeSettings(BaseModel):
     autocompact_codex_tokens: int | None = Field(
         default=None, description="Codex 的上下文到多少 token 时自动压缩；0 是用平台自己的"
     )
+    hooks_enabled: bool | None = Field(
+        default=None,
+        description="压缩钩子（4.3）：压缩前告诉平台要保留什么、压缩后把平台写的摘要留下来"
+        "（并进会话纪要、另开会话时直接用）。只对 Claude、CodeBuddy；没在真实账号上验证过，"
+        "默认关。旧版本的管理器没有这一项（为空）",
+    )
     platforms: list[str] = Field(
         default=list(ALL_PLATFORMS), description="这个 MCP 管理器控制的平台"
     )
@@ -192,6 +198,7 @@ class LlmBridgeSettingsPatch(_In):
     autocompact_claude_percent: int | None = Field(default=None, ge=0, le=100)
     autocompact_workbuddy_percent: int | None = Field(default=None, ge=0, le=100)
     autocompact_codex_tokens: int | None = Field(default=None, ge=0, le=10_000_000)
+    hooks_enabled: bool | None = None
     platforms: list[Platform] | None = Field(
         default=None,
         min_length=1,

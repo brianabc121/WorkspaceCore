@@ -20,7 +20,8 @@ export const fileSize = (bytes: number) => (bytes >= 1024 * 1024 ? `${(bytes / 1
 export type ChatConversation = Schema['LlmChatConversationOut']
 export type ChatEvent = Schema['LlmChatEventOut']
 export type ChatOptions = Schema['LlmChatOptionsOut']
-export type ChatCreateBody = Schema['LlmChatCreateIn']
+// 固定带着的笔记可以不填（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.3）
+export type ChatCreateBody = Omit<Schema['LlmChatCreateIn'], 'pinned_notes'> & { pinned_notes?: string[] }
 export type ChatTurn = Schema['LlmChatTurnOut']
 export type ChatQueue = Schema['LlmChatQueueOut']
 export type ChatQueueItem = Schema['LlmChatQueueItem']
@@ -144,7 +145,7 @@ export function useLlmChat(scope: string) {
       return out
     },
     async create(bridge: string, body: ChatCreateBody) {
-      const out = dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions', { params: at(bridge), body }))
+      const out = dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions', { params: at(bridge), body: { pinned_notes: [], ...body } }))
       await cache.invalidateQueries({ queryKey: key(bridge, 'sessions') })
       return out
     },
@@ -239,9 +240,9 @@ export function useLlmChat(scope: string) {
     },
     // ---- 提问前用上知识库、会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 5、6 节）----
     /** 输入框里的文字在知识库和以前的会话里找相近的（只在工作台里找，不发给任何平台） */
-    async related(bridge: string, q: string, session?: string, signal?: AbortSignal) {
+    async related(bridge: string, q: string, session?: string, signal?: AbortSignal, limit?: number) {
       return dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/chat/related', {
-        params: { ...at(bridge), query: { q: q.slice(0, 2000), ...(session ? { session_id: session } : {}) } }, signal,
+        params: { ...at(bridge), query: { q: q.slice(0, 2000), ...(session ? { session_id: session } : {}), ...(limit ? { limit } : {}) } }, signal,
       }))
     },
     useDigests: (state: Ref<string | null>, wanted: Ref<boolean>) => useQuery({
@@ -305,6 +306,8 @@ export const DIGEST_STATE: Record<string, string> = { active: '照常更新', of
 export const DIGEST_REASON: Record<string, string> = { compaction: '平台压缩了上下文', archived: '会话归档', idle: '24 小时没有新回合', continued: '带着摘要另开会话', manual: '管理员要求现在整理' }
 /** 一条消息最多带几篇笔记（和后端一致） */
 export const MAX_REFERENCES = 3
+/** 新建会话时最多固定带着几篇笔记（6.3） */
+export const MAX_PINNED = 5
 /** 特殊回合的说明（4.2）：要交接摘要、带着摘要另开、手动压缩 */
 export const TURN_KIND: Record<string, { label: string; title: string }> = {
   summary: { label: '要交接摘要', title: '带着摘要另开会话的第一步：在老的上下文里要一份交接摘要' },

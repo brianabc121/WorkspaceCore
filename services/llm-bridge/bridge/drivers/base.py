@@ -77,6 +77,10 @@ class SessionSpec:
     # 自动压缩的触发点（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）：0 是用平台自己的。
     # Claude / CodeBuddy 是上下文的百分比，Codex 是 token 数（各自官方程序的设置方式）
     autocompact: int = 0
+    # 压缩钩子（4.3，管理器设置里打开才有）：压缩前给说明、压缩后把平台写的摘要留下来
+    hooks: bool = False
+    # 固定带着的参考资料（6.3）：对话会话随系统提示带上；开发会话由 engine 写进工作目录的记忆文件
+    pinned: str = ""
 
 
 @dataclass

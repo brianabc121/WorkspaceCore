@@ -28,6 +28,9 @@ from app.modules.llm_bridge.models import LlmBridge, LlmBridgeSession
 HUMAN_MAX_NOTES = 3
 AGENT_MAX_NOTES = 5
 MAX_CHARS = 6000
+# 固定带着的参考资料（6.3）：每个回合都算钱，合计最多 4000 字，最多 5 篇
+PINNED_MAX_NOTES = 5
+PINNED_MAX_CHARS = 4000
 MAX_TOKENS = 12
 _SPLIT = re.compile(r"[\s,.;:!?()\[\]{}<>\"'`~@#$%^&*+=|\\/，。；：！？、（）【】《》“”‘’…—·]+")
 _CJK = re.compile(r"[㐀-鿿豈-﫿]+")
@@ -205,6 +208,8 @@ async def build(
     note_ids: Sequence[uuid.UUID],
     *,
     instance: AgentInstance | None = None,
+    limit: int | None = None,
+    max_chars: int = MAX_CHARS,
 ) -> References | None:
     """按挑好的笔记编号取出内容，检查后排成参考资料。没挑就是 None。
 
@@ -213,7 +218,7 @@ async def build(
     ids = list(dict.fromkeys(note_ids))
     if not ids:
         return None
-    limit = HUMAN_MAX_NOTES if instance is None else AGENT_MAX_NOTES
+    limit = limit or (HUMAN_MAX_NOTES if instance is None else AGENT_MAX_NOTES)
     if len(ids) > limit:
         raise ReferenceProblem("VALIDATION_FAILED", f"一条消息最多带 {limit} 篇笔记")
     rows = {
@@ -250,7 +255,7 @@ async def build(
                 f"知识库「{space.name}」设置成不允许发给外部大模型平台，《{note.title}》不能带上",
             )
         picked.append(found)
-    budget, truncated, items = MAX_CHARS, False, []
+    budget, truncated, items = max_chars, False, []
     for note, _ in picked:
         body = note.body.strip()
         if len(body) > budget:

@@ -50,6 +50,13 @@ class SessionCreateInput(ChannelInput):
         description="幂等号（建议带）：开发会话要先克隆仓库，可能等不到结果；"
         "用同一个 request_id 重试得到的是同一个会话，不会建出两个",
     )
+    pinned_notes: list[UUID] = Field(
+        default=[],
+        max_length=5,
+        description="固定带着的知识库笔记编号（最多 5 篇、合计 4000 字；只能带你读得到、"
+        "所在知识库允许发给外部平台的）：整个会话一直带着，开发会话写进工作目录的记忆文件"
+        "（压缩后官方程序会重新读），对话会话随系统提示带上。适合项目简报、约定、接口说明",
+    )
 
 
 _MAX_CHARS = Field(
@@ -79,6 +86,11 @@ class SendInput(_Input):
         default=None, max_length=60, description="新建开发会话用的环境编号"
     )
     title: str | None = Field(default=None, max_length=120, description="新建会话的标题")
+    pinned_notes: list[UUID] = Field(
+        default=[],
+        max_length=5,
+        description="新建会话时固定带着的知识库笔记编号（见 llm_bridge_session_create）",
+    )
     text: str = Field(min_length=1, max_length=100_000, description="要发送的消息")
     notify: bool = Field(
         default=False,

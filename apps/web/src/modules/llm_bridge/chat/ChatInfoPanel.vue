@@ -51,6 +51,10 @@ const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
       <dt>开始</dt><dd>{{ seconds(session.created_at) }}</dd>
       <dt>最后活动</dt><dd>{{ seconds(session.updated_at) }}</dd>
       <dt>状态</dt><dd>{{ session.status === 'archived' ? '已归档' : session.busy ? '正在回答' : '进行中' }}</dd>
+      <template v-if="session.pinned?.length">
+        <dt>固定带着</dt>
+        <dd><span v-for="p in session.pinned" :key="p.note_id" class="lc-pinned-item">《{{ p.title }}》</span><span class="lc-sub">新建会话时选的笔记，整个会话一直带着</span></dd>
+      </template>
       <template v-if="session.context && session.origin !== 'external'">
         <dt>上下文</dt>
         <dd>

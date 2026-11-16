@@ -43,6 +43,10 @@ type AutoKey = (typeof AUTOCOMPACT)[number]['key']
 const auto = reactive<Record<AutoKey, string>>({ autocompact_claude_percent: '', autocompact_workbuddy_percent: '', autocompact_codex_tokens: '' })
 watch(settings, value => { if (value) for (const f of AUTOCOMPACT) auto[f.key] = value[f.key] == null ? '' : String(value[f.key]) }, { immediate: true })
 const autoFields = computed(() => AUTOCOMPACT.filter(f => settings.value?.[f.key] != null))
+// 压缩时的钩子（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.3）：默认关；旧版本的管理器没有（为空）就不显示
+const hooks = ref(false)
+watch(settings, value => { hooks.value = !!value?.hooks_enabled }, { immediate: true })
+const hasHooks = computed(() => settings.value?.hooks_enabled != null)
 // 旧版本的管理器没有“自动继续”：那三项不显示也不提交
 const hasResume = computed(() => !!settings.value?.resume_text)
 const fields = computed(() => FIELDS.filter(f => f.key !== 'auto_resume_max' || hasResume.value))
@@ -69,6 +73,7 @@ async function save() {
     if (!String(auto[f.key]).trim() || !Number.isInteger(n) || n < f.min || n > f.max) { error.value = `「${f.label}」要填 ${f.min}–${f.max} 之间的整数。`; notice.value = ''; return }
     if (n !== settings.value?.[f.key]) body[f.key] = n
   }
+  if (hasHooks.value && hooks.value !== settings.value?.hooks_enabled) body.hooks_enabled = hooks.value
   busy.value = true; error.value = notice.value = ''
   try { await props.api.saveSettings(props.bridge.id, body); notice.value = '设置已保存。' } catch (e) { error.value = bridgeError(e) } finally { busy.value = false }
 }
@@ -113,6 +118,11 @@ async function save() {
           <input :id="`lb-set-${f.key}`" v-model="auto[f.key]" type="number" inputmode="numeric" step="1" :min="f.min" :max="f.max" />
           <p class="form-help">{{ f.help }}</p>
         </div>
+      </fieldset>
+      <fieldset v-if="hasHooks" class="lb-checks" :disabled="!canWrite || busy" aria-label="压缩时的钩子">
+        <legend>压缩时的钩子</legend>
+        <label class="check-field"><input v-model="hooks" type="checkbox" />Claude 和 CodeBuddy 压缩上下文时，提醒它保留要紧的内容，并把它写的摘要记下来</label>
+        <p class="form-help">默认关。打开后：压缩前告诉平台要保留目标、做过的决定、没解决的问题和改过的文件，摘要按这四栏写；压缩后把平台写的摘要存在管理器里，用在会话纪要和“带着摘要另开会话”上（不用再让模型写一遍）。只对之后开始的回合生效；用真实账号核对前建议先在一个管理器上试。Codex 不支持。</p>
       </fieldset>
       <p class="form-help">Claude 订阅登录的风险确认：{{ settings.claude_subscription_ack ? '已确认' : '未确认（在“平台与账号”里用订阅方式登录 Claude 时确认）' }}。</p>
       <div v-if="canWrite" class="lb-actions"><button type="submit" class="primary-button" :disabled="busy">{{ busy ? '正在保存…' : '保存设置' }}</button></div>

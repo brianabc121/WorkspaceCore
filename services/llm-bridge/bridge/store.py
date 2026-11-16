@@ -273,6 +273,21 @@ class Store:
         turn_columns = {row["name"] for row in self._db.execute("PRAGMA table_info(turns)")}
         if "kind" not in turn_columns:
             self._db.execute("ALTER TABLE turns ADD COLUMN kind TEXT")
+        # 平台压缩时写的摘要（第 4 期，压缩后钩子留下的；4.3）
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS compaction_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+                native_id TEXT,
+                trigger TEXT,
+                text TEXT NOT NULL,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS compaction_summaries_session
+                ON compaction_summaries (session_id, id);
+            """
+        )
 
     def _migrate_messages(self) -> None:
         """会话内容落库（T-0236 第二步）：messages / attachments；已有的回合和事件回填进去。"""
@@ -641,6 +656,25 @@ class Store:
             (session_id, slot, native_id, turns, by, at),
         )
         return {"id": cursor.lastrowid, "turns": turns, "by": by, "at": at}
+
+    def add_compaction_summary(
+        self, session_id: str, native_id: str, at: float, trigger: str | None, summary: str
+    ) -> None:
+        self._exec(
+            "INSERT INTO compaction_summaries (session_id, native_id, trigger, text, at) "
+            "VALUES (?,?,?,?,?)",
+            (session_id, native_id, trigger, summary, at),
+        )
+
+    def compaction_summaries(self, session_id: str, limit: int = 10) -> list[Row]:
+        """平台压缩时写的摘要，最新的在前。"""
+        return self._all(
+            "SELECT * FROM compaction_summaries WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+        )
+
+    def compaction_summary(self, summary_id: int) -> Row | None:
+        return self._one("SELECT * FROM compaction_summaries WHERE id = ?", (summary_id,))
 
     def context_resets(self, session_id: str) -> list[Row]:
         """这个会话清空过几次上下文：每次谁清的、什么时候、清空前那段有几个回合（按先后）。"""
@@ -1057,7 +1091,7 @@ class Store:
 
     def purge_session(self, session_id: str) -> None:
         """清掉一个会话的对话内容：提问、回答、过程、事件、附件。会话、回合的状态和用量留着。"""
-        for table in ("messages", "events", "attachments"):
+        for table in ("messages", "events", "attachments", "compaction_summaries"):
             self._exec(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))  # noqa: S608
         self._exec(
             "UPDATE turns SET text = '', result_text = NULL, error_message = NULL "

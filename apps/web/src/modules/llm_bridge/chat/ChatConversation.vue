@@ -175,12 +175,14 @@ async function shapeContext(action: keyof typeof CONTEXT_ACTIONS) {
   shaping.value = action
   const run = (takeover: boolean) => (action === 'compact' ? props.chat.compact(props.bridge.id, props.sessionId, '', takeover) : props.chat.continueWithSummary(props.bridge.id, props.sessionId, takeover))
   try {
-    try { await run(foreign.value) }
+    let out: Awaited<ReturnType<typeof run>>
+    try { out = await run(foreign.value) }
     catch (e) {
       if (!needsTakeover(e) || !window.confirm(takeoverText.value)) throw e
-      await run(true)
+      out = await run(true)
     }
-    sendNotice.value = text.done
+    // 平台压缩时写过摘要（打开了压缩钩子，4.3）：直接用它，不再先问一次
+    sendNotice.value = out && 'summary_from' in out && out.summary_from === 'compaction' ? '已排上“带着摘要另开会话”：直接用平台压缩时写的摘要，清空上下文后发出（不再先问一次）。' : text.done
     stick = true
     await reload()
     void poll()

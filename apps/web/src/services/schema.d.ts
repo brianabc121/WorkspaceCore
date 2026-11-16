@@ -12829,6 +12829,11 @@ export interface components {
              * @default true
              */
             digest_follow_retention: boolean;
+            /**
+             * Hooks Enabled
+             * @description 压缩钩子（4.3）：压缩前告诉平台要保留什么、压缩后把平台写的摘要留下来（并进会话纪要、另开会话时直接用）。只对 Claude、CodeBuddy；没在真实账号上验证过，默认关。旧版本的管理器没有这一项（为空）
+             */
+            hooks_enabled?: boolean | null;
             /** Max Text Chars */
             max_text_chars: number;
             /**
@@ -12888,6 +12893,8 @@ export interface components {
             digest_enabled?: boolean | null;
             /** Digest Follow Retention */
             digest_follow_retention?: boolean | null;
+            /** Hooks Enabled */
+            hooks_enabled?: boolean | null;
             /** Max Text Chars */
             max_text_chars?: number | null;
             /** Min Start Interval Seconds */
@@ -13202,10 +13209,17 @@ export interface components {
             handoff_turn_id?: string | null;
             session: components["schemas"]["LlmChatSessionOut"];
             /**
-             * Summary Turn Id
-             * @description 在老的上下文里要摘要的那一回合
+             * Summary From
+             * @description 摘要从哪来：asked 是先在老的上下文里问一次；compaction 是直接用平台压缩时写的（打开了压缩钩子才会有，docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.3）
+             * @default asked
+             * @enum {string}
              */
-            summary_turn_id: string;
+            summary_from: "asked" | "compaction";
+            /**
+             * Summary Turn Id
+             * @description 在老的上下文里要摘要的那一回合；直接用了平台压缩时写的摘要时为空
+             */
+            summary_turn_id?: string | null;
         };
         /** LlmChatConversationOut */
         LlmChatConversationOut: {
@@ -13237,6 +13251,12 @@ export interface components {
             mode: "chat" | "dev";
             /** Model */
             model?: string | null;
+            /**
+             * Pinned Notes
+             * @description 固定带着的知识库笔记（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.3，最多 5 篇、合计 4000 字）：整个会话一直带着——开发会话写进工作目录的记忆文件，对话会话随系统提示带上。所在知识库不允许发给外部平台时 403
+             * @default []
+             */
+            pinned_notes: string[];
             /**
              * Platform
              * @enum {string}
@@ -13699,6 +13719,18 @@ export interface components {
              */
             models_error: string;
         };
+        /**
+         * LlmChatPinnedOut
+         * @description 新建会话时固定带着的一篇笔记（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.3）。
+         *
+         *     只给标题，正文只发给模型。
+         */
+        LlmChatPinnedOut: {
+            /** Note Id */
+            note_id: string;
+            /** Title */
+            title: string;
+        };
         /** LlmChatQueueEditIn */
         LlmChatQueueEditIn: {
             /** Text */
@@ -13874,6 +13906,12 @@ export interface components {
              * @enum {string}
              */
             owner_kind: "me" | "user" | "agent" | "external";
+            /**
+             * Pinned
+             * @description 固定带着的参考资料（只有标题）；只在会话内容里给出
+             * @default []
+             */
+            pinned: components["schemas"]["LlmChatPinnedOut"][];
             /** Platform */
             platform: string;
             /**

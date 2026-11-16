@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from tests.conftest import Bridge
@@ -265,3 +266,78 @@ async def test_autocompact_threshold_is_passed_on_and_moves_the_warning(
         sent = await _send(bridge, agent, session, f"第 {i} 问", f"r{i}")
     assert bridge.fake.specs[-1].autocompact == 60
     assert sent["context"]["warn_percent"] == 50 and sent["context"]["near_limit"] is True
+
+
+# ---- 第 4 期：压缩钩子、固定带着的参考资料（4.3、6.3）----
+async def test_hooks_keep_the_platform_summary_for_digests_and_hand_offs(bridge: Bridge) -> None:
+    """钩子默认关；打开后平台压缩时写的摘要留下来：纪要的素材里有，带着摘要另开会话时直接用它
+    （不再花钱问）。会话内容按保留期清掉时摘要一起清。"""
+    agent = "openclaw-1"
+    session = await _session(bridge, agent)
+    await _send(bridge, agent, session, "第一问", "r1")
+    await _send(bridge, agent, session, "compact", "r2")
+    assert bridge.engine.settings_view()["hooks_enabled"] is False
+    material = (await bridge.admin("GET", f"/admin/sessions/{session}/digest")).json()
+    assert material["summaries"] == []
+    changed = await bridge.admin("PUT", "/admin/settings", json={"hooks_enabled": True})
+    assert changed.status_code == 200
+    await _send(bridge, agent, session, "compact", "r3")
+    material = (await bridge.admin("GET", f"/admin/sessions/{session}/digest")).json()
+    (summary,) = material["summaries"]
+    assert summary["trigger"] == "auto" and summary["summary"].startswith("结论和决定：先备份")
+    started = await bridge.tool(
+        agent, "llm_session_continue", {"session_id": session, "request_id": "c1"}
+    )
+    assert started["summary_from"] == "compaction" and started["summary_turn_id"] is None
+    await _done(bridge, agent, started["handoff_turn_id"])
+    native = bridge.engine.store.get_session(session)["native_id"]
+    first = bridge.fake.history[native][0].text
+    assert "（平台压缩上下文时写的摘要）" in first and "回滚脚本还没写" in first
+    # 保留期清内容时，摘要也清掉
+    bridge.engine.store.purge_session(session)
+    assert bridge.engine.store.compaction_summaries(session) == []
+
+
+async def test_pinned_references_ride_along_for_the_whole_session(bridge: Bridge) -> None:
+    """固定带着的参考资料：对话会话每个回合随系统提示带上；开发会话写进工作目录的记忆文件
+    （有标记的一段，原来的内容不动）；会话信息里只给标题；合计最多 4000 字。"""
+    agent = "openclaw-1"
+    refs = [{"note_id": "n1", "title": "部署约定", "label": "人已确认", "text": "先备份"}]
+    chat = await _session(bridge, agent, pinned=refs)
+    await _send(bridge, agent, chat, "怎么部署", "r1")
+    pinned = bridge.fake.specs[-1].pinned
+    assert pinned.startswith('<参考资料 来源="工作台知识库" 用途="整个会话一直带着"')
+    assert "《部署约定》（人已确认）\n先备份" in pinned
+    view = (await bridge.tool(agent, "llm_session_get", {"session_id": chat}))["session"]
+    assert view["pinned"] == [{"note_id": "n1", "title": "部署约定"}]
+    assert "pinned" not in view["options"]
+    long = [{"title": f"长文 {i}", "text": "字" * 3000} for i in range(2)]
+    other = await _session(bridge, agent, pinned=long)
+    await _send(bridge, agent, other, "你好", "r2")
+    assert "（后面的内容超过上限，没有带上）" in bridge.fake.specs[-1].pinned
+    assert len(bridge.fake.specs[-1].pinned) < 4000 + 300
+    # 开发会话：写进记忆文件，原来的内容留着
+    env = (
+        await bridge.admin(
+            "POST",
+            "/admin/environments",
+            json={"platform": "fake", "mode": "dev", "name": "空目录"},
+        )
+    ).json()
+    dev = await bridge.tool(
+        agent,
+        "llm_session_create",
+        {"platform": "fake", "mode": "dev", "environment": env["id"], "pinned": refs},
+    )
+    memory = Path(bridge.engine.store.get_session(dev["session_id"])["workdir"]) / "AGENTS.md"
+    text = memory.read_text()
+    assert "工作台固定带着的参考资料：开始" in text and "先备份" in text
+    await _send(bridge, agent, dev["session_id"], "你好", "r3")
+    assert bridge.fake.specs[-1].pinned == ""  # 开发会话不重复放进系统提示
+    from bridge.engine import write_pinned
+
+    memory.write_text("# 原来的说明\n\n" + text + "\n后面的说明\n")
+    write_pinned(memory, "新的资料")
+    updated = memory.read_text()
+    assert updated.startswith("# 原来的说明") and "新的资料" in updated and "先备份" not in updated
+    assert updated.rstrip().endswith("后面的说明")

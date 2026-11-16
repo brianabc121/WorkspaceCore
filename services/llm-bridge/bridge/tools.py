@@ -24,6 +24,19 @@ class ChannelInput(_Input):
     mode: ModeName = Field(description="模式：chat（聊天）/ dev（开发）/ cloud（云端）")
 
 
+class ReferenceInput(_Input):
+    """随消息带上的一篇参考资料（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）：由工作台从知识库取出并检查过权限。"""
+
+    note_id: str = Field(
+        default="", max_length=60, description="知识库笔记的编号（显示“参考了”用）"
+    )
+    title: str = Field(min_length=1, max_length=200, description="笔记标题")
+    label: str = Field(
+        default="", max_length=80, description="来源说明，例如“人已确认 · 2026-11-10 更新”"
+    )
+    text: str = Field(default="", max_length=8000, description="正文（可能已经截断）")
+
+
 class SessionCreateInput(ChannelInput):
     model: str | None = Field(default=None, description="模型；不填用默认。可选值见 llm_models")
     environment: str | None = Field(
@@ -37,19 +50,13 @@ class SessionCreateInput(ChannelInput):
         max_length=100,
         description="幂等号（建议带）：没等到结果时用同一个重试，得到的是同一个会话，不会建出两个",
     )
-
-
-class ReferenceInput(_Input):
-    """随消息带上的一篇参考资料（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）：由工作台从知识库取出并检查过权限。"""
-
-    note_id: str = Field(
-        default="", max_length=60, description="知识库笔记的编号（显示“参考了”用）"
+    pinned: list[ReferenceInput] = Field(
+        default=[],
+        max_length=5,
+        description="固定带着的参考资料（由工作台从知识库取出）：整个会话都带着，合计最多 4000 字。"
+        "开发会话写进工作目录里官方程序会自动读的记忆文件（压缩后程序会重新读）；"
+        "对话会话随系统提示带上",
     )
-    title: str = Field(min_length=1, max_length=200, description="笔记标题")
-    label: str = Field(
-        default="", max_length=80, description="来源说明，例如“人已确认 · 2026-11-10 更新”"
-    )
-    text: str = Field(default="", max_length=8000, description="正文（可能已经截断）")
 
 
 class SendInput(_Input):

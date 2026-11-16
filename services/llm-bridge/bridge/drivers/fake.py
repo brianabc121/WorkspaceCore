@@ -58,6 +58,8 @@ class FakeDriver(Driver):
         self.specs: list[SessionSpec] = []
         # 以这段文字开头的提问都失败（测试“没写出摘要”这类情况）
         self.fail_prefix: str | None = None
+        # 压缩后钩子留下的摘要（打开了钩子才有）：原生会话号 → 摘要
+        self.summaries: dict[str, list[dict[str, Any]]] = {}
 
     def supports(self, mode: Mode) -> bool:
         return mode in ("chat", "dev")
@@ -163,6 +165,7 @@ class FakeDriver(Driver):
                     "compacted", {"trigger": trigger, "pre_tokens": 8000, "post_tokens": 500}
                 )
                 self.history[spec.native_id] = []
+                self._summarize(spec, trigger)
             history = self.history.setdefault(spec.native_id, [])
             history += [
                 Message("user", text, time.time()),
@@ -197,7 +200,22 @@ class FakeDriver(Driver):
             return TurnOutcome(text="")
         await sink("compacted", {"trigger": "manual", "pre_tokens": 8000, "post_tokens": 400})
         self.history[spec.native_id or ""] = []
+        self._summarize(spec, "manual")
         return TurnOutcome(text="", compactions=1, context=ContextUsage(400, 10000))
+
+    def _summarize(self, spec: SessionSpec, trigger: str) -> None:
+        """模拟压缩后钩子：打开了钩子时留下平台写的摘要（按四栏写）。"""
+        if spec.hooks:
+            self.summaries.setdefault(spec.native_id or "", []).append(
+                {
+                    "at": time.time(),
+                    "trigger": trigger,
+                    "summary": "结论和决定：先备份再升级\n没解决的问题：回滚脚本还没写",
+                }
+            )
+
+    def take_summaries(self, native_id: str) -> list[dict[str, Any]]:
+        return self.summaries.pop(native_id, [])
 
     async def quota(self) -> list[dict[str, Any]] | None:
         if not self.can_query_quota:

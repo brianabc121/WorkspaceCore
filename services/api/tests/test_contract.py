@@ -969,7 +969,7 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "llm_bridge_send",
             "llm_bridge_turn_cancel",
             "llm_bridge_session_archive",
-            # 手动压缩上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2；人类 2026-11-16 同意补进例外九）
+            # 手动压缩上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2；人类 2026-11-16 同意）
             "llm_bridge_session_compact",
         },
     }

@@ -364,7 +364,9 @@ class CodexDriver(Driver):
         if spec.model:
             params["model"] = spec.model
         if spec.mode == "chat":
-            params["developerInstructions"] = CHAT_INSTRUCTIONS
+            # 固定带着的参考资料（6.3）放在开发者说明里：随线程保存，压缩不会把它压掉
+            pinned = f"\n\n{spec.pinned}" if spec.pinned else ""
+            params["developerInstructions"] = CHAT_INSTRUCTIONS + pinned
         if self._config(spec):
             params["config"] = self._config(spec)
         result = await self._call("thread/start", params)

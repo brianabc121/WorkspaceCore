@@ -580,3 +580,62 @@ async def test_codex_manual_compaction_and_autocompact_config(
     plain_id = await codex.create(plain)
     state = json.loads((tmp_path / "home" / "fake-state.json").read_text())
     assert state["threads"][plain_id]["config"] is None
+
+
+# ---- 第 4 期：压缩钩子、固定带着的参考资料（4.3、6.3）----
+def test_hook_script_says_what_to_keep_and_leaves_the_summary(tmp_path: Path) -> None:
+    """钩子脚本：压缩前输出固定的说明；压缩后把摘要写到管理器能读的地方；出错安静退出。"""
+    import subprocess
+
+    from bridge import hooks
+
+    script = hooks.install(tmp_path)
+    run = [sys.executable, "-I", str(script)]
+    before = subprocess.run([*run, "pre_compact"], input="{}", capture_output=True, text=True)
+    assert before.returncode == 0 and before.stdout == hooks.PRESERVE
+    payload = {"session_id": "abc-1", "trigger": "auto", "compact_summary": "结论和决定：A"}
+    env = {"BRIDGE_HOOK_DIR": str(tmp_path / "hooks")}
+    after = subprocess.run(
+        [*run, "post_compact"], input=json.dumps(payload), capture_output=True, text=True, env=env
+    )
+    assert after.returncode == 0 and after.stdout == ""
+    line = json.loads((tmp_path / "hooks" / "summaries" / "abc-1.jsonl").read_text())
+    assert (line["trigger"], line["summary"]) == ("auto", "结论和决定：A")
+    # 会话号不合法、输入不是 JSON：什么也不写，也不让压缩失败
+    for bad in ('{"session_id": "../x", "compact_summary": "y"}', "not json"):
+        done = subprocess.run(
+            [*run, "post_compact"], input=bad, capture_output=True, text=True, env=env
+        )
+        assert done.returncode == 0
+    assert sorted(p.name for p in (tmp_path / "hooks" / "summaries").iterdir()) == ["abc-1.jsonl"]
+
+
+async def test_cli_hooks_hand_back_the_platform_summary(tmp_path: Path) -> None:
+    """打开钩子：按回合经 --settings 带上；压缩时官方程序跑钩子，
+    摘要留给管理器取走（取一次就没了）。
+    对话会话的固定参考资料跟着系统提示带上。"""
+    from bridge import hooks
+
+    driver = _cli(tmp_path)
+    driver.hook_script = hooks.install(tmp_path / "data")
+    driver.hook_dir = driver.hook_script.parent
+    await driver.login("api_key", {"api_key": "k"})
+    spec = SessionSpec(
+        mode="chat",
+        model=None,
+        workdir=tmp_path / "w",
+        native_id=await driver.create(None),  # type: ignore[arg-type]
+        pinned="《部署约定》先备份",
+    )
+    args = driver._args(spec)
+    assert "--settings" not in args
+    assert args[args.index("--append-system-prompt") + 1].endswith("\n\n《部署约定》先备份")
+    with_hooks = replace(spec, hooks=True)
+    assert "--settings" in driver._args(with_hooks)
+    await driver.compact(with_hooks, "", Sink())
+    (summary,) = driver.take_summaries(spec.native_id or "")
+    assert summary["trigger"] == "manual" and summary["summary"].startswith(
+        "结论和决定：先备份再升级"
+    )
+    assert hooks.PRESERVE in summary["summary"]  # 压缩前的说明并进了压缩说明
+    assert driver.take_summaries(spec.native_id or "") == []
