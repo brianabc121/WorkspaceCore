@@ -532,7 +532,7 @@ sudo bash scripts/deploy.sh connect
 工作台不再生成、安装或使用 SSH 密钥登录 OpenClaw 服务器（T-0179，`docs/decisions/2026-11-09-agent-server-password-auth.md`）。**前提**：
 
 - 第 ② 步的外网接入入口已经配置（一键配置即可）；
-- OpenClaw 服务器：Ubuntu 22.04 / 24.04 或 Debian 12（amd64、arm64）；已经装好 Docker 与 Compose 插件的其他发行版也可以；
+- OpenClaw 服务器：Ubuntu 20.04 / 22.04 / 24.04 或 Debian 11 / 12（amd64、arm64）；初始化按系统安装已核验的固定 Docker / Compose 版本（旧系统的版本见 `docs/decisions/2026-11-16-docker-legacy-init.md`）；已经装好 Docker 与 Compose 插件的其他发行版也可以；
 - 工作台服务器能连到它的 SSH 端口（云服务器的安全组要放行，来源可以只填工作台服务器的公网 IP）；
 - 服务器开着密码登录（`PasswordAuthentication yes`）；账号是 root，或者能**用同一个登录密码 sudo** 的普通账号
   （需要另外的 sudo 密码或交互式验证（MFA）的服务器不支持自动初始化，先手动装好 Docker 并把账号加入 docker 组）；
