@@ -25,7 +25,7 @@ sha256 `2c0f41d55f9369c95a0aa83c64f05e905c9a48df353bd677765a6f3d4e3386a2`）。�
 | [`RUNNER_PLAN.md`](RUNNER_PLAN.md) | 运行服务器方案（2026-11-06，T-0134）：单独一台高配服务器给所有智能体跑容器；模板 / 环境 / 运行三层，一次性 / 会话 / 常驻三类容器，空闲分档回收、按重建耗时打分、删除条件、归档后按配置记录快速重建；runner-agent、MCP 工具与管理页面 | 新增，**已采纳**（人类 2026-11-06 决定 D1、D2、D11，其余按推荐；T-0135 ~ T-0141） |
 | [`LLM_BRIDGE_PLAN.md`](LLM_BRIDGE_PLAN.md) | 大模型会话桥方案（2026-11-13，T-0226）：一个 Docker 部署的 MCP 服务，让多个 OpenClaw 向 ChatGPT / Codex / Claude / WorkBuddy 发指令；会话与回合、各平台驱动、开发环境、一座桥一个账号；附 GitHub 同类开源方案调研 | 新增，**已批准，实施中**（人类 2026-11-13 要求按方案全面落实，D1 ~ D9 按推荐；T-0227 起） |
 | [`LLM_BRIDGE_IMPROVE_PLAN.md`](LLM_BRIDGE_IMPROVE_PLAN.md) | 大模型客户端改进方案（2026-11-15，T-0246）：从智能体调用、管理员回溯、人日常聊天三条链路看现有设计的问题；先修正 7 处、再做共用的底座（回合状态、事件流、出处、会话索引）、再分链路改进；附业内做法的来源 | 新增，**已批准，实施中**（人类 2026-11-15 要求全面落实；T-0247 起） |
-| [`LLM_BRIDGE_MEMORY_PLAN.md`](LLM_BRIDGE_MEMORY_PLAN.md) | 大模型客户端：上下文压缩与知识库结合的优化方案（2026-11-16，T-0255）：三个官方程序自带的压缩能力（锁定版本核对）、业内做法、看得见与管得了压缩、会话纪要进知识库、提问前挑选笔记带上；第 9 节有 6 件事等人类决定 | 新增，**提案** |
+| [`LLM_BRIDGE_MEMORY_PLAN.md`](LLM_BRIDGE_MEMORY_PLAN.md) | 大模型客户端：上下文压缩与知识库结合的优化方案（2026-11-16，T-0255）：三个官方程序自带的压缩能力（锁定版本核对）、业内做法、看得见与管得了压缩、会话纪要进知识库、提问前挑选笔记带上；人类 2026-11-16 已答复（会话纪要默认自动写入、知识库默认允许外发、其余按推荐） | 新增，**已定，待实施** |
 | [`package/README_V2.md`](package/README_V2.md) | 资料包说明 | 新增 |
 | [`package/AGENT_ARCHITECTURE_V2.md`](package/AGENT_ARCHITECTURE_V2.md) | Agent Control Plane 架构增补规格（V2 的主体） | 新增 |
 | [`package/AGENT_TASKS_V2.md`](package/AGENT_TASKS_V2.md) | V2-S0 ~ V2-S7 任务清单 | 新增 |
