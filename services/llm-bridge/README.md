@@ -44,7 +44,7 @@ BRIDGE_DATA_DIR=./.data BRIDGE_ADMIN_TOKEN=$(openssl rand -hex 32) BRIDGE_ENABLE
 
 | 路径 | 内容 |
 |---|---|
-| `bridge.sqlite3` | 账号登记、设置、环境、会话、回合、事件 |
+| `bridge.sqlite3` | 账号登记、设置、环境、会话、回合、事件、清空上下文的记录（`context_resets`） |
 | `home/codex`、`home/claude`、`home/codebuddy` | 各平台官方程序的登录目录和会话记录（每个平台只有一个） |
 | `secrets/` | 管理员在页面上填的 API 密钥 / 令牌（0600），只用来注入官方程序的环境变量 |
 | `work/<会话号>/` | 每个会话的工作目录；归档会话时删除 |

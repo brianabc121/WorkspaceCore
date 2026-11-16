@@ -772,7 +772,14 @@ class Engine:
                 raise from_driver(error) from error
             messages = [{"role": m.role, "text": redact(m.text), "at": m.at} for m in native]
         else:
+            # 清空过上下文的位置：一条 text=context_cleared 的记录，它之前的内容模型已经不记得
+            resets = self.store.context_resets(session_id)
             for turn in self.store.list_turns(session_id=session_id, limit=10_000):
+                while resets and resets[0]["at"] < turn["queued_at"]:
+                    reset = resets.pop(0)
+                    messages.append(
+                        {"role": "status", "text": "context_cleared", "at": reset["at"]}
+                    )
                 messages.append(
                     {
                         "role": "user",
@@ -804,6 +811,9 @@ class Engine:
                         if nxt:
                             note["next_turn_id"] = nxt
                     messages.append(note)
+            messages += [
+                {"role": "status", "text": "context_cleared", "at": reset["at"]} for reset in resets
+            ]
         total = len(messages)
         view["total"] = total
         if order == "newest":  # 从最新的开始翻页；页内仍按时间先后
@@ -1752,7 +1762,12 @@ class Engine:
             if attachment["turn_id"]:
                 key = (attachment["turn_id"], attachment["direction"])
                 files.setdefault(key, []).append(attachment_view(attachment))
+        # 清空上下文的位置（T-0255）：排在清空之后发出的第一条之前
+        resets = self.store.context_resets(session_id)
+        view["context_cleared_at"] = resets[-1]["at"] if resets else None
         for turn in self.store.list_turns(session_id=session_id, limit=10_000):
+            while resets and resets[0]["at"] < turn["queued_at"]:
+                messages.append(_cleared_view(resets.pop(0)))
             mine = by_turn.get(turn["id"], [])
             asked = next((m for m in mine if m["role"] == "user"), None)
             messages.append(
@@ -1829,6 +1844,7 @@ class Engine:
             if turn.get("source"):
                 reply["source"] = turn["source"]
             messages.append(reply)
+        messages += [_cleared_view(reset) for reset in resets]
         return {"session": view, "messages": messages, "last_event_id": last_event_id}
 
     async def session_events(self, session_id: str, after: int, wait_seconds: float) -> Row:
@@ -2186,6 +2202,70 @@ class Engine:
             self.store.add_event(session_id, None, "model", {"model": picked})
         return self.admin_session_view(self._required_session(session_id))
 
+    def _context_start(self, session_id: str) -> float:
+        """这个会话当前这段上下文从什么时候开始：最后一次清空的时间，没清空过是 0。"""
+        resets = self.store.context_resets(session_id)
+        return float(resets[-1]["at"]) if resets else 0.0
+
+    async def clear_context(
+        self, session_id: str, by: str | None = None, *, owner: str | None = None
+    ) -> Row:
+        """清空上下文（T-0255）：同一个会话换一个新的官方会话，之后的回合从零开始。
+
+        之前的回合、过程、附件和开发会话工作目录里的文件都留着，只是模型不再记得。
+        官方程序的非交互模式不执行 /clear 这类命令，而且续接同一个会话号时整段记录又会被读回来，
+        所以由管理器换会话号：命令行类平台下一回合用新的 --session-id，Codex 新开一个线程。
+        清空前的会话号记在 context_resets 里，同步官方程序的会话时不会再被登记成“官方程序里已有”。
+        """
+        session = self._required_session(session_id)
+        if owner is not None and session["caller_id"] != owner:
+            raise BridgeError("NOT_OWNER", "这不是你建的会话：确认后再清空")
+        if session["status"] != "active":
+            raise BridgeError("CONFLICT", "会话已归档，不能清空上下文")
+        if session["origin"] != "bridge":
+            raise BridgeError(
+                "NOT_SUPPORTED",
+                "官方程序里已有的会话不能在这里清空上下文：要从头开始就新建一个会话",
+            )
+        busy_message = "还有消息在排队或进行中：等它们做完或停止后再清空"
+        if session_id in self.store.busy_sessions():
+            raise BridgeError("CONFLICT", busy_message)
+        since = self._context_start(session_id)
+        turns = [
+            t
+            for t in self.store.list_turns(session_id=session_id, limit=10_000)
+            if t["queued_at"] > since
+        ]
+        if not turns:  # 上次清空之后还没有发过消息：没有可清的，什么也不做
+            return {**self.admin_session_view(session), "cleared": False}
+        self._require_platform(session["platform"])
+        driver = self._driver(session["slot"])
+        try:
+            native = await driver.create(replace(self._spec(session), native_id=None))
+        except DriverError as error:
+            raise from_driver(error) from error
+        # 新建官方会话的时候可能有人发了消息：那条消息按旧的上下文处理，这次就不清了
+        session = self._required_session(session_id)
+        if session_id in self.store.busy_sessions() or session["status"] != "active":
+            with contextlib.suppress(DriverError):
+                await driver.archive(native)
+            raise BridgeError("CONFLICT", busy_message)
+        label = " ".join(redact(by or "").split())[:120] or None
+        reset = self.store.add_context_reset(
+            session_id, session["slot"], session["native_id"], len(turns), label
+        )
+        self.store.update_session(session_id, native_id=native)
+        # 被额度打断、等着自动继续的回合：上下文已经没了，再发“继续”没有意义
+        for turn in self.store.pending_resumes(session["platform"]):
+            if turn["session_id"] == session_id:
+                self.store.update_turn(turn["id"], resume_state="skipped")
+                self.store.add_event(
+                    session_id, turn["id"], "resume_skipped", {"reason": "上下文已清空"}
+                )
+        self.store.add_event(session_id, None, "cleared", {"by": label, "turns": len(turns)})
+        refreshed = self._required_session(session_id)
+        return {**self.admin_session_view(refreshed), "cleared": True, "cleared_at": reset["at"]}
+
     # ---- 管理页用 ----
     async def overview(self) -> Row:
         enabled = self.platforms()
@@ -2287,6 +2367,17 @@ def _event_view(event: Row) -> Row:
     if event["kind"] in ("failed", "unknown") and payload.get("kind"):
         view["reason"] = payload["kind"]
     return view
+
+
+def _cleared_view(reset: Row) -> Row:
+    """会话内容里的一条分隔：在这里清空了上下文，之前的内容模型已经不记得（T-0255）。"""
+    return {
+        "role": "context_cleared",
+        "text": "",
+        "at": reset["at"],
+        "by": reset["by"],
+        "turns": reset["turns"],
+    }
 
 
 def _step(message: Row) -> Row | None:
