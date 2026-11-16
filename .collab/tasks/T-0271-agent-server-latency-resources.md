@@ -2,7 +2,7 @@
 id: T-0271
 title: 智能体服务器详情：连接格刷新并显示延迟，初始化后显示 CPU / 内存 / 硬盘与挂载盘并可一键刷新
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/amazing-faraday-6ey29e
 paths: services/api/app/domain/agent_server_resources.py,services/api/app/domain/agent_server_ssh.py,services/api/app/domain/agent_servers.py,services/api/app/models/agent.py,services/api/app/schemas/agents.py,services/api/migrations/versions/20261116_0076_agent_server_latency.py,services/api/openapi.json,services/api/tests/test_agent_server_resources_view.py,services/api/tests/test_agent_server_credentials.py,services/api/tests/test_agent_server_legacy_cleanup.py,apps/web/src/features/agents,apps/web/src/services/schema.d.ts,apps/web/tests,tests/e2e/agent_ssh_browser.cjs
@@ -48,3 +48,5 @@ SSH 资源采样（`resource_snapshot`，T-0224 的调度用）和手动刷新�
 - 2026-11-16 20:58 UTC · claude · 创建任务（owner: unassigned；编号 T-0271 由集成会话在 #235 预留）
 - 2026-11-16 20:42 UTC · human · owner unassigned → claude：人类在对话中指派：智能体服务器详情页的连接格加刷新按钮并显示延迟；初始化后显示 CPU / 内存 / 硬盘与挂载盘，并加一键刷新
 - 2026-11-16 20:42 UTC · claude · 开始任务
+- 2026-11-16 20:54 UTC · claude · 做完：后端——测试连接（与旧公钥退役）登录成功时从同一条 SSH 连接读 TCP_INFO 的往返时间，写进 agent_ssh_targets.last_connection_latency_ms（迁移 0076，CHECK 0–60000；登录失败、换地址、换密码时清空），ServerSshOut.connection_latency_ms 只在 connected 时给出；资源采样脚本追加 mounts（df -PkTl，本地 /dev 设备、按设备去重、排除 squashfs 与 /etc /proc /sys /dev 下的单文件挂载、最多 16 个、安全字符，失败为空），解析时单独校验、坏了只丢 mounts，调度字段不变；MAX_OUTPUT 8 KiB → 16 KiB；AgentServerOut.resources 是 resource_snapshot 的强类型展示视图（sample / stale / attempted_at / error，硬盘总量来自挂载盘之和，旧快照退回 Docker 数据目录分区）。前端——页头加“硬盘”格成一行六格（中等宽度 3×2、手机 2 列），连接格右上角“重新检测连接”图标、显示“延迟 N ms”（<100 绿 / <300 琥珀 / 其余红），CPU / 内存 / 硬盘优先用平台采样、没有时退回实例上报、都没有时写原因；“服务器资源”一行显示采样时间与“刷新资源”按钮，下面列出每个挂载盘；登录前提与测试结果提示带延迟；列表与部署抽屉的“系统 / 资源”也用采样。测试：后端新增 test_agent_server_resources_view.py 26 个（TCP_INFO 读取含真实回环连接、假 df / 本机 df 过滤、resources 视图各状态、刷新接口集成），连接测试 / 换密码 / 旧公钥退役加延迟断言；前端新增 agent-server-resources.test.ts 5 个，页头断言改成六格；e2e 在初始化成功后检查重新检测连接的延迟与刷新资源。本地：ruff / format / mypy（app migrations tests scripts）、export_openapi --check、alembic upgrade / check / downgrade 0075 / downgrade base / upgrade、相关后端测试 80 + 19 + 26 个通过；前端 lint、typecheck、vitest 84 个文件 905 个测试、build、check:api 通过；Vite + Playwright 截图核对 1680 / 1180 / 390 宽度，没有横向滚动。后端全量 pytest 与 CI（含真实 sshd 的浏览器验收）结果见 PR。
+- 2026-11-16 20:54 UTC · claude · status in_progress → done：连接格刷新并显示延迟、初始化后显示 CPU / 内存 / 硬盘与挂载盘并可一键刷新，验收标准全部勾选（CI 浏览器验收合并前确认）
