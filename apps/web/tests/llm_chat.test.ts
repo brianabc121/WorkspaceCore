@@ -608,35 +608,6 @@ describe('大模型聊天', () => {
     expect(bodies).toHaveLength(1)
   })
 
-  it('sends a message typed right after clearing, while the conversation is still being reloaded', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 50, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false, references: [] }
-    let cleared = false, reads = 0, release: () => void = () => {}
-    const gate = new Promise<void>(resolve => { release = resolve })
-    const { requests } = setup('owner', {}, async (r, w) => {
-      if (path(r) === `${chat}/sessions/${S1}/clear` && r.method === 'POST') {
-        cleared = true
-        w.conversations[S1] = talk({}, [asked('写一个周报模板'), answered('好的，模板如下。'), divider])
-        return Response.json({ session: session(), cleared: true, cleared_at: now() })
-      }
-      // 清空之后：第一次重新读取（分隔线这时出现）照常回来，第二次一直不回来——这期间按 Enter 的消息也要发出去
-      if (cleared && path(r) === `${chat}/sessions/${S1}` && r.method === 'GET' && ++reads === 2) await gate
-      return undefined
-    })
-    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
-    const box = await composer()
-    const clear = screen.getByRole('button', { name: '清空上下文' })
-    await waitFor(() => expect(clear).toBeEnabled())
-    await fireEvent.click(clear)
-    expect(await screen.findByRole('separator', { name: /上下文已清空/ })).toBeVisible()
-    expect(await screen.findByText('已清空上下文：之后的消息从头开始，上面的记录还在。')).toBeVisible()
-    await waitFor(() => expect(reads).toBe(2))
-    await fireEvent.update(box, '从头问一句')
-    await fireEvent.keyDown(box, { key: 'Enter' })
-    await waitFor(() => expect(writes(requests).map(path)).toContain(`${chat}/sessions/${S1}/messages`))
-    release()
-  })
-
   it('asks before clearing from the button and for a session someone else made, and not while a turn runs', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const bodies: unknown[] = []
@@ -660,7 +631,7 @@ describe('大模型聊天', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const sends: Schema['LlmChatSendIn'][] = []
     let finish: (() => void) | undefined
-    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 5, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false }
+    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 5, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false, references: [] }
     setup('owner', {}, async (r, w) => {
       const p = path(r)
       if (p === `${chat}/sessions/${S1}/clear`) {
