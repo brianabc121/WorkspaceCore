@@ -138,3 +138,130 @@ async def test_digest_material_lists_each_turn_without_a_model(bridge: Bridge) -
     changed = await bridge.admin("PUT", "/admin/settings", json={"digest_enabled": False})
     assert changed.status_code == 200 and changed.json()["digest_enabled"] is False
     assert (await bridge.admin("GET", "/admin/index?after=0")).json()["digest"]["enabled"] is False
+
+
+# ---- 第 2 期：带着摘要另开会话、手动压缩、触发点（4.2）----
+async def _done(bridge: Bridge, caller: str, turn_id: str) -> dict[str, Any]:
+    for _ in range(50):
+        turn = await bridge.tool(caller, "llm_turn_get", {"turn_id": turn_id, "wait_seconds": 1})
+        if turn["status"] not in ("queued", "running"):
+            return turn
+    raise AssertionError("回合一直没有结束")
+
+
+async def test_continue_with_a_summary_reuses_clearing_the_context(bridge: Bridge) -> None:
+    """先在老的上下文里要摘要，轮到第二个回合时清空上下文（换新的官方会话、画分隔线），
+    把摘要作为新上下文的第一条发出；之后的消息进新的上下文；同一个 request_id 重试不会排两次。"""
+    agent = "openclaw-1"
+    session = await _session(bridge, agent)
+    await _send(bridge, agent, session, "第一问", "r1")
+    await _send(bridge, agent, session, "第二问", "r2")
+    old_native = bridge.engine.store.get_session(session)["native_id"]
+    started = await bridge.tool(
+        agent, "llm_session_continue", {"session_id": session, "request_id": "c1"}
+    )
+    assert started["session_id"] == session and started["handoff_turn_id"]
+    again = await bridge.tool(
+        agent, "llm_session_continue", {"session_id": session, "request_id": "c1"}
+    )
+    assert (again["summary_turn_id"], again["handoff_turn_id"]) == (
+        started["summary_turn_id"],
+        started["handoff_turn_id"],
+    )
+    handoff = await _done(bridge, agent, started["handoff_turn_id"])
+    assert handoff["status"] == "completed" and handoff["kind"] == "handoff"
+    new_native = bridge.engine.store.get_session(session)["native_id"]
+    assert new_native != old_native
+    # 老的上下文最后收到的是要摘要的那一句；新的上下文第一条是摘要
+    assert bridge.fake.history[old_native][-2].text.startswith("接下来要清空这个会话的上下文")
+    first = bridge.fake.history[new_native][0].text
+    assert first.startswith("这是同一项工作的接续") and "（上一个上下文写出的摘要）" in first
+    assert "<交接摘要>\n[fake-1] 接下来要清空" in first
+    assert (await _send(bridge, agent, session, "第三问", "r3"))["status"] == "completed"
+    assert bridge.fake.history[new_native][-1].text == "[fake-1] 第三问"
+    # 会话内容：摘要那一问、清空的分隔线、新上下文的第一条，按先后排好
+    view = (await bridge.admin("GET", f"/admin/sessions/{session}")).json()
+    roles = [(m["role"], m.get("kind")) for m in view["messages"] if m["role"] != "assistant"]
+    assert roles == [
+        ("user", None),
+        ("user", None),
+        ("user", "summary"),
+        ("context_cleared", None),
+        ("user", "handoff"),
+        ("user", None),
+    ]
+    divider = next(m for m in view["messages"] if m["role"] == "context_cleared")
+    assert divider["by"] == "带着摘要另开会话" and divider["turns"] == 3
+
+
+async def test_continue_falls_back_to_the_records_when_no_summary_comes(bridge: Bridge) -> None:
+    """老的上下文没写出摘要（失败）：用管理器的记录排一份，不再花钱问。没有可交接的内容时 409。"""
+    agent = "openclaw-1"
+    session = await _session(bridge, agent)
+    await _send(bridge, agent, session, "部署之前先备份", "r1")
+    bridge.fake.fail_prefix = "接下来要清空"
+    started = await bridge.tool(
+        agent, "llm_session_continue", {"session_id": session, "request_id": "c1"}
+    )
+    assert (await _done(bridge, agent, started["summary_turn_id"]))["status"] == "failed"
+    assert (await _done(bridge, agent, started["handoff_turn_id"]))["status"] == "completed"
+    native = bridge.engine.store.get_session(session)["native_id"]
+    first = bridge.fake.history[native][0].text
+    assert "管理器按记录整理（上一个上下文没有写出摘要）" in first
+    assert "- 问：部署之前先备份" in first and "答：[fake-1] 部署之前先备份" in first
+    # 刚换了上下文、还没发过别的：没有可交接的
+    other = await _session(bridge, agent)
+    refused = await bridge.tool(
+        agent, "llm_session_continue", {"session_id": other, "request_id": "c2"}
+    )
+    assert refused["error"]["code"] == "CONFLICT"
+
+
+async def test_manual_compaction_says_whether_the_platform_compacted(bridge: Bridge) -> None:
+    """手动压缩排一个回合；平台压成了上下文记一次手动压缩；没压成照实说，建议另开会话。"""
+    agent = "openclaw-1"
+    session = await _session(bridge, agent)
+    await _send(bridge, agent, session, "你好", "r1")
+    done = await bridge.tool(
+        agent,
+        "llm_session_compact",
+        {
+            "session_id": session,
+            "instructions": "保留接口约定",
+            "request_id": "k1",
+            "wait_seconds": 10,
+        },
+    )
+    assert done["status"] == "completed" and done["kind"] == "compact"
+    assert done["summary"]["compacted"] is True and done["result"].startswith("已压缩上下文")
+    assert done["context"]["compactions"] == 1 and done["context"]["last_trigger"] == "manual"
+    assert bridge.fake.compact_instructions == ["保留接口约定"]
+    bridge.fake.compactable = False
+    failed = await bridge.tool(
+        agent,
+        "llm_session_compact",
+        {"session_id": session, "request_id": "k2", "wait_seconds": 10},
+    )
+    assert failed["summary"]["compacted"] is False and "带着摘要另开会话" in failed["result"]
+    assert failed["context"]["compactions"] == 1
+
+
+async def test_autocompact_threshold_is_passed_on_and_moves_the_warning(
+    bridge: Bridge, monkeypatch: Any
+) -> None:
+    """自动压缩的触发点：默认 0（用平台自己的）；填了就带给官方程序，提醒的位置也提前。"""
+    from bridge import engine as engine_module
+
+    monkeypatch.setitem(engine_module.AUTOCOMPACT_SETTING, "fake", "autocompact_claude_percent")
+    settings = bridge.engine.settings_view()
+    assert settings["autocompact_claude_percent"] == 0 and settings["autocompact_codex_tokens"] == 0
+    bad = await bridge.admin("PUT", "/admin/settings", json={"autocompact_claude_percent": 101})
+    assert bad.status_code == 422
+    ok = await bridge.admin("PUT", "/admin/settings", json={"autocompact_claude_percent": 60})
+    assert ok.status_code == 200
+    agent = "openclaw-1"
+    session = await _session(bridge, agent)
+    for i in range(5):
+        sent = await _send(bridge, agent, session, f"第 {i} 问", f"r{i}")
+    assert bridge.fake.specs[-1].autocompact == 60
+    assert sent["context"]["warn_percent"] == 50 and sent["context"]["near_limit"] is True

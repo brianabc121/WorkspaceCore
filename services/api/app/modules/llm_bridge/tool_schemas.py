@@ -99,6 +99,15 @@ class SendInput(_Input):
         le=50,
         description="最多等多少秒；没答完就先返回回合号，之后用 llm_bridge_turn_get 取",
     )
+    continue_from: str | None = Field(
+        default=None,
+        max_length=60,
+        description="带着摘要另开会话：填一个已有会话的编号（不填 session_id）。"
+        "工作台先在它老的上下文里"
+        "要一份交接摘要，再清空它的上下文、把摘要作为新上下文的第一条发出，然后把这条消息发进去。"
+        "聊得很长（data.context.near_limit 为 true）时比一直在老会话里聊省 token。"
+        "结果的 session_id 还是这个会话",
+    )
     knowledge_notes: list[UUID] = Field(
         default=[],
         max_length=5,
@@ -172,6 +181,22 @@ class SessionArchiveInput(_Input):
     session_id: str = Field(max_length=60)
 
 
+class SessionCompactInput(_Input):
+    session_id: str = Field(max_length=60)
+    instructions: str = Field(
+        default="",
+        max_length=500,
+        description="压缩时要保留什么（Claude 会用；Codex 的接口带不了，会忽略）",
+    )
+    request_id: str = Field(
+        min_length=1,
+        max_length=100,
+        pattern=r"^[\w.\-:]+$",
+        description="幂等号：重试时用同一个，不会压两次",
+    )
+    wait_seconds: float = Field(default=30, ge=0, le=50)
+
+
 class QueueInput(_Input):
     session_id: str = Field(max_length=60)
 
@@ -233,4 +258,10 @@ DESCRIPTIONS: dict[str, str] = {
     "data.digest_note_id 是工作台为这个会话整理的会话纪要（未确认，可以用 knowledge_get 读）；"
     "觉得值得长期留下的，用 knowledge_write 另写一篇。" + _NOTE,
     "llm_bridge_session_archive": "归档一个会话（之后不能再发送；开发会话的工作目录会被删除）。",
+    "llm_bridge_session_compact": "手动压缩一个会话的上下文："
+    "排一个回合，轮到时让平台把之前的内容压成摘要，"
+    "之后每回合花的 token 变少（摘要这一步本身要花一次模型调用）。instructions 写要保留什么。"
+    "结果的 data.summary.compacted 说明平台有没有真的压缩；"
+    "没有时改用 llm_bridge_send 的 continue_from"
+    "（带着摘要另开会话）。",
 }

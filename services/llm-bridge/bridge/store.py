@@ -268,6 +268,11 @@ class Store:
         columns = {row["name"] for row in self._db.execute("PRAGMA table_info(sessions)")}
         if "context" not in columns:
             self._db.execute("ALTER TABLE sessions ADD COLUMN context TEXT NOT NULL DEFAULT '{}'")
+        # 回合的种类（第 2 期）：空是普通的提问；summary 要交接摘要；handoff 带着摘要换新的上下文；
+        # compact 手动压缩
+        turn_columns = {row["name"] for row in self._db.execute("PRAGMA table_info(turns)")}
+        if "kind" not in turn_columns:
+            self._db.execute("ALTER TABLE turns ADD COLUMN kind TEXT")
 
     def _migrate_messages(self) -> None:
         """会话内容落库（T-0236 第二步）：messages / attachments；已有的回合和事件回填进去。"""
@@ -621,9 +626,15 @@ class Store:
         )
 
     def add_context_reset(
-        self, session_id: str, slot: str, native_id: str | None, turns: int, by: str | None
+        self,
+        session_id: str,
+        slot: str,
+        native_id: str | None,
+        turns: int,
+        by: str | None,
+        at: float | None = None,
     ) -> Row:
-        at = time.time()
+        at = time.time() if at is None else at
         cursor = self._exec(
             "INSERT INTO context_resets (session_id, slot, native_id, turns, by, at) "
             "VALUES (?,?,?,?,?,?)",
@@ -700,8 +711,11 @@ class Store:
         delivery: str = "turn",
         source: Row | None = None,
         data: Row | None = None,
+        kind: str | None = None,
     ) -> Row:
-        """新回合；同时把这一问写进 messages（by：谁发的；data：随这一问的数据，例如参考资料）。"""
+        """新回合；同时把这一问写进 messages（by：谁发的；data：随这一问的数据，例如参考资料）。
+
+        kind：回合的种类（summary / handoff / compact），普通的提问为空。"""
         turn_id = new_id("bt")
         self._exec(
             "INSERT INTO turns (id, session_id, caller_id, request_id, status, text, queued_at) "
@@ -711,6 +725,8 @@ class Store:
         self._exec("UPDATE turns SET position = queued_at WHERE id = ?", (turn_id,))
         if source:
             self._update("turns", "id", turn_id, {"source": source})
+        if kind:
+            self._update("turns", "id", turn_id, {"kind": kind})
         self.touch_session(session_id)
         self.add_message(
             session_id, turn_id, "user", "text", text, by=by, delivery=delivery, data=data

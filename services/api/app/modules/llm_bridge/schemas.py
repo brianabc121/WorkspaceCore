@@ -160,6 +160,17 @@ class LlmBridgeSettings(BaseModel):
         default=True,
         description="会话内容按保留期清掉时，纪要一起放进回收站（默认开）",
     )
+    autocompact_claude_percent: int | None = Field(
+        default=None,
+        description="Claude 的上下文用到百分之多少时自动压缩（LLM_BRIDGE_MEMORY_PLAN.md 4.2）；"
+        "0 是用平台自己的（默认）。旧版本的管理器没有这一项（为空）",
+    )
+    autocompact_workbuddy_percent: int | None = Field(
+        default=None, description="CodeBuddy 的上下文用到百分之多少时自动压缩；0 是用平台自己的"
+    )
+    autocompact_codex_tokens: int | None = Field(
+        default=None, description="Codex 的上下文到多少 token 时自动压缩；0 是用平台自己的"
+    )
     platforms: list[str] = Field(
         default=list(ALL_PLATFORMS), description="这个 MCP 管理器控制的平台"
     )
@@ -178,6 +189,9 @@ class LlmBridgeSettingsPatch(_In):
     retention_days: int | None = Field(default=None, ge=0, le=3650)
     digest_enabled: bool | None = None
     digest_follow_retention: bool | None = None
+    autocompact_claude_percent: int | None = Field(default=None, ge=0, le=100)
+    autocompact_workbuddy_percent: int | None = Field(default=None, ge=0, le=100)
+    autocompact_codex_tokens: int | None = Field(default=None, ge=0, le=10_000_000)
     platforms: list[Platform] | None = Field(
         default=None,
         min_length=1,

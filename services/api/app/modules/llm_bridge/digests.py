@@ -494,6 +494,35 @@ async def purge_follow(db: AsyncSession, settings: Settings, bridge: LlmBridge) 
     return done
 
 
+async def write_for(
+    db: AsyncSession,
+    settings: Settings,
+    runtime: ConnectorRuntime,
+    bridge_id: uuid.UUID,
+    session_id: str,
+    reason: str = "continued",
+) -> LlmBridgeDigest | None:
+    """人或智能体“带着摘要另开会话”时整理一次纪要（5.2 的时机之一）：同样要 3 个以上回合、
+    纪要开着；连不上、写不了就算了（不影响另开会话本身）。"""
+    from app.modules.llm_bridge import jobs  # jobs 导入了本模块
+
+    try:
+        await jobs.sync_bridge(db, settings, runtime, bridge_id)
+        bridge = await db.get(LlmBridge, bridge_id)
+        row = await db.scalar(
+            select(LlmBridgeSession).where(
+                LlmBridgeSession.bridge_id == bridge_id, LlmBridgeSession.session_id == session_id
+            )
+        )
+        if bridge is None or row is None or not enabled(bridge) or row.turns_total < MIN_TURNS:
+            return None
+        return await write(db, settings, runtime, bridge, row, reason)
+    except (BridgeCallError, ConnectorError, ApiError) as error:
+        await db.rollback()
+        logger.info("digest on continue for %s skipped: %s", session_id, type(error).__name__)
+        return None
+
+
 async def tick(
     db: AsyncSession, settings: Settings, runtime: ConnectorRuntime, bridge_id: uuid.UUID
 ) -> int:

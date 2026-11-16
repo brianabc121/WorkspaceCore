@@ -19,7 +19,7 @@ import math
 import os
 import re
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +95,8 @@ class CliProfile:
     reports_quota: bool = True
     # 能不能用“容器里已有的登录”（要进容器操作官方程序；有网页登录的平台不再提供）
     allow_existing: bool = True
+    # 自动压缩触发点（上下文的百分比）的环境变量（核验记录第 1、2 节）
+    autocompact_env: str = ""
 
 
 CLAUDE_MODELS = (
@@ -113,6 +115,7 @@ def claude_profile(binary: str) -> CliProfile:
         secret_envs={"api_key": "ANTHROPIC_API_KEY", "oauth_token": "CLAUDE_CODE_OAUTH_TOKEN"},
         models=CLAUDE_MODELS,
         auth_cli=True,
+        autocompact_env="CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
     )
 
 
@@ -130,6 +133,7 @@ def codebuddy_profile(binary: str) -> CliProfile:
         web_login={"web_cn": "internal", "web_intl": "external"},
         allow_existing=False,
         reports_quota=False,
+        autocompact_env="CODEBUDDY_AUTOCOMPACT_PCT_OVERRIDE",
     )
 
 
@@ -521,7 +525,7 @@ class CliStreamDriver(Driver):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(spec.workdir),
-                env=self._env(spec.env),
+                env=self._env({**spec.env, **self._autocompact(spec)}),
                 limit=16 * 1024 * 1024,
             )
         except OSError as error:
@@ -576,6 +580,7 @@ class CliStreamDriver(Driver):
             if seen.compacting:  # 报了“正在压缩”却没等到结束：回合结束时也算压缩过一次
                 await self._compacted(seen, sink, {"trigger": "manual" if manual else "auto"})
             outcome.context = _result_context(result, seen.model, seen.used)
+            outcome.compactions = seen.compactions
             return self._finish(result, messages, outcome, limited)
         finally:
             self._procs.pop(spec.native_id, None)
@@ -583,6 +588,18 @@ class CliStreamDriver(Driver):
                 proc.kill()
                 with contextlib.suppress(ProcessLookupError):
                     await proc.wait()
+
+    def _autocompact(self, spec: SessionSpec) -> dict[str, str]:
+        """自动压缩的触发点（管理员在设置里填了才有）：上下文用到百分之多少时压缩。"""
+        if spec.autocompact and self.profile.autocompact_env:
+            return {self.profile.autocompact_env: str(min(max(spec.autocompact, 1), 100))}
+        return {}
+
+    async def compact(self, spec: SessionSpec, instructions: str, sink: EventSink) -> TurnOutcome:
+        """手动压缩：把 `/compact [要保留什么]` 当提问发（Claude Code 的非交互模式支持；
+        CodeBuddy 没核实，结果以有没有收到压缩事件为准）。"""
+        command = "/compact" + (f" {instructions.strip()}" if instructions.strip() else "")
+        return await self._turn(replace(spec, images=()), command, sink, manual=True)
 
     async def _on_system(
         self, event: dict[str, Any], seen: _Seen, sink: EventSink, *, manual: bool

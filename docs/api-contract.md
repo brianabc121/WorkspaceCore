@@ -940,6 +940,15 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 - 智能体：`llm_bridge_send`、`llm_bridge_turn_get` 的结果多 `data.context`；`llm_bridge_session_get` 的 `data.session.context` 同样，消息里压缩的位置是 `role=status`、`text=context_compacted`（带 `trigger`）。
 - 管理器的会话索引（`GET /admin/index`）每条多 `compactions`。这一期只记录和显示，不改任何行为、不多花 token。
 
+**带着摘要另开会话、手动压缩、自动压缩的位置**（T-0259，`docs/v2/LLM_BRIDGE_MEMORY_PLAN.md` 4.2）：
+
+- `POST .../chat/sessions/{session_id}/continue`（admin，`{request_id, takeover}`）：带着摘要另开会话，复用清空上下文（T-0255）。管理器排两个回合：先在老的上下文里要一份交接摘要（`kind=summary`），轮到第二个回合（`kind=handoff`）时清空上下文（换新的官方会话、记录保留、会话内容里有一条 `context_cleared`，`by` 是“带着摘要另开会话”），把摘要作为新上下文的第一条发出。老的上下文没写出摘要时（失败、中断），用管理器的记录排一份（每一问的原话和回答的开头），不再花钱问。会话还是同一个，之后的消息接着发。上次清空之后还没发过消息 409；不是自己建的会话要 `takeover=true`。返回 `session`、`summary_turn_id`、`handoff_turn_id`。同时整理一次会话纪要（3 个以上回合时，`reason=continued`）。记审计 `chat_session_continued`。
+- `POST .../chat/sessions/{session_id}/compact`（admin，`{instructions, request_id, takeover}`）：手动压缩，排一个回合（`kind=compact`），轮到时让平台压缩：Claude / CodeBuddy 发 `/compact [要保留什么]`，Codex 调 `thread/compact/start`（带不了说明）。回合照常完成，`summary.compacted` 说明平台有没有真的压缩（CodeBuddy 的非交互模式没核实）；没有时回答里建议改用带着摘要另开会话。记审计 `chat_session_compacted`。
+- 会话内容的提问多 `kind`（`summary` / `handoff` / `compact`）；回合（`llm_turn_get` 等）多 `kind`。
+- 管理器设置多三项（默认 0 = 用平台自己的，不改）：`autocompact_claude_percent`、`autocompact_workbuddy_percent`（0–100，经官方程序的 `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` / `CODEBUDDY_AUTOCOMPACT_PCT_OVERRIDE`）、`autocompact_codex_tokens`（0–10000000，经线程的 `config.model_auto_compact_token_limit`，对新建或重新载入的线程生效）。旧版本的管理器没有这三项（为空）。调早了百分比时，“快到压缩的位置”的提醒提前到它前面 10%。
+- 智能体：新工具 `llm_bridge_session_compact`（direct，需要 `can_write`；`session_id`、`instructions`、`request_id`、`wait_seconds`），审计 `agent_session_compacted`；`llm_bridge_send` 多 `continue_from`（已有会话的编号，代替 `session_id`）：先带着摘要另开，再把这条消息发进去，结果多 `data.continued`（两个回合的编号），审计 `agent_session_continued`。`docs/AGENTS.md` 例外九的名单已补上（人类 2026-11-16 同意）。
+- 管理器的 MCP 工具多 `llm_session_compact`、`llm_session_continue`。
+
 **会话纪要、提问前用上知识库**（T-0258，`docs/v2/LLM_BRIDGE_MEMORY_PLAN.md` 第 5、6 节）：
 
 - **会话纪要**：一个大模型会话一篇笔记，类型 `digest`（会话纪要，未确认），放在知识库的“会话纪要”文件夹。工作台每分钟同步会话索引后检查：会话有 3 个以上回合，并且平台压缩了上下文、会话归档、或者 24 小时没有新回合，就向管理器取素材（管理器的 `GET /admin/sessions/{id}/digest`：每一问的原话、回答的开头一段、改动的文件、跑过的命令、没做完的原因；不调模型）按固定几栏排好写进去；同一个会话合并进同一篇，每次一个版本，作者是“工作台”。放在哪：会话出处里有项目的放项目库，智能体建的放它自己的库，人建的放公共库。

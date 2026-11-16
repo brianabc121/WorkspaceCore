@@ -14795,6 +14795,42 @@
             "title": "Auto Resume Max",
             "type": "integer"
           },
+          "autocompact_claude_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude 的上下文用到百分之多少时自动压缩（LLM_BRIDGE_MEMORY_PLAN.md 4.2）；0 是用平台自己的（默认）。旧版本的管理器没有这一项（为空）",
+            "title": "Autocompact Claude Percent"
+          },
+          "autocompact_codex_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Codex 的上下文到多少 token 时自动压缩；0 是用平台自己的",
+            "title": "Autocompact Codex Tokens"
+          },
+          "autocompact_workbuddy_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CodeBuddy 的上下文用到百分之多少时自动压缩；0 是用平台自己的",
+            "title": "Autocompact Workbuddy Percent"
+          },
           "claude_subscription_ack": {
             "description": "已确认了解 Claude 订阅登录的合规风险",
             "title": "Claude Subscription Ack",
@@ -14911,6 +14947,45 @@
               }
             ],
             "title": "Auto Resume Max"
+          },
+          "autocompact_claude_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autocompact Claude Percent"
+          },
+          "autocompact_codex_tokens": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autocompact Codex Tokens"
+          },
+          "autocompact_workbuddy_percent": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autocompact Workbuddy Percent"
           },
           "claude_subscription_ack": {
             "anyOf": [
@@ -15491,6 +15566,36 @@
         "title": "LlmChatClearedOut",
         "type": "object"
       },
+      "LlmChatCompactIn": {
+        "additionalProperties": false,
+        "properties": {
+          "instructions": {
+            "default": "",
+            "description": "压缩时要保留什么（Claude 会用；Codex 带不了）",
+            "maxLength": 500,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "request_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[\\w.\\-:]+$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "takeover": {
+            "default": false,
+            "description": "不是自己建的会话时必须为 true",
+            "title": "Takeover",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "LlmChatCompactIn",
+        "type": "object"
+      },
       "LlmChatContextOut": {
         "description": "会话的上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：官方程序报的数，没报的为空。",
         "properties": {
@@ -15580,6 +15685,59 @@
           }
         },
         "title": "LlmChatContextOut",
+        "type": "object"
+      },
+      "LlmChatContinueIn": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "pattern": "^[\\w.\\-:]+$",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "takeover": {
+            "default": false,
+            "description": "不是自己建的会话时必须为 true",
+            "title": "Takeover",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "title": "LlmChatContinueIn",
+        "type": "object"
+      },
+      "LlmChatContinuedOut": {
+        "properties": {
+          "handoff_turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "清空上下文、把摘要作为新上下文第一条发出的那一回合",
+            "title": "Handoff Turn Id"
+          },
+          "session": {
+            "$ref": "#/components/schemas/LlmChatSessionOut"
+          },
+          "summary_turn_id": {
+            "description": "在老的上下文里要摘要的那一回合",
+            "title": "Summary Turn Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session",
+          "summary_turn_id"
+        ],
+        "title": "LlmChatContinuedOut",
         "type": "object"
       },
       "LlmChatConversationOut": {
@@ -16353,6 +16511,18 @@
             "description": "官方程序里原有的内容（第一次打开时导入的）",
             "title": "Imported",
             "type": "boolean"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "user 消息所在回合的种类（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）：summary 带着摘要另开会话时要摘要的那一问；handoff 清空后作为新上下文第一条发出的摘要；compact 手动压缩；普通的提问为空",
+            "title": "Kind"
           },
           "mine": {
             "anyOf": [
@@ -60017,6 +60187,304 @@
           }
         ],
         "summary": "聊天：清空会话的上下文（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/compact": {
+      "post": {
+        "description": "排一个回合（kind=compact），轮到时让平台把之前的内容压成摘要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）。instructions 是要保留什么（Claude 会用）。回合结果的 summary.compacted 说明平台有没有真的压缩。不是自己建的会话要带 takeover=true。",
+        "operationId": "llm_chat_compact",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmChatCompactIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatTurnOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "聊天：手动压缩会话的上下文（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/continue": {
+      "post": {
+        "description": "复用清空上下文：先在老的上下文里要一份交接摘要（kind=summary），再清空上下文、把摘要作为新上下文的第一条发出（kind=handoff）。两个回合排在会话队列里；老的上下文没写出摘要时用管理器的记录排一份。同时整理一次会话纪要。上次清空之后还没发过消息 409；不是自己建的会话要带 takeover=true。",
+        "operationId": "llm_chat_continue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmChatContinueIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatContinuedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "聊天：带着摘要另开会话（admin）",
         "tags": [
           "llm_bridge"
         ]

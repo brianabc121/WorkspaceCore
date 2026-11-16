@@ -20,6 +20,9 @@ from app.modules.llm_bridge.chat_schemas import (
     LlmChatAttachmentOut,
     LlmChatClearedOut,
     LlmChatClearIn,
+    LlmChatCompactIn,
+    LlmChatContinuedOut,
+    LlmChatContinueIn,
     LlmChatConversationOut,
     LlmChatCreatedOut,
     LlmChatCreateIn,
@@ -346,6 +349,47 @@ async def llm_chat_clear_context(
     return await LlmChatService(bridges).clear_context(
         access, row, session_id, takeover=body.takeover
     )
+
+
+@router.post(
+    f"{prefix}/sessions/{{session_id}}/compact",
+    summary="聊天：手动压缩会话的上下文（admin）",
+    description="排一个回合（kind=compact），轮到时让平台把之前的内容压成摘要"
+    "（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）。instructions 是要保留什么（Claude 会用）。"
+    "回合结果的 summary.compacted 说明平台有没有真的压缩。不是自己建的会话要带 takeover=true。",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_compact(
+    access: Admin,
+    bridges: Bridges,
+    bridge_id: UUID,
+    session_id: SessionId,
+    body: LlmChatCompactIn,
+) -> LlmChatTurnOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).compact(access, row, session_id, body)
+
+
+@router.post(
+    f"{prefix}/sessions/{{session_id}}/continue",
+    summary="聊天：带着摘要另开会话（admin）",
+    description="复用清空上下文：先在老的上下文里要一份交接摘要（kind=summary），"
+    "再清空上下文、把摘要作为新上下文的第一条发出（kind=handoff）。两个回合排在会话队列里；"
+    "老的上下文没写出摘要时用管理器的记录排一份。同时整理一次会话纪要。"
+    "上次清空之后还没发过消息 409；不是自己建的会话要带 takeover=true。",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_continue(
+    access: Admin,
+    bridges: Bridges,
+    bridge_id: UUID,
+    session_id: SessionId,
+    body: LlmChatContinueIn,
+) -> LlmChatContinuedOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).continue_with_summary(access, row, session_id, body)
 
 
 @router.patch(

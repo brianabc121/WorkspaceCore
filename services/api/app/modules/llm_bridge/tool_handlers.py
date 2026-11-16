@@ -27,7 +27,7 @@ from app.integrations.base import ConnectorError
 from app.models import AgentInstance, KnowledgeNote
 from app.models.task import Task
 from app.models.timeline import TaskRun
-from app.modules.llm_bridge import memory, watches
+from app.modules.llm_bridge import digests, memory, watches
 from app.modules.llm_bridge.client import BridgeCaller, BridgeCallError, BridgeClient
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeDigest, LlmBridgeGrant
 from app.modules.llm_bridge.service import LlmBridgeService
@@ -241,11 +241,25 @@ async def _forward(
     result_offset = arguments.pop("result_offset", 0)
     arguments.pop("notify", None)
     note_ids = [uuid.UUID(str(n)) for n in arguments.pop("knowledge_notes", None) or []]
+    # 带着摘要另开会话（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2，复用清空上下文）：发到 continue_from
+    continue_from = arguments.pop("continue_from", None)
+    if continue_from is not None:
+        if arguments.get("session_id") not in (None, continue_from):
+            raise ToolCallError(
+                "VALIDATION_FAILED",
+                "continue_from 就是要接着做的那个会话：不要再填别的 session_id",
+            )
+        arguments["session_id"] = continue_from
     # 发送时没给会话：先新建一个（要有平台）
     create: dict[str, Any] | None = None
     if tool == "llm_bridge_send":
         new_keys = ("platform", "session_mode", "model", "environment", "title")
         given = {key: arguments.pop(key) for key in new_keys if key in arguments}
+        if given and continue_from is not None:
+            raise ToolCallError(
+                "VALIDATION_FAILED",
+                "带着摘要另开会话是在同一个会话里换新的上下文：不要再填 " + "、".join(given),
+            )
         if "session_id" not in arguments:
             if "platform" not in given:
                 raise ToolCallError(
@@ -312,12 +326,20 @@ async def _forward(
     # 之后不再用数据库：等会话桥回答可能要几十秒，不占着事务
     bridge_label, bridge_id, client = bridge.name, str(bridge.id), await service.client(bridge)
     await db.commit()
+    continued: dict[str, Any] | None = None
     try:
         if create is not None:
             made = await client.tool(caller, "llm_session_create", create)
             if not isinstance(made, dict) or not isinstance(made.get("session_id"), str):
                 raise ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥返回了无法识别的结果")
             arguments["session_id"] = made["session_id"]
+        if continue_from is not None:
+            # 先排“要摘要”和“清空后发出摘要”两个回合，这条消息排在它们后面
+            continued = await client.tool(
+                caller,
+                "llm_session_continue",
+                {"session_id": continue_from, "request_id": f"{arguments['request_id']}.continue"},
+            )
         data = await client.tool(caller, "llm_" + tool.removeprefix(PREFIX), arguments)
     except (BridgeCallError, ConnectorError) as error:
         failure = _call_error(error, "llm_bridge_session_create" if create is not None else tool)
@@ -333,6 +355,13 @@ async def _forward(
         raise ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥返回了无法识别的结果")
     if create is not None:
         data["created_session"] = True
+    if isinstance(continued, dict):
+        data["continued"] = {
+            "summary_turn_id": continued.get("summary_turn_id"),
+            "handoff_turn_id": continued.get("handoff_turn_id"),
+        }
+        # 老的上下文到这里告一段落：整理一次会话纪要（5.2 的时机之一；连不上就算了）
+        await digests.write_for(db, settings, runtime, uuid.UUID(bridge_id), str(continue_from))
     if references is not None:
         data["knowledge_notes"] = references.note_ids
         data["knowledge_truncated"] = references.truncated
@@ -462,6 +491,7 @@ _AUDIT_ACTIONS = {
     "llm_bridge_send": "agent_message_sent",
     "llm_bridge_turn_cancel": "agent_turn_cancelled",
     "llm_bridge_session_archive": "agent_session_archived",
+    "llm_bridge_session_compact": "agent_session_compacted",
 }
 
 
@@ -488,7 +518,10 @@ def _summary(tool: str, output: BridgeToolOutput) -> str:
     if tool == "llm_bridge_session_create":
         return f"在 {where} 新建会话（模型 {data.get('model')}）"
     if tool == "llm_bridge_send":
-        return f"向 {where} 的会话发送消息：{data.get('status')}"
+        how = "（带着摘要另开）" if data.get("continued") else ""
+        return f"向 {where} 的会话发送消息{how}：{data.get('status')}"
+    if tool == "llm_bridge_session_compact":
+        return f"手动压缩 {where} 的会话：{data.get('status')}"
     if tool == "llm_bridge_turn_cancel":
         return f"取消回合：{data.get('status')}"
     return f"归档 {where} 的会话"
@@ -609,6 +642,8 @@ async def run(
     action = _AUDIT_ACTIONS[spec.name]
     if spec.name == "llm_bridge_send" and output.data.get("takeover"):
         action = "agent_takeover_sent"
+    elif spec.name == "llm_bridge_send" and output.data.get("continued"):
+        action = "agent_session_continued"
     await AuditTrail(service.db, service.settings).record(
         f"llm_bridge.{action}",
         workspace_ids=[current.workspace_id],

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { CHAT_NO_TOOLS, credits, duration, seconds } from '../api'
-import { splitText, tokens, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
+import { TURN_KIND, splitText, tokens, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
 import ChatAttachments from './ChatAttachments.vue'
 import { answerHtml } from './markdown'
 import '../../../features/kb/kb.css'
@@ -142,6 +142,7 @@ const clearedText = computed(() => {
       <span v-if="message.delivery === 'inserted'" class="lc-tag" title="在上一条还没答完时插进去的，进了正在处理的那一回合">插入</span>
       <span v-if="message.delivery === 'merged'" class="lc-tag" title="插入时平台没有收下：中断了上一回合，这条消息带着“接着刚才的做”重新开始">插入（合并重发）</span>
       <span v-if="message.imported" class="lc-tag" title="官方程序里原有的内容，第一次打开时导入的">导入的</span>
+      <span v-if="message.kind && TURN_KIND[message.kind]" class="lc-tag" :title="TURN_KIND[message.kind]!.title">{{ TURN_KIND[message.kind]!.label }}</span>
     </div>
     <details v-if="reply && message.steps?.length" class="lc-steps" :open="pending">
       <summary>过程（{{ message.steps.length }} 步）</summary>

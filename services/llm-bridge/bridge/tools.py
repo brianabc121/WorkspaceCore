@@ -133,6 +133,26 @@ class QueueInput(_Input):
     session_id: str
 
 
+class CompactInput(_Input):
+    session_id: str
+    instructions: str = Field(
+        default="",
+        max_length=500,
+        description="压缩时要保留什么（Claude 会用；Codex 的接口带不了，会忽略）",
+    )
+    request_id: str = Field(
+        min_length=1, max_length=100, description="幂等号：重试时用同一个，不会压两次"
+    )
+    wait_seconds: float = Field(default=0, ge=0, le=50)
+
+
+class ContinueInput(_Input):
+    session_id: str
+    request_id: str = Field(
+        min_length=1, max_length=100, description="幂等号：重试时用同一个，不会排两次"
+    )
+
+
 @dataclass(frozen=True)
 class ToolDef:
     name: str
@@ -206,6 +226,21 @@ TOOLS: tuple[ToolDef, ...] = (
         "查看一个会话的消息队列：正在处理的那一条和排队中的各条（按将要处理的顺序）。",
         QueueInput,
         True,
+    ),
+    ToolDef(
+        "llm_session_compact",
+        "手动压缩一个会话的上下文：排一个回合，轮到时让平台把之前的内容压成摘要，之后每回合花的 token 变少。"
+        "结果的 summary.compacted 说明平台有没有真的压缩；没有时建议改用 llm_session_continue。",
+        CompactInput,
+        False,
+    ),
+    ToolDef(
+        "llm_session_continue",
+        "带着摘要另开会话（比一直在老会话里聊省 token）：先在老的上下文里要一份交接摘要，"
+        "再清空这个会话的上下文（换新的官方会话、记录保留），把摘要作为新上下文的第一条发出去。"
+        "排两个回合；之后接着往同一个 session_id 发消息即可。",
+        ContinueInput,
+        False,
     ),
     ToolDef(
         "llm_session_archive",

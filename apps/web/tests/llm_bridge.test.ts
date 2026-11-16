@@ -535,6 +535,26 @@ describe('大模型客户端管理', () => {
     expect(body).not.toHaveProperty('digest_follow_retention')
   })
 
+  it('sets where each platform compacts automatically, sending only what changed', async () => {
+    const withAuto = { ...settings, autocompact_claude_percent: 0, autocompact_workbuddy_percent: 0, autocompact_codex_tokens: 0 }
+    const requests = setup('owner', async r => {
+      if (path(r) === `${base}/settings`) return Response.json({ ...withAuto, ...(await r.clone().json()) })
+      if (path(r) === `${base}/status`) return Response.json({ ...status(), settings: withAuto })
+      return undefined
+    })
+    await openApp('/llm_bridge?view=manage')
+    const set = await openTab('设置')
+    const group = await within(set).findByRole('group', { name: '自动压缩的位置' })
+    const claude = within(group).getByLabelText('Claude：上下文用到百分之多少时自动压缩')
+    expect(claude).toHaveValue(0)
+    await fireEvent.update(claude, '60')
+    await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(writes(requests)).toHaveLength(1))
+    const body = await writes(requests)[0]!.clone().json()
+    expect(body).toMatchObject({ autocompact_claude_percent: 60 })
+    expect(body).not.toHaveProperty('autocompact_codex_tokens')
+  })
+
   it('saves settings within the backend limits and environments in dev mode with an exec warning', async () => {
     const requests = setup('owner', async r => {
       if (path(r) === `${base}/settings`) return Response.json({ ...settings, ...(await r.clone().json()) })

@@ -182,6 +182,12 @@ class LlmChatMessageOut(BaseModel):
         description="提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；"
         "merged 中断上一个回合后合并重发；imported 导入的",
     )
+    kind: str | None = Field(
+        default=None,
+        description="user 消息所在回合的种类（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）："
+        "summary 带着摘要另开会话时要摘要的那一问；handoff 清空后作为新上下文第一条发出的摘要；"
+        "compact 手动压缩；普通的提问为空",
+    )
 
 
 class LlmChatDigestOut(BaseModel):
@@ -342,6 +348,28 @@ class LlmChatClearedOut(BaseModel):
         description="这次清空了没有：上次清空之后还没发过消息时什么也不做，为 false"
     )
     cleared_at: float | None = Field(default=None, description="清空的时间")
+
+
+# ---- 带着摘要另开会话、手动压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）----
+class LlmChatCompactIn(_In):
+    instructions: str = Field(
+        default="", max_length=500, description="压缩时要保留什么（Claude 会用；Codex 带不了）"
+    )
+    request_id: str = Field(min_length=1, max_length=100, pattern=_REQUEST_ID)
+    takeover: bool = Field(default=False, description="不是自己建的会话时必须为 true")
+
+
+class LlmChatContinueIn(_In):
+    request_id: str = Field(min_length=1, max_length=100, pattern=_REQUEST_ID)
+    takeover: bool = Field(default=False, description="不是自己建的会话时必须为 true")
+
+
+class LlmChatContinuedOut(BaseModel):
+    session: LlmChatSessionOut
+    summary_turn_id: str = Field(description="在老的上下文里要摘要的那一回合")
+    handoff_turn_id: str | None = Field(
+        default=None, description="清空上下文、把摘要作为新上下文第一条发出的那一回合"
+    )
 
 
 # ---- 会话的消息队列（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 4 节）----

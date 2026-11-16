@@ -339,3 +339,105 @@ async def test_agent_attaches_notes_it_can_read_and_sees_similar_sessions(
         env, token, session_id=sent["session_id"], text="x", knowledge_notes=[hidden]
     )
     assert tool_error(refused)["code"] == "NOT_FOUND"
+
+
+# ---------------------------------------------------------------- 管得了上下文（4.2）
+
+
+async def wait_turn(rig: Rig, token: str, turn_id: str) -> dict[str, Any]:  # noqa: F811
+    for _ in range(40):
+        turn = ok(
+            await call(
+                rig.env, token, "llm_bridge_turn_get", {"turn_id": turn_id, "wait_seconds": 2}
+            )
+        )
+        if turn["status"] not in ("queued", "running"):
+            return turn
+    raise AssertionError("回合一直没有结束")
+
+
+async def test_chat_compacts_and_continues_with_a_summary(rig: Rig) -> None:  # noqa: F811
+    """聊天页：手动压缩、带着摘要另开会话（同一个会话换新的上下文）；另开会话时整理一次纪要；
+    别人建的会话要先确认。"""
+    created = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/chat/sessions",
+        json={"platform": "claude", "mode": "chat", "text": "第一问", "request_id": "c1"},
+    )
+    session = created.json()["session"]["session_id"]
+    path = f"/bridges/{rig.bridge_id}/chat/sessions/{session}"
+    for i, text in enumerate(("第二问", "第三问")):
+        sent = await rig.api("POST", f"{path}/messages", json={"text": text, "request_id": f"m{i}"})
+        assert sent.status_code == 200, sent.text
+    compacted = await rig.api("POST", f"{path}/compact", json={"request_id": "k1"})
+    assert compacted.status_code == 200, compacted.text
+    continued = await rig.api("POST", f"{path}/continue", json={"request_id": "u1"})
+    assert continued.status_code == 200, continued.text
+    body = continued.json()
+    assert body["session"]["session_id"] == session and body["handoff_turn_id"]
+    for _ in range(80):
+        view = (await rig.api("GET", path)).json()
+        if not view["session"]["busy"]:
+            break
+    kinds = [m.get("kind") for m in view["messages"] if m["role"] == "user"]
+    assert kinds == [None, None, None, "compact", "summary", "handoff"]
+    assert "context_cleared" in [m["role"] for m in view["messages"]]
+    assert view["session"]["context"]["compactions"] == 1
+    # 另开会话是纪要的一个时机：已经整理进公共知识库
+    assert view["digest"]["reason"] == "continued" and view["digest"]["note_id"]
+    for action in ("llm_bridge.chat_session_compacted", "llm_bridge.chat_session_continued"):
+        assert action in await actions(rig)
+    # 智能体建的会话：不确认就 409 TAKEOVER_REQUIRED
+    token = await rig.agent("openclaw-1", can_write=True)
+    theirs = ok(await agent_send(rig.env, token, platform="claude", text="你好"))["session_id"]
+    other = f"/bridges/{rig.bridge_id}/chat/sessions/{theirs}"
+    blocked = await rig.api("POST", f"{other}/compact", json={"request_id": "k2"})
+    assert blocked.status_code == 409 and blocked.json()["error"]["code"] == "TAKEOVER_REQUIRED"
+    allowed = await rig.api("POST", f"{other}/compact", json={"request_id": "k2", "takeover": True})
+    assert allowed.status_code == 200, allowed.text
+
+
+async def test_agent_compacts_and_continues_from_a_session(rig: Rig) -> None:  # noqa: F811
+    """智能体：llm_bridge_session_compact（直接执行、记执行记录和审计）；
+    llm_bridge_send 的 continue_from：先要摘要、清空、发出摘要，这条消息排在后面，会话还是同一个。"""
+    env = rig.env
+    token = await rig.agent("openclaw-1", can_write=True)
+    session = ok(await agent_send(env, token, platform="claude", text="第一问"))["session_id"]
+    compacted = ok(
+        await call(
+            env,
+            token,
+            "llm_bridge_session_compact",
+            {"session_id": session, "request_id": "k1", "wait_seconds": 10},
+        )
+    )
+    assert compacted["status"] == "completed" and compacted["summary"]["compacted"] is True
+    sent = ok(await agent_send(env, token, continue_from=session, text="接着做第三步"))
+    assert sent["session_id"] == session and sent["continued"]["handoff_turn_id"]
+    handoff = await wait_turn(rig, token, sent["continued"]["handoff_turn_id"])
+    assert handoff["status"] == "completed" and handoff["kind"] == "handoff"
+    last = await wait_turn(rig, token, sent["turn_id"])
+    assert last["result"] == "[fake-1] 接着做第三步"
+    bad = await agent_send(env, token, continue_from=session, platform="claude", text="x")
+    assert tool_error(bad)["code"] == "VALIDATION_FAILED"
+    logged = await actions(rig)
+    assert "llm_bridge.agent_session_compacted" in logged
+    assert "llm_bridge.agent_session_continued" in logged
+
+
+async def test_autocompact_settings_round_trip(rig: Rig) -> None:  # noqa: F811
+    """自动压缩的触发点：默认 0（用平台自己的）；改了写进管理器，超出范围 422。"""
+    status = (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).json()
+    assert status["settings"]["autocompact_claude_percent"] == 0
+    changed = await rig.api(
+        "PUT",
+        f"/bridges/{rig.bridge_id}/settings",
+        json={"autocompact_claude_percent": 60, "autocompact_codex_tokens": 150000},
+    )
+    assert changed.status_code == 200, changed.text
+    assert changed.json()["autocompact_claude_percent"] == 60
+    assert changed.json()["autocompact_codex_tokens"] == 150000
+    bad = await rig.api(
+        "PUT", f"/bridges/{rig.bridge_id}/settings", json={"autocompact_claude_percent": 101}
+    )
+    assert bad.status_code == 422

@@ -60,6 +60,8 @@ _APPROVALS = {
     "execCommandApproval",
 }
 _CLOSED = {"method": "$closed", "params": {}}
+# 手动压缩：看到压缩条目之后再等这么久，没有回合结束的通知也算做完了
+COMPACT_SETTLE_SECONDS = 5.0
 
 
 def _error_kind(info: Any) -> ErrorKind:
@@ -363,6 +365,8 @@ class CodexDriver(Driver):
             params["model"] = spec.model
         if spec.mode == "chat":
             params["developerInstructions"] = CHAT_INSTRUCTIONS
+        if self._config(spec):
+            params["config"] = self._config(spec)
         result = await self._call("thread/start", params)
         thread_id = str(result["thread"]["id"])
         self._loaded.add(thread_id)
@@ -378,9 +382,7 @@ class CodexDriver(Driver):
         if not thread_id:
             raise DriverError("invalid", "会话没有 Codex 线程号")
         await self._ensure()
-        if thread_id not in self._loaded:
-            await self._call("thread/resume", {"threadId": thread_id})
-            self._loaded.add(thread_id)
+        await self._load(spec)
         queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._subs[thread_id] = queue
         try:
@@ -405,6 +407,63 @@ class CodexDriver(Driver):
         finally:
             self._subs.pop(thread_id, None)
             self._active.pop(thread_id, None)
+
+    @staticmethod
+    def _config(spec: SessionSpec) -> dict[str, Any]:
+        """线程的配置项（thread/start、thread/resume 的 config，0.169.0 的 ThreadStartParams）：
+        自动压缩的触发点 model_auto_compact_token_limit（token 数，管理员在设置里填了才有）。"""
+        if spec.autocompact:
+            return {"model_auto_compact_token_limit": int(spec.autocompact)}
+        return {}
+
+    async def _load(self, spec: SessionSpec) -> None:
+        thread_id = spec.native_id or ""
+        if thread_id in self._loaded:
+            return
+        params: dict[str, Any] = {"threadId": thread_id}
+        if self._config(spec):
+            params["config"] = self._config(spec)
+        await self._call("thread/resume", params)
+        self._loaded.add(thread_id)
+
+    async def compact(self, spec: SessionSpec, instructions: str, sink: EventSink) -> TurnOutcome:
+        """手动压缩：`thread/compact/start {threadId}`（0.169.0，不能带说明），应答是空的；
+        压缩在后台做，做完报一个 contextCompaction 条目、回合结束。等到回合结束（或者压缩条目出现后
+        短时间内没有别的动静）就返回。"""
+        thread_id = spec.native_id
+        if not thread_id:
+            raise DriverError("invalid", "会话没有 Codex 线程号")
+        await self._ensure()
+        await self._load(spec)
+        queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        self._subs[thread_id] = queue
+        outcome = TurnOutcome(text="")
+        try:
+            await self._call("thread/compact/start", {"threadId": thread_id})
+            while True:
+                try:
+                    wait = COMPACT_SETTLE_SECONDS if outcome.compactions else None
+                    message = await asyncio.wait_for(queue.get(), wait)
+                except TimeoutError:
+                    return outcome
+                method, params = message["method"], message.get("params") or {}
+                if method == "$closed":
+                    raise DriverError("unavailable", "codex app-server 在压缩时退出了")
+                item = params.get("item") or {}
+                if method == "item/completed" and item.get("type") == "contextCompaction":
+                    outcome.compactions += 1
+                    await sink("compacted", {"trigger": "manual"})
+                elif method == "thread/tokenUsage/updated":
+                    outcome.context = token_context(params.get("tokenUsage"))
+                elif method == "turn/completed":
+                    turn = params.get("turn") or {}
+                    if turn.get("status") == "failed":
+                        error = turn.get("error") or {}
+                        text = str(error.get("message") or "Codex 压缩上下文失败")[:500]
+                        raise DriverError(_error_kind(error.get("codexErrorInfo")), text)
+                    return outcome
+        finally:
+            self._subs.pop(thread_id, None)
 
     async def _collect(
         self, queue: asyncio.Queue[dict[str, Any]], turn_id: str, sink: EventSink
@@ -464,6 +523,7 @@ class CodexDriver(Driver):
                 elif kind == "contextCompaction":
                     # 压缩了一次（0.169.0 的 ContextCompactionThreadItem 只有 id，
                     # 没有前后的 token 数）
+                    outcome.compactions += 1
                     await sink("compacted", {"trigger": "auto"})
                 elif kind == "imageGeneration" and isinstance(item.get("savedPath"), str):
                     # 模型画的图：官方程序已经存成文件，交给 engine 收进附件

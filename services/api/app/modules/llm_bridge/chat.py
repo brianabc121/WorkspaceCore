@@ -24,11 +24,14 @@ from app.domain import secret_scan
 from app.domain.policy import WorkspaceAccess
 from app.integrations.base import ConnectorError
 from app.models import User
-from app.modules.llm_bridge import memory
+from app.modules.llm_bridge import digests, memory
 from app.modules.llm_bridge.chat_schemas import (
     LlmChatAttachmentOut,
     LlmChatClearedOut,
+    LlmChatCompactIn,
     LlmChatContextOut,
+    LlmChatContinuedOut,
+    LlmChatContinueIn,
     LlmChatConversationOut,
     LlmChatCreatedOut,
     LlmChatCreateIn,
@@ -269,6 +272,7 @@ class LlmChatService:
                     attachments=item.get("attachments") or [],
                     imported=bool(item.get("imported")),
                     delivery=item.get("delivery") if is_user else None,
+                    kind=item.get("kind") if is_user else None,
                     references=item.get("references") or [] if is_user else [],
                     trigger=item.get("trigger") if compacted else None,
                     pre_tokens=item.get("pre_tokens") if compacted else None,
@@ -694,6 +698,93 @@ class LlmChatService:
         )
         await self.db.commit()
         return session_out(data, me)
+
+    async def _as_user(
+        self,
+        access: WorkspaceAccess,
+        row: LlmBridge,
+        session_id: str,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        takeover: bool,
+        what: str,
+    ) -> dict[str, Any]:
+        """代表这个人调用会话桥的写工具。
+
+        别人建的会话没确认时 409 TAKEOVER_REQUIRED（和发送一样）。"""
+        self._writable(row)
+        caller = await self._caller(access, SCOPES if takeover else OWN_SCOPES)
+        client = await self.bridges.client(row)
+        await self.db.commit()
+        try:
+            return await self._tool(client, caller, name, {"session_id": session_id, **arguments})
+        except ApiError as error:
+            if error.code == "NOT_FOUND" and not takeover:
+                await self._admin(client, "GET", f"/sessions/{session_id}/events?after=0")
+                raise ApiError(
+                    409, "TAKEOVER_REQUIRED", f"这不是你建的会话：确认后再{what}"
+                ) from error
+            raise
+
+    async def compact(
+        self, access: WorkspaceAccess, row: LlmBridge, session_id: str, body: LlmChatCompactIn
+    ) -> LlmChatTurnOut:
+        """手动压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）。
+
+        排一个回合，轮到时让平台压缩上下文。"""
+        bridge_id, bridge_name = row.id, row.name
+        data = await self._as_user(
+            access,
+            row,
+            session_id,
+            "llm_session_compact",
+            {"instructions": body.instructions, "request_id": body.request_id, "wait_seconds": 0},
+            takeover=body.takeover,
+            what="压缩上下文",
+        )
+        await self.bridges.audit(
+            access,
+            "chat_session_compacted",
+            bridge_id,
+            {"bridge": bridge_name, "session": session_id, "turn": data.get("turn_id")},
+        )
+        await self.db.commit()
+        return _turn_out(data)
+
+    async def continue_with_summary(
+        self, access: WorkspaceAccess, row: LlmBridge, session_id: str, body: LlmChatContinueIn
+    ) -> LlmChatContinuedOut:
+        """带着摘要另开会话（4.2，复用清空上下文）：先要摘要，再清空，把摘要作为新上下文的第一条。
+
+        也是会话纪要的一个时机（5.2）：老的上下文到这里告一段落，整理一次纪要（不花 token）。"""
+        me, bridge_id, bridge_name = caller_id(access.user_id), row.id, row.name
+        data = await self._as_user(
+            access,
+            row,
+            session_id,
+            "llm_session_continue",
+            {"request_id": body.request_id},
+            takeover=body.takeover,
+            what="带着摘要另开会话",
+        )
+        await self.bridges.audit(
+            access,
+            "chat_session_continued",
+            bridge_id,
+            {"bridge": bridge_name, "session": session_id, "turn": data.get("handoff_turn_id")},
+        )
+        client = await self.bridges.client(row)
+        await self.db.commit()
+        await digests.write_for(
+            self.db, self.bridges.settings, self.bridges.runtime, bridge_id, session_id
+        )
+        view = await self._admin(client, "GET", f"/sessions/{session_id}")
+        return LlmChatContinuedOut(
+            session=session_out(view["session"], me),
+            summary_turn_id=str(data["summary_turn_id"]),
+            handoff_turn_id=data.get("handoff_turn_id"),
+        )
 
     async def clear_context(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str, *, takeover: bool

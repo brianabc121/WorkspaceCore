@@ -794,6 +794,34 @@ describe('大模型聊天', () => {
     expect(screen.getByRole('link', { name: '会话纪要' })).toHaveAttribute('aria-current', 'page')
   })
 
+  it('compacts or continues with a summary from the near-limit hint and tags those turns', async () => {
+    const context = { used: 170000, window: 200000, percent: 85, compactions: 0, last_compacted_at: null, last_trigger: null, near_limit: true, warn_percent: 80 }
+    const calls: [string, unknown][] = []
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    setup('owner', { conversations: { [S1]: talk({ context }, [asked('第一问'), answered('第一答'), asked('交接摘要', T2, { kind: 'summary' }), answered('摘要', T2), asked('压缩', 'bt_' + '3'.repeat(20), { kind: 'compact' })]) } }, async r => {
+      const p = path(r)
+      if (p === `${chat}/sessions/${S1}/compact` || p === `${chat}/sessions/${S1}/continue`) {
+        calls.push([p.split('/').at(-1)!, await r.json()])
+        return p.endsWith('/compact') ? Response.json(turn(T2)) : Response.json({ session: session({ context }), summary_turn_id: T1, handoff_turn_id: T2 })
+      }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const hint = await screen.findByText(/快到平台自动压缩的位置了/)
+    const box = hint.closest('[role="note"]') as HTMLElement
+    await fireEvent.click(within(box).getByRole('button', { name: '压缩一下' }))
+    await waitFor(() => expect(calls).toHaveLength(1))
+    await waitFor(() => expect(within(box).getByRole('button', { name: '带着摘要另开会话' })).toBeEnabled())
+    await fireEvent.click(within(box).getByRole('button', { name: '带着摘要另开会话' }))
+    await waitFor(() => expect(calls).toHaveLength(2))
+    expect(calls[0]).toEqual(['compact', { instructions: '', request_id: expect.stringMatching(/^web-/), takeover: false }])
+    expect(calls[1]).toEqual(['continue', { request_id: expect.stringMatching(/^web-/), takeover: false }])
+    expect(await screen.findByText(/已排上“带着摘要另开会话”/)).toBeVisible()
+    // 特殊的回合带着标记
+    expect(screen.getByText('要交接摘要')).toBeVisible()
+    expect(screen.getByText('手动压缩')).toBeVisible()
+  })
+
   it('says that CodeBuddy gives no quota instead of promising one after a turn', async () => {
     setup('owner', { conversations: { [S1]: talk({ platform: 'workbuddy' }) } }, withQuota)
     await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)

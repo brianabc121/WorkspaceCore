@@ -238,7 +238,8 @@
 .lc-compacted { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .78rem; text-align: center; }
 .lc-compacted::before, .lc-compacted::after { content: ""; flex: 1; min-width: 16px; border-top: 1px dotted var(--line); }
 .lc-compacted > span { max-width: 80%; overflow-wrap: anywhere; }
-.lc-context-warn { background: var(--warning-soft); color: var(--warning); }
+.lc-context-warn { background: var(--warning-soft); color: var(--warning); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.lc-context-actions { display: inline-flex; flex-wrap: wrap; gap: 4px 12px; }
 
 /* 提问前用上知识库（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 6 节）：相近内容的提示、挑选的笔记 */
 .lc-kb { display: grid; gap: 6px; }

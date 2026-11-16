@@ -224,6 +224,19 @@ export function useLlmChat(scope: string) {
       await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }), cache.invalidateQueries({ queryKey: key(bridge, 'session', session) })])
       return out
     },
+    // ---- 手动压缩、带着摘要另开会话（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）----
+    /** 手动压缩：排一个回合，轮到时让平台压缩上下文。别人建的会话要 takeover */
+    async compact(bridge: string, session: string, instructions = '', takeover = false) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/compact', { params: sessionAt(bridge, session), body: { instructions, request_id: newRequestId(), takeover } }))
+      await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }), cache.invalidateQueries({ queryKey: key(bridge, 'session', session) })])
+      return out
+    },
+    /** 带着摘要另开会话：先要摘要，再清空上下文，把摘要作为新上下文的第一条发出（同一个会话） */
+    async continueWithSummary(bridge: string, session: string, takeover = false) {
+      const out = dataOf(await auth.slowApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/continue', { params: sessionAt(bridge, session), body: { request_id: newRequestId(), takeover } }))
+      await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }), cache.invalidateQueries({ queryKey: key(bridge, 'session', session) })])
+      return out
+    },
     // ---- 提问前用上知识库、会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 5、6 节）----
     /** 输入框里的文字在知识库和以前的会话里找相近的（只在工作台里找，不发给任何平台） */
     async related(bridge: string, q: string, session?: string, signal?: AbortSignal) {
@@ -292,6 +305,12 @@ export const DIGEST_STATE: Record<string, string> = { active: '照常更新', of
 export const DIGEST_REASON: Record<string, string> = { compaction: '平台压缩了上下文', archived: '会话归档', idle: '24 小时没有新回合', continued: '带着摘要另开会话', manual: '管理员要求现在整理' }
 /** 一条消息最多带几篇笔记（和后端一致） */
 export const MAX_REFERENCES = 3
+/** 特殊回合的说明（4.2）：要交接摘要、带着摘要另开、手动压缩 */
+export const TURN_KIND: Record<string, { label: string; title: string }> = {
+  summary: { label: '要交接摘要', title: '带着摘要另开会话的第一步：在老的上下文里要一份交接摘要' },
+  handoff: { label: '带着摘要另开', title: '清空了上下文，把上一步的摘要作为新上下文的第一条发出' },
+  compact: { label: '手动压缩', title: '让平台把之前的内容压成摘要' },
+}
 /** 会话的上下文用了多少、压缩过几次（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）；平台没报就说没有 */
 export function contextText(context: ChatContext | null | undefined) {
   if (!context) return ''
