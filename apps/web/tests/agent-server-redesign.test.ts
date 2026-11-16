@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { fireEvent, screen, within } from '@testing-library/vue'
 import { mockApi, openApp, me, workspace } from './helpers'
-import { at, current, detail, fail, job, path, readyServer, readySsh, row, server, serverList, ssh, summary } from './agents-fixtures'
+import { PREPARE_STEPS, at, current, detail, fail, job, path, readyServer, readySsh, row, server, serverList, ssh, summary } from './agents-fixtures'
 import type { Schema } from '../src/services/api'
 
 // T-0181（改造方案 Task 4 Step 1–2）：独立的“智能体服务器”页——两个侧栏入口、旧链接跳转、服务端统计、服务器表、
@@ -266,7 +266,25 @@ describe('agent servers page: connection and initialization', () => {
     expect(await within(progress).findByText(/这个账号不能用 sudo/, {}, { timeout: 4000 })).toBeVisible()
     const steps = within(progress).getAllByRole('listitem')
     expect(steps.map(li => li.getAttribute('data-status'))).toEqual(['done', 'failed', 'pending'])
-    expect(steps[1]).toHaveTextContent('检测系统与权限：sudo 被拒绝失败')
+    // 步骤名与说明分两行；失败原因挂在失败的那一步下面；结束后没轮到的步骤是“未执行”（T-0265）
+    expect(within(steps[0]!).getByText('用保存的密码登录服务器')).toBeVisible()
+    expect(within(steps[1]!).getByText('检测系统与权限')).toBeVisible()
+    expect(within(steps[1]!).getByText('sudo 被拒绝')).toBeVisible()
+    const reason = within(steps[1]!).getByRole('alert')
+    expect(reason).toHaveTextContent('失败原因这个账号不能用 sudo：请换 root 或能 sudo 的账号AGENT_SSH_SUDO_FAILED')
+    expect(within(steps[1]!).getByText('失败')).toBeVisible()
+    expect(within(steps[2]!).getByText('未执行')).toBeVisible()
+    expect(progress).toHaveTextContent('完成 1 / 3 步，在第 2 步失败')
+    expect(progress).toHaveTextContent('后面 1 步未执行')
+    // 命令输出默认折叠，“查看命令输出”展开它
+    const log = progress.querySelector('details')!
+    expect(log.open).toBe(false)
+    expect(within(progress).getByText('2 行 · 密码、令牌、私钥已替换成 ***')).toBeInTheDocument()
+    await fireEvent.click(within(reason).getByRole('button', { name: '查看命令输出' }))
+    await vi.waitFor(() => expect(log.open).toBe(true))
+    expect(within(log).getByText('$ sudo -S true')).toHaveClass('is-cmd')
+    // 失败后主按钮变成“重新初始化”
+    expect(within(panel).getByRole('button', { name: '重新初始化' })).toBeEnabled()
     expect(within(panel).getAllByText('初始化失败').length).toBeGreaterThan(0)
     expect(within(panel).queryByText(/服务器环境初始化完成/)).not.toBeInTheDocument()
   })
@@ -334,9 +352,13 @@ describe('agent servers page: connection and initialization', () => {
     })
     const first = await openApp('/agent-servers?server=srv-1')
     const head = await screen.findByRole('region', { name: '服务器：香港节点 A' })
-    const meters = within(head).getByRole('list', { name: '整机当前用量' })
+    // 页头一行五格：连接、服务器环境、CPU、内存、部署智能体（T-0265）；没有上报写“暂无上报”，不画 0
+    const meters = within(head).getByRole('list', { name: '服务器概览' })
+    expect(within(meters).getAllByRole('listitem').map(li => li.querySelector('.asv-stat-label')?.textContent)).toEqual(['连接', '服务器环境', 'CPU', '内存', '部署智能体'])
     expect(within(meters).getAllByText('暂无上报')).toHaveLength(2)
     expect(meters).not.toHaveTextContent('0%')
+    expect(meters).toHaveTextContent('连接连接正常')
+    expect(meters).toHaveTextContent('服务器环境已就绪')
     expect(within(head).getByRole('link', { name: /前往部署智能体/ })).toHaveAttribute('href', '/agents?deploy=1&server_id=srv-1')
     const deployed = screen.getByRole('region', { name: '已部署 OpenClaw' })
     expect(within(deployed).getByRole('heading', { name: '已部署 OpenClaw · 3' })).toBeVisible()
@@ -358,8 +380,124 @@ describe('agent servers page: connection and initialization', () => {
 
     reported = true
     await openApp('/agent-servers?server=srv-1')
-    const live = await screen.findByRole('list', { name: '整机当前用量' })
+    const live = await screen.findByRole('list', { name: '服务器概览' })
     await vi.waitFor(() => expect(live).toHaveTextContent('CPU60%'))
     expect(live).toHaveTextContent('内存12.0 GB / 16.0 GB')
+  })
+})
+
+// T-0265：按效果图重排的“连接与初始化”——登录前提清单、进行中的任务、成功条、没有失败步骤时的失败原因
+describe('agent servers page: initialization layout', () => {
+  const STEPS6 = ['connect', 'inspect', 'docker', 'reconnect', 'workspace', 'verify'] as const
+
+  it('locks every action while a job runs, shows which step and its newest output, and keeps the steps as “等待”', async () => {
+    const s = server({ ssh: readySsh({ prepared_at: null }), initialization_status: 'initializing', deploy_block_reason: 'initializing' })
+    const running = job('prepare', 'running', { log: '$ 安装 Docker 与 Compose\nGet:1 https://download.example.invalid stable InRelease\n\nSetting up containerd.io ...\n' })
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/agents/servers') return Response.json(serverList([s]))
+      if (path(r) === '/api/v1/agents/servers/srv-1') return Response.json(detail(s, { job: running }))
+    })
+    await openApp('/agent-servers?server=srv-1')
+    const panel = await screen.findByRole('region', { name: '连接与初始化' })
+    expect(within(panel).getByRole('button', { name: '初始化中…' })).toBeDisabled()
+    expect(panel).toHaveTextContent('这台服务器正在执行任务，结束后再操作。')
+    const checks = within(panel).getByRole('region', { name: '登录前提' })
+    expect(checks).toHaveTextContent('4 / 4 通过')
+    expect(checks).toHaveTextContent('登录地址deploy@203.0.113.10:22')
+    expect(checks).toHaveTextContent('登录密码已加密保存第 1 版')
+    expect(checks).toHaveTextContent('主机指纹已确认')
+    expect(checks).toHaveTextContent('连接测试连接正常')
+    for (const name of ['更换地址', '更新密码', '测试连接']) expect(within(checks).getByRole('button', { name })).toBeDisabled()
+    const progress = within(panel).getByRole('region', { name: '初始化服务器进度' })
+    expect(progress).toHaveAttribute('data-status', 'running')
+    expect(progress).toHaveTextContent('正在执行第 3 / 4 步')
+    expect(progress).toHaveTextContent('完成 2 步')
+    const steps = within(progress).getAllByRole('listitem')
+    expect(within(steps[2]!).getByText('进行中')).toBeVisible()
+    const live = within(steps[2]!).getByLabelText('最新输出')
+    expect(live).toHaveTextContent('Setting up containerd.io ...')
+    expect(within(live).getByText('$ 安装 Docker 与 Compose')).toHaveClass('is-cmd')
+    expect(within(steps[3]!).getByText('等待')).toBeVisible()
+    expect(within(panel).getByText('可以离开这个页面')).toBeVisible()
+    expect(within(panel).getByRole('button', { name: '移除服务器' })).toBeDisabled()
+    expect(within(panel).getByText('这台服务器正在执行任务，结束后才能移除。')).toBeVisible()
+    expect(writes(requests)).toHaveLength(0)
+  })
+
+  it('points to the fingerprint check from the checklist and shows the plan before the first run', async () => {
+    const s = server()
+    setup(r => {
+      if (path(r) === '/api/v1/agents/servers') return Response.json(serverList([s]))
+      if (path(r) === '/api/v1/agents/servers/srv-1') return Response.json(detail(s))
+    })
+    await openApp('/agent-servers?server=srv-1')
+    const panel = await screen.findByRole('region', { name: '连接与初始化' })
+    expect(panel).toHaveTextContent('先核对主机指纹，再测试连接与初始化。')
+    const checks = within(panel).getByRole('region', { name: '登录前提' })
+    expect(checks).toHaveTextContent('2 / 4 通过')
+    expect(checks).toHaveTextContent('主机指纹待核对')
+    expect(checks).toHaveTextContent('连接测试未检测核对指纹后才能测试')
+    expect(within(checks).getByRole('button', { name: '测试连接' })).toBeDisabled()
+    await fireEvent.click(within(checks).getByRole('button', { name: '去核对' }))
+    const verify = within(panel).getByRole('group', { name: '核对主机公钥' })
+    await vi.waitFor(() => expect(document.activeElement).toBe(within(verify).getByLabelText(/我已在服务器上核对/)))
+    const plan = within(panel).getByRole('region', { name: '初始化将完成' })
+    expect(within(plan).getAllByRole('listitem')).toHaveLength(4)
+    expect(within(plan).getAllByText('待执行')).toHaveLength(4)
+    expect(within(panel).getByRole('button', { name: '初始化服务器' })).toBeDisabled()
+    expect(within(panel).getByText('工作台不再保存它的地址、主机公钥与登录密码；不会停止或删除服务器上的任何容器。')).toBeVisible()
+  })
+
+  it('folds a finished initialization into one success strip, opens the steps on request, and shows a short notice', async () => {
+    const s = readyServer()
+    const done = job('prepare', 'succeeded', { steps: STEPS6.map(key => ({ key, status: 'done', detail: null })) })
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/agents/servers') return Response.json(serverList([s]))
+      if (path(r) === '/api/v1/agents/servers/srv-1' && r.method === 'GET') return Response.json(detail(s, { job: done }))
+      if (path(r) === '/api/v1/agents/servers/srv-1/test-connection') return Response.json(detail(s, { job: done }))
+    })
+    await openApp('/agent-servers?server=srv-1')
+    const panel = await screen.findByRole('region', { name: '连接与初始化' })
+    expect(panel).toHaveTextContent('环境已就绪，可以在这台服务器上部署智能体了。')
+    const progress = within(panel).getByRole('region', { name: '初始化服务器进度' })
+    expect(within(progress).getByRole('status')).toHaveTextContent('服务器初始化完成：可以在这台服务器上部署智能体了。')
+    for (const chip of ['Docker 与 Compose', '部署目录', '平台连通']) expect(within(progress).getByText(chip)).toBeVisible()
+    expect(within(progress).queryAllByRole('listitem')).toHaveLength(0)
+    const toggle = within(progress).getByRole('button', { name: '查看每一步（6 / 6 步完成）' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await fireEvent.click(toggle)
+    expect(within(progress).getAllByRole('listitem')).toHaveLength(6)
+    expect(within(progress).getByRole('button', { name: '收起每一步' })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(panel).getByRole('button', { name: '重新初始化' })).toBeEnabled()
+    await fireEvent.click(within(within(panel).getByRole('region', { name: '登录前提' })).getByRole('button', { name: '测试连接' }))
+    expect(await json(requests, 'POST', '/api/v1/agents/servers/srv-1/test-connection')).toEqual({ version: 1 })
+    const toast = await within(panel).findByText('连接正常：已用保存的密码登录服务器。')
+    expect(toast).toHaveAttribute('role', 'status')
+    expect(toast).toHaveClass('asv-toast')
+  })
+
+  it('shows the reason on its own when the job failed before any step, and marks the error lines in the output', async () => {
+    const s = server({ ssh: readySsh({ prepared_at: null }), initialization_status: 'failed', deploy_block_reason: 'initialization_failed' })
+    const failed = job('prepare', 'failed', {
+      error_code: 'unsupported_os', error_message: '自动安装 Docker 只支持 Ubuntu 22.04 / 24.04、Debian 12（amd64、arm64）',
+      log: 'os_id=debian\n$ 核对物理服务器身份（退出码 0）\n！自动安装 Docker 只支持 Ubuntu 22.04 / 24.04、Debian 12（amd64、arm64）',
+      steps: PREPARE_STEPS.map(key => ({ key, status: key === 'connect' ? 'done' : 'pending', detail: null })),
+    })
+    setup(r => {
+      if (path(r) === '/api/v1/agents/servers') return Response.json(serverList([s]))
+      if (path(r) === '/api/v1/agents/servers/srv-1') return Response.json(detail(s, { job: failed }))
+    })
+    await openApp('/agent-servers?server=srv-1')
+    const progress = await screen.findByRole('region', { name: '初始化服务器进度' })
+    expect(progress).toHaveTextContent('完成 1 / 4 步后失败')
+    expect(progress).toHaveTextContent('后面 3 步未执行')
+    const reason = within(progress).getByRole('alert')
+    expect(reason).toHaveTextContent('失败原因自动安装 Docker 只支持')
+    expect(reason).toHaveTextContent('unsupported_os')
+    expect(within(progress).getAllByText('未执行')).toHaveLength(3)
+    const log = progress.querySelector('details')!
+    expect(within(log).getByText(/^！自动安装 Docker/)).toHaveClass('is-err')
+    expect(within(log).getByText('os_id=debian')).not.toHaveClass('is-err')
+    expect(within(log).getByText('3 行 · 密码、令牌、私钥已替换成 ***')).toBeInTheDocument()
   })
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
-import { ArrowRight, Cpu, MemoryStick, Server as ServerIcon, X } from '@lucide/vue'
+import { ArrowRight, Cpu, MemoryStick, Package, Plug, Rocket, Server as ServerIcon, X } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import { dataOf } from '../../services/api'
 import { formatTime } from '../time'
@@ -20,8 +20,8 @@ import ServerAgentsTable from './ServerAgentsTable.vue'
 import OpsPanel from './OpsPanel.vue'
 import ModuleServerPanels from '../../modules/ModuleServerPanels.vue'
 
-// 服务器详情（T-0147；独立页面 T-0181，效果图 01 下半部分）：名称、地址与真实 CPU / 内存（没有上报写“暂无上报”，不写 0）、
-// 前往部署；连接与初始化；“已部署 OpenClaw”清单（跳到智能体详情）；整机负载与趋势、各智能体负载；服务器级运维。
+// 服务器详情（T-0147；独立页面 T-0181，效果图 01 下半部分；页头按 T-0265 效果图收成一行五格）：名称、地址，
+// 连接、服务器环境、真实 CPU / 内存（没有上报写“暂无上报”，不写 0）、前往部署；连接与初始化；“已部署 OpenClaw”清单（跳到智能体详情）；整机负载与趋势、各智能体负载；服务器级运维。
 // “已部署 OpenClaw”后面是插拔式模块提供的区块（例如大模型客户端的“MCP 管理器”，T-0234）：经 ModuleServerPanels 渲染，这里不导入模块的代码。
 const props = defineProps<{ serverId: string; range: HostRange }>()
 const emit = defineEmits<{ back: []; edit: [mode: 'credentials' | 'address', server: Server]; range: [range: HostRange] }>()
@@ -101,32 +101,37 @@ async function rename() {
           </div>
         </div>
 
-        <div class="asv-head-body">
-          <ul class="asv-meters" aria-label="整机当前用量">
-            <li>
-              <span class="asv-meter-label"><Cpu aria-hidden="true" />CPU</span>
-              <template v-if="current && current.cpu_percent !== null"><b>{{ percent(current.cpu_percent) }}</b><span class="host-bar" aria-hidden="true"><span :style="bar(current.cpu_percent)" /></span></template>
-              <span v-else class="asv-none">暂无上报</span>
-            </li>
-            <li>
-              <span class="asv-meter-label"><MemoryStick aria-hidden="true" />内存</span>
-              <template v-if="current && memPercent !== null"><b>{{ bytes(current.mem_used) }} / {{ bytes(current.mem_total) }}</b><span class="host-bar" aria-hidden="true"><span :style="bar(memPercent)" /></span></template>
-              <span v-else class="asv-none">暂无上报</span>
-            </li>
-          </ul>
-          <div class="asv-deploy-link">
-            <RouterLink v-if="server.kind === 'ssh' && server.deployable" class="asv-go" :to="{ path: '/agents', query: { deploy: '1', server_id: server.id } }">前往部署智能体<ArrowRight aria-hidden="true" /></RouterLink>
-            <p v-else-if="server.kind === 'ssh'" class="form-help">暂不能部署：{{ blockReason(server) }}</p>
-            <p v-else class="form-help">自动识别的服务器不能自动部署。</p>
-          </div>
-        </div>
-
-        <dl class="asv-head-facts">
-          <div><dt>连接状态</dt><dd><span v-if="connection" class="asv-state" :class="`tone-${connection.tone}`">{{ connection.label }}</span></dd></div>
-          <div><dt>环境状态</dt><dd>{{ init?.label }}</dd></div>
-          <div><dt>最近检查</dt><dd>{{ server.ssh?.last_connection_at ? formatTime(server.ssh.last_connection_at) : '—' }}</dd></div>
-          <div><dt>最近上报</dt><dd>{{ server.reported_at ? formatTime(server.reported_at) : '暂无上报' }}<template v-if="server.reported_at && server.stale">（已过期）</template></dd></div>
-        </dl>
+        <ul class="asv-stats" aria-label="服务器概览">
+          <li>
+            <span class="asv-stat-label"><Plug aria-hidden="true" />连接</span>
+            <span class="asv-stat-value"><span v-if="connection" class="asv-state" :class="`tone-${connection.tone}`">{{ connection.label }}</span></span>
+            <span class="asv-stat-note">{{ server.ssh ? (server.ssh.last_connection_at ? `${formatTime(server.ssh.last_connection_at)} 检测` : '还没有检测') : server.reported_at ? `${formatTime(server.reported_at)} 上报` : '没有上报' }}</span>
+          </li>
+          <li>
+            <span class="asv-stat-label"><Package aria-hidden="true" />服务器环境</span>
+            <span class="asv-stat-value"><span v-if="init" class="asv-state" :class="`tone-${init.tone}`">{{ init.label }}</span></span>
+            <span v-if="server.ssh?.prepared_at && server.initialization_status === 'ready'" class="asv-stat-note">{{ formatTime(server.ssh.prepared_at) }} 完成</span>
+          </li>
+          <li class="asv-stat-usage">
+            <span class="asv-stat-label"><Cpu aria-hidden="true" />CPU</span>
+            <template v-if="current && current.cpu_percent !== null"><b class="asv-stat-value">{{ percent(current.cpu_percent) }}</b><span class="host-bar" aria-hidden="true"><span :style="bar(current.cpu_percent)" /></span><span v-if="server.reported_at" class="asv-stat-note">最近上报 {{ formatTime(server.reported_at) }}<template v-if="server.stale">（已过期）</template></span></template>
+            <template v-else><span class="asv-stat-value asv-none">暂无上报</span><span class="asv-stat-note">智能体上线后每分钟上报</span></template>
+          </li>
+          <li class="asv-stat-usage">
+            <span class="asv-stat-label"><MemoryStick aria-hidden="true" />内存</span>
+            <template v-if="current && memPercent !== null"><b class="asv-stat-value">{{ bytes(current.mem_used) }} / {{ bytes(current.mem_total) }}</b><span class="host-bar" aria-hidden="true"><span :style="bar(memPercent)" /></span><span class="asv-stat-note">已用 {{ percent(memPercent) }}</span></template>
+            <template v-else><span class="asv-stat-value asv-none">暂无上报</span><span class="asv-stat-note">{{ server.reported_at ? `最近上报 ${formatTime(server.reported_at)}${server.stale ? '（已过期）' : ''}` : '智能体上线后每分钟上报' }}</span></template>
+          </li>
+          <li>
+            <span class="asv-stat-label"><Rocket aria-hidden="true" />部署智能体</span>
+            <template v-if="server.kind === 'ssh' && server.deployable">
+              <RouterLink class="asv-go asv-stat-value" :to="{ path: '/agents', query: { deploy: '1', server_id: server.id } }">前往部署智能体<ArrowRight aria-hidden="true" /></RouterLink>
+              <span class="asv-stat-note">{{ data.agents.length ? `已有 ${data.agents.length} 个智能体` : '还没有智能体' }}</span>
+            </template>
+            <template v-else-if="server.kind === 'ssh'"><span class="asv-stat-value asv-none">暂不能部署</span><span class="asv-stat-note">{{ blockReason(server) }}</span></template>
+            <template v-else><span class="asv-stat-value asv-none">不能自动部署</span><span class="asv-stat-note">自动识别的服务器不能自动部署。</span></template>
+          </li>
+        </ul>
         <ul v-if="server.alerts.length" class="host-alerts" aria-label="正在提醒的告警">
           <li v-for="a in server.alerts" :key="a"><span class="host-alert-icon" aria-hidden="true">!</span>{{ ALERT[a] }}</li>
         </ul>
