@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue'
-import { Archive, ArrowLeft, BookOpen, Code2, Cpu, Download, Eraser, Layers, MessageSquare, PanelRight, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
+import { Archive, ArrowLeft, BookOpen, ChevronDown, ChevronUp, Code2, Cpu, Download, Eraser, Layers, MessageSquare, MoreHorizontal, PanelRight, Paperclip, Pencil, RefreshCw, Search, Send, Square, X } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { CHAT_NO_TOOLS, MODES, platformName, seconds, type Bridge, type Platform, type Quota } from '../api'
@@ -316,7 +316,7 @@ function saveTitle() {
 }
 // 换模型：Claude / CodeBuddy 每个回合起一次官方程序，模型可以逐回合换；ChatGPT / Codex 的会话换不了
 const canSwitch = computed(() => !!session.value && ['claude', 'workbuddy'].includes(session.value.platform) && session.value.origin === 'bridge' && session.value.status === 'active' && props.bridge.enabled)
-const optionPlatform = computed(() => (canSwitch.value && infoOpen.value ? (session.value!.platform as Platform) : null))
+const optionPlatform = computed(() => (canSwitch.value ? (session.value!.platform as Platform) : null))
 const optionMode = computed<'chat' | 'dev'>(() => (session.value?.mode === 'dev' ? 'dev' : 'chat'))
 const options = props.chat.useOptions(bridgeId, optionPlatform, optionMode)
 const models = computed(() => (canSwitch.value ? (options.data.value?.models ?? []).map(m => ({ id: m.id, name: m.name })) : []))
@@ -337,9 +337,80 @@ async function exportSession() {
   } catch (e) { headError.value = `没能导出：${chatError(e)}` } finally { working.value = false }
 }
 function archive() {
-  if (!window.confirm('归档这个会话？\n\n归档后不能再往里发消息，记录保留，可以在“看已归档的”里找到。')) return
+  if (!window.confirm('归档这个会话？\n\n归档后不能再往里发消息，记录保留，可以在左栏的“已归档”里找到。')) return
   return act(() => props.chat.archive(props.bridge.id, props.sessionId))
 }
+
+// ---- 头部的“更多操作”：改标题、清空上下文、导出、归档、重新导入。点外面、按 Esc、做了一个操作后收起 ----
+const moreOpen = ref(false), moreBox = ref<HTMLElement | null>(null)
+function outsideMore(event: MouseEvent) { if (moreOpen.value && moreBox.value && !moreBox.value.contains(event.target as Node)) moreOpen.value = false }
+function escapeMore(event: KeyboardEvent) { if (event.key === 'Escape') moreOpen.value = false }
+document.addEventListener('click', outsideMore, true)
+document.addEventListener('keydown', escapeMore)
+function menu(action: () => unknown) { moreOpen.value = false; return action() }
+
+// ---- 会话内搜索：在这个会话的提问和回答里找一段文字，逐处跳过去 ----
+// 命中的那条消息标出来；浏览器支持 CSS Custom Highlight 时把命中的文字也高亮（不改页面内容）
+const searchOpen = ref(false), query = ref(''), hitAt = ref(0), searchInput = ref<HTMLInputElement | null>(null)
+const needle = computed(() => query.value.trim().toLowerCase())
+const hits = computed(() => (needle.value
+  ? messages.value.flatMap((m, i) => ((m.role === 'user' || m.role === 'assistant') && [m.text, m.partial].filter(Boolean).join('\n').toLowerCase().includes(needle.value) ? [i] : []))
+  : []))
+const hitNow = computed(() => (hits.value.length ? hits.value[Math.min(hitAt.value, hits.value.length - 1)]! : -1))
+function openSearch() {
+  if (searchOpen.value) { closeSearch(); return }
+  searchOpen.value = true
+  void nextTick(() => searchInput.value?.focus())
+}
+function closeSearch() { searchOpen.value = false; query.value = ''; hitAt.value = 0; paint() }
+function stepHit(delta: number) {
+  const n = hits.value.length
+  if (n) hitAt.value = (Math.min(hitAt.value, n - 1) + delta + n) % n
+}
+function onSearchKey(event: KeyboardEvent) {
+  if (event.isComposing) return
+  if (event.key === 'Enter') { event.preventDefault(); stepHit(event.shiftKey ? -1 : 1) }
+  else if (event.key === 'Escape') { event.preventDefault(); closeSearch() }
+}
+type HighlightRegistry = { set(name: string, value: unknown): void; delete(name: string): void }
+function paint() {
+  const registry = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS?.highlights
+  const Mark = (globalThis as { Highlight?: new (...ranges: Range[]) => unknown }).Highlight
+  if (!registry || !Mark) return
+  registry.delete('lc-hit'); registry.delete('lc-hit-now')
+  const root = box.value
+  if (!searchOpen.value || !needle.value || !root) return
+  const all: Range[] = [], now: Range[] = []
+  for (const bubble of Array.from(root.querySelectorAll<HTMLElement>('li[data-msg] .lc-bubble'))) {
+    const current = bubble.closest('li')?.getAttribute('data-msg') === String(hitNow.value)
+    const walker = document.createTreeWalker(bubble, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = (node.textContent ?? '').toLowerCase()
+      for (let at = text.indexOf(needle.value); at >= 0; at = text.indexOf(needle.value, at + needle.value.length)) {
+        const range = document.createRange()
+        range.setStart(node, at); range.setEnd(node, at + needle.value.length)
+        ;(current ? now : all).push(range)
+      }
+    }
+  }
+  registry.set('lc-hit', new Mark(...all))
+  registry.set('lc-hit-now', new Mark(...now))
+}
+watch(needle, () => { hitAt.value = 0 })
+watch([hitNow, () => messages.value.length], () => {
+  void nextTick(() => {
+    paint()
+    if (hitNow.value < 0) return
+    stick = false
+    box.value?.querySelector<HTMLElement>(`li[data-msg="${hitNow.value}"]`)?.scrollIntoView?.({ block: 'center' })
+  })
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', outsideMore, true)
+  document.removeEventListener('keydown', escapeMore)
+  const registry = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS?.highlights
+  registry?.delete('lc-hit'); registry?.delete('lc-hit-now')
+})
 </script>
 
 <template>
@@ -356,22 +427,45 @@ function archive() {
           <h2 v-else>{{ session ? session.title || '（没有标题）' : '会话' }}</h2>
         </div>
         <div v-if="session" class="lc-head-actions">
-          <button v-if="session.origin === 'external'" type="button" class="lc-icon" aria-label="重新导入" title="重新向官方程序读一次内容" :disabled="working" @click="reimport"><RefreshCw aria-hidden="true" /></button>
-          <button v-if="!renaming && session.origin !== 'external'" type="button" class="lc-icon" aria-label="改标题" title="改标题" :disabled="working" @click="startRename"><Pencil aria-hidden="true" /></button>
-          <button v-if="canClear" type="button" class="lc-icon" aria-label="清空上下文" title="清空上下文：之后的消息从头开始，上面的记录保留（也可以在输入框里输入 /clear）" :disabled="clearing" @click="clearContext()"><Eraser aria-hidden="true" /></button>
-          <button type="button" class="lc-icon" aria-label="导出会话" title="导出成 Markdown 文件" :disabled="working" @click="exportSession"><Download aria-hidden="true" /></button>
-          <button v-if="session.status !== 'archived'" type="button" class="lc-icon" aria-label="归档会话" title="归档" :disabled="working" @click="archive"><Archive aria-hidden="true" /></button>
+          <button type="button" class="lc-icon" :aria-pressed="searchOpen" aria-label="在会话里搜索" title="在这个会话里搜索" @click="openSearch"><Search aria-hidden="true" /></button>
+          <div ref="moreBox" class="lc-menu-wrap">
+            <button type="button" class="lc-icon" aria-label="更多操作" title="更多操作" aria-haspopup="true" :aria-expanded="moreOpen" @click="moreOpen = !moreOpen"><MoreHorizontal aria-hidden="true" /></button>
+            <div v-if="moreOpen" class="lc-menu" role="group" aria-label="会话操作">
+              <button v-if="!renaming && session.origin !== 'external'" type="button" aria-label="改标题" :disabled="working" @click="menu(startRename)"><Pencil aria-hidden="true" />改标题</button>
+              <button v-if="canClear" type="button" aria-label="清空上下文" title="之后的消息从头开始，上面的记录保留（也可以在输入框里输入 /clear）" :disabled="clearing" @click="menu(() => clearContext())"><Eraser aria-hidden="true" />清空上下文</button>
+              <button v-if="session.origin === 'external'" type="button" aria-label="重新导入" title="重新向官方程序读一次内容" :disabled="working" @click="menu(reimport)"><RefreshCw aria-hidden="true" />重新导入</button>
+              <button type="button" aria-label="导出会话" title="导出成 Markdown 文件" :disabled="working" @click="menu(exportSession)"><Download aria-hidden="true" />导出</button>
+              <button v-if="session.status !== 'archived'" type="button" aria-label="归档会话" :disabled="working" @click="menu(archive)"><Archive aria-hidden="true" />归档</button>
+            </div>
+          </div>
           <button type="button" class="lc-icon" :aria-pressed="infoOpen" aria-label="会话信息" title="会话详情" @click="infoOpen = !infoOpen"><PanelRight aria-hidden="true" /></button>
         </div>
         <ul v-if="session" class="lc-chips" aria-label="会话的平台、模型与用法" :title="`${bridge.name} · ${ownerText(session)}建的`">
           <li class="lc-chip"><span class="lc-chip-mark" :data-platform="session.platform" aria-hidden="true">{{ PLATFORM_MARK[session.platform] ?? '?' }}</span>{{ platformName(session.platform) }}</li>
-          <li class="lc-chip"><Cpu aria-hidden="true" />{{ session.model || '平台默认模型' }}</li>
+          <li v-if="models.length" class="lc-chip is-select" title="换了之后从下一回合起用新的模型">
+            <Cpu aria-hidden="true" />
+            <select :value="session.model ?? ''" :disabled="working" aria-label="之后的回合用的模型" @change="setModel(($event.target as HTMLSelectElement).value)">
+              <option v-if="!session.model" value="" disabled>平台默认模型</option>
+              <option v-else-if="!models.some(m => m.id === session!.model)" :value="session.model">{{ session.model }}</option>
+              <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name || m.id }}</option>
+            </select>
+            <ChevronDown aria-hidden="true" />
+          </li>
+          <li v-else class="lc-chip"><Cpu aria-hidden="true" />{{ session.model || '平台默认模型' }}</li>
           <li class="lc-chip"><component :is="session.mode === 'dev' ? Code2 : MessageSquare" aria-hidden="true" />{{ MODES[session.mode] ?? session.mode }}模式</li>
           <li v-if="session.environment" class="lc-chip"><Layers aria-hidden="true" />{{ session.environment.name }}</li>
           <li v-if="session.mode === 'chat'" class="lc-chip is-plain" :title="CHAT_NO_TOOLS">不能执行命令</li>
           <li v-if="session.status === 'archived'" class="lc-chip is-warn">已归档</li>
         </ul>
       </header>
+      <div v-if="searchOpen && session" class="lc-search-bar" role="search" aria-label="在这个会话里搜索">
+        <Search aria-hidden="true" />
+        <input ref="searchInput" v-model="query" type="search" maxlength="200" aria-label="要找的文字" placeholder="在提问和回答里找…" @keydown="onSearchKey" />
+        <span class="lc-search-count" role="status">{{ !needle ? '' : hits.length ? `第 ${Math.min(hitAt, hits.length - 1) + 1} 处 / 共 ${hits.length} 处` : '没有找到' }}</span>
+        <button type="button" class="lc-icon" aria-label="上一处" :disabled="hits.length < 2" @click="stepHit(-1)"><ChevronUp aria-hidden="true" /></button>
+        <button type="button" class="lc-icon" aria-label="下一处" :disabled="hits.length < 2" @click="stepHit(1)"><ChevronDown aria-hidden="true" /></button>
+        <button type="button" class="lc-icon" aria-label="关闭搜索" @click="closeSearch"><X aria-hidden="true" /></button>
+      </div>
       <p v-if="headError" class="lc-note is-red" role="alert">{{ headError }}</p>
       <p v-if="session?.purged_at" class="lc-note" role="note">这个会话的对话内容已经按保留期清除（{{ seconds(session.purged_at) }}）：只剩下每个回合的状态、用时和用量。</p>
 
@@ -380,7 +474,7 @@ function archive() {
         <template v-else-if="session">
           <p v-if="!messages.length" class="lc-none">这个会话里还没有消息。</p>
           <ol v-else class="lc-messages" aria-label="消息">
-            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :platform-id="session.platform" :no-tools="session.mode === 'chat'" :target="!!targetTurn && m.turn_id === targetTurn" :last="i === messages.length - 1" :busy-action="sending" :resuming="resuming" :source="source" @resume="resume" @again="again" @save="saveAnswer" />
+            <ChatMessage v-for="(m, i) in messages" :key="`${m.turn_id ?? ''}:${m.role}:${i}`" :message="m" :platform="platformName(session.platform)" :platform-id="session.platform" :no-tools="session.mode === 'chat'" :target="!!targetTurn && m.turn_id === targetTurn" :last="i === messages.length - 1" :data-msg="i" :class="{ 'is-hit': hits.includes(i), 'is-hit-now': i === hitNow }" :busy-action="sending" :resuming="resuming" :source="source" @resume="resume" @again="again" @save="saveAnswer" />
           </ol>
           <p v-if="resumeError" class="lc-note is-red" role="alert">{{ resumeError }}</p>
           <p v-if="lost" class="lc-note is-red" role="alert">{{ lost }} <button type="button" class="asv-link" @click="poll()">重试</button></p>
@@ -432,7 +526,7 @@ function archive() {
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>
       </form>
     </div>
-    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" :quota="quotas?.[session.platform] ?? null" :models="models" :changing="working" :digest="conversation.data.value?.digest ?? null" :can-write="bridge.enabled" @model="setModel" @digest="digestAction" @shape="shapeContext" @close="infoOpen = false" />
+    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" :quota="quotas?.[session.platform] ?? null" :changing="working" :digest="conversation.data.value?.digest ?? null" :can-write="bridge.enabled" @digest="digestAction" @shape="shapeContext" @close="infoOpen = false" />
     <ChatSaveNote v-if="saving && session" :chat="chat" :question="saving.question" :answer="saving.answer" :session-title="session.title" :link="saving.link" @close="saving = null" />
   </div>
 </template>

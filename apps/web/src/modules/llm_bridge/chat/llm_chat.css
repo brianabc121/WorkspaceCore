@@ -109,6 +109,27 @@
 .lc-chip-mark[data-platform="codex"] { background: color-mix(in srgb, var(--text) 10%, var(--surface)); color: var(--text); }
 .lc-chip-mark[data-platform="claude"] { background: color-mix(in srgb, var(--warning) 16%, var(--surface)); color: var(--warning); }
 .lc-head-actions { flex: none; display: flex; gap: 2px; }
+/* 头部的“更多操作”菜单、会话内搜索、模型标签上的下拉 */
+.lc-menu-wrap { position: relative; }
+.lc-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 170px; display: grid; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 12px 32px color-mix(in srgb, var(--text) 14%, transparent); }
+.lc-menu button { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 0; border-radius: 8px; background: none; color: var(--text); font: inherit; font-size: .88rem; text-align: left; white-space: nowrap; cursor: pointer; }
+.lc-menu button:hover { background: var(--surface-2); }
+.lc-menu button svg { width: 16px; height: 16px; color: var(--muted); }
+.lc-menu button:disabled { opacity: .5; cursor: default; }
+.lc-search-bar { display: flex; align-items: center; gap: 6px; padding: 8px 14px 8px 20px; border-bottom: 1px solid var(--line); background: var(--surface-2); }
+.lc-search-bar > svg { flex: none; width: 16px; height: 16px; color: var(--muted); }
+.lc-app .lc-search-bar input { flex: 1; min-width: 0; height: 34px; padding: 0 10px; }
+.lc-search-count { flex: none; min-width: 7em; color: var(--muted); font-size: .8rem; text-align: right; font-variant-numeric: tabular-nums; }
+.lc-search-bar .lc-icon { width: 30px; height: 30px; }
+.lc-msg.is-hit .lc-bubble { border-color: color-mix(in srgb, var(--warning) 45%, var(--line)); }
+.lc-msg.is-hit-now .lc-bubble { outline: 2px solid var(--warning); outline-offset: 2px; }
+::highlight(lc-hit) { background-color: color-mix(in srgb, var(--warning) 30%, transparent); }
+::highlight(lc-hit-now) { background-color: var(--warning); color: var(--surface); }
+.lc-chip.is-select { position: relative; padding-right: 8px; }
+.lc-chip.is-select select { appearance: none; max-width: 220px; height: 26px; margin: 0; padding: 0 18px 0 0; border: 0; background: none; color: var(--text); font: inherit; font-size: .8rem; cursor: pointer; }
+.lc-chip.is-select select:focus-visible { outline: none; }
+.lc-chip.is-select:focus-within { border-color: var(--accent); }
+.lc-chip.is-select > svg:last-child { position: absolute; right: 8px; pointer-events: none; }
 .lc-icon { flex: none; width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
 .lc-icon:hover, .lc-icon[aria-pressed="true"] { background: var(--surface-2); color: var(--text); }
 .lc-icon[aria-pressed="true"] { color: var(--accent); }

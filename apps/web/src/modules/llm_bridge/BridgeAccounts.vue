@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, reactive, ref, toRef } from 'vue'
-import { Activity, ArrowRight, Clock, KeyRound, Play, RefreshCw, UserRound } from '@lucide/vue'
+import { Activity, ArrowRight, Check, Clock, KeyRound, Pencil, Play, RefreshCw, UserRound } from '@lucide/vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import AccountQuota from './AccountQuota.vue'
 import { PLATFORM_MARK } from './chat/chatApi'
@@ -51,6 +51,23 @@ const accountOf = (platform: Platform) => props.status?.accounts.find(a => a.slo
 // 没勾选的平台：只有还登录着（或账号不一致）才显示，方便退出登录
 const accounts = computed(() => (props.status?.accounts ?? []).filter(a => a.enabled || a.state === 'logged_in' || a.state === 'mismatch'))
 const channels = computed(() => (props.status?.channels ?? []).filter(c => c.enabled))
+// 通道可用性表按平台一行：支持哪几种用法（不可用的标出来）、整体能不能用、各用法的说明
+const channelRows = computed(() => {
+  const rows = new Map<string, { platform: string; modes: { mode: string; available: boolean; note: string }[] }>()
+  for (const c of channels.value) {
+    const row = rows.get(c.platform) ?? { platform: c.platform, modes: [] }
+    row.modes.push({ mode: c.mode, available: c.available, note: c.note })
+    rows.set(c.platform, row)
+  }
+  // 说明按文字去重；同一平台不同用法的说明不一样时，前面标上用法
+  return [...rows.values()].map(r => {
+    const texts = [...new Set(r.modes.map(m => m.note).filter(Boolean))]
+    const notes = texts.map(note => (texts.length > 1 ? `${r.modes.filter(m => m.note === note).map(m => MODES[m.mode] ?? m.mode).join('、')}：${note}` : note))
+    return { ...r, available: r.modes.some(m => m.available), notes }
+  })
+})
+// 已控制平台：平时只读，点“编辑”才能勾选（勾选仍然立即保存，取消要确认）
+const editing = ref(false)
 // 一个账号槽位对应的平台（OpenAI 的账号同时给 ChatGPT 和 Codex 用）：卡片的标记和额度按它们来
 const platformsOf = (slot: string) => PLATFORMS.map(p => p.id).filter(id => PLATFORM_SLOT[id] === slot)
 const markOf = (slot: string) => platformsOf(slot).map(id => PLATFORM_MARK[id]).join('') || '?'
@@ -180,11 +197,12 @@ function reset(account: Account) {
     </div>
     <template v-else>
       <div class="lb-control-row">
-        <fieldset :key="redraw" class="lb-control" :disabled="!canWrite || !!busy" aria-label="控制的平台">
+        <fieldset :key="redraw" class="lb-control" :class="{ 'is-editing': editing }" :disabled="!canWrite || !editing || !!busy" aria-label="控制的平台">
           <legend>已控制平台：</legend>
           <label v-for="p in PLATFORMS" :key="p.id" class="lb-control-chip"><input type="checkbox" :checked="controlled.includes(p.id)" @change="setPlatform(p.id, checked($event))" />{{ p.name }}</label>
         </fieldset>
-        <p class="lb-control-note">只有勾选的平台能在这里登录、被智能体使用{{ canWrite ? '；改动立即保存' : '' }}。ChatGPT 与 Codex 共用同一个账号。</p>
+        <p class="lb-control-note">{{ editing ? '勾选的平台才能在这里登录、被智能体使用；改动立即保存，取消前会确认。' : '只有勾选的平台能在这里登录、被智能体使用。' }}ChatGPT 与 Codex 共用同一个账号。</p>
+        <button v-if="canWrite" type="button" class="secondary-button lb-control-edit" :aria-pressed="editing" :aria-label="editing ? '完成编辑控制的平台' : '编辑控制的平台'" @click="editing = !editing"><component :is="editing ? Check : Pencil" aria-hidden="true" />{{ editing ? '完成' : '编辑' }}</button>
       </div>
 
       <div class="lb-overview" role="group" aria-label="运行概览">
@@ -268,13 +286,18 @@ function reset(account: Account) {
           <button type="button" class="secondary-button" :disabled="netBusy || net.isFetching.value" @click="recheckNet"><RefreshCw aria-hidden="true" />{{ netBusy || net.isFetching.value ? '正在检测…' : '重新检测连通性' }}</button>
         </div>
         <table class="asv-table lb-table" aria-label="通道">
-          <thead><tr><th scope="col">平台</th><th scope="col">用法</th><th scope="col">当前可用性</th><th scope="col">说明</th></tr></thead>
+          <thead><tr><th scope="col">平台</th><th scope="col">支持用法</th><th scope="col" class="lb-nowrap">当前可用性</th><th scope="col">说明</th></tr></thead>
           <tbody>
-            <tr v-for="c in channels" :key="`${c.platform}.${c.mode}`">
-              <th scope="row"><span class="lb-table-mark" :data-platform="c.platform" aria-hidden="true">{{ PLATFORM_MARK[c.platform] ?? '?' }}</span>{{ platformName(c.platform) }}</th>
-              <td data-label="用法" class="lb-nowrap">{{ MODES[c.mode] ?? c.mode }}</td>
-              <td data-label="可用" class="lb-nowrap"><span class="lb-avail" :data-ok="c.available">{{ c.available ? '可用' : '不可用' }}</span></td>
-              <td data-label="说明" class="lb-full">{{ c.note || '—' }}</td>
+            <tr v-for="r in channelRows" :key="r.platform">
+              <th scope="row" class="lb-nowrap"><span class="lb-table-mark" :data-platform="r.platform" aria-hidden="true">{{ PLATFORM_MARK[r.platform] ?? '?' }}</span>{{ platformName(r.platform) }}</th>
+              <td data-label="支持用法">
+                <span class="lb-modes-list"><span v-for="m in r.modes" :key="m.mode" class="lb-mode" :data-ok="m.available" :title="m.note || undefined">{{ MODES[m.mode] ?? m.mode }}<span v-if="!m.available" class="lb-mode-off">不可用</span></span></span>
+              </td>
+              <td data-label="可用" class="lb-nowrap"><span class="lb-avail" :data-ok="r.available">{{ r.available ? '可用' : '不可用' }}</span></td>
+              <td data-label="说明" class="lb-full">
+                <template v-if="r.notes.length"><span v-for="n in r.notes" :key="n" class="lb-channel-note">{{ n }}</span></template>
+                <template v-else>—</template>
+              </td>
             </tr>
           </tbody>
         </table>

@@ -77,7 +77,13 @@ describe('大模型客户端管理', () => {
     const overview = screen.getByRole('group', { name: '运行概览' })
     expect(overview).toHaveTextContent('排队中 1')
     expect(overview).toHaveTextContent('进行中 2')
-    expect(within(screen.getByRole('table', { name: '通道' })).getByText('云端通道还没有实现')).toBeVisible()
+    // 通道按平台一行：支持的用法（不可用的标出来）、整体可用性、说明
+    const channels = screen.getByRole('table', { name: '通道' })
+    const claudeRow = within(channels).getByRole('row', { name: /Claude/ })
+    expect(claudeRow).toHaveTextContent('云端不可用')
+    expect(within(claudeRow).getByText('不可用', { selector: '.lb-avail' })).toBeVisible()
+    expect(within(channels).getByText('云端通道还没有实现')).toBeVisible()
+    expect(within(within(channels).getByRole('row', { name: /Codex/ })).getByText('可用', { selector: '.lb-avail' })).toBeVisible()
     expect(requests.find(r => path(r) === `${base}/status`)!.headers.get('X-Workspace-Id')).toBe('workspace-a')
   })
 
@@ -126,6 +132,7 @@ describe('大模型客户端管理', () => {
     expect(await screen.findByText('只有 owner 能修改大模型客户端；你看到的是只读视图。')).toBeVisible()
     await screen.findByRole('article', { name: '账号：Claude' })
     for (const name of [/^添加 MCP 管理器$/, /^修改/, /^删除/, /^停用/, /^登录/, /^退出登录/, /^更换账号/]) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '编辑控制的平台' })).not.toBeInTheDocument()
     // 重新检查只是读状态，admin 可以点
     expect(screen.getByRole('button', { name: '重新检查Claude' })).toBeEnabled()
 
@@ -481,6 +488,11 @@ describe('大模型客户端管理', () => {
     expect(within(await control()).getByLabelText('Codex')).toBeChecked()
     // 没勾选、也没登录过的平台不占地方
     expect(screen.queryByRole('article', { name: '账号：CodeBuddy' })).not.toBeInTheDocument()
+    // 平时只读：点“编辑”后才能勾选，点“完成”收起
+    expect(within(await control()).getByLabelText('Codex')).toBeDisabled()
+    await fireEvent.click(screen.getByRole('button', { name: '编辑控制的平台' }))
+    expect(within(await control()).getByLabelText('Codex')).toBeEnabled()
+    expect(screen.getByRole('button', { name: '完成编辑控制的平台' })).toHaveAttribute('aria-pressed', 'true')
 
     // 取消勾选要确认；不确认就什么都不发，勾选框回到原样
     await fireEvent.click(within(await control()).getByLabelText('Codex'))
@@ -510,6 +522,8 @@ describe('大模型客户端管理', () => {
     expect(confirm).not.toHaveBeenCalled()
     expect(await writes(requests)[1]!.clone().json()).toEqual({ platforms: ['claude', 'workbuddy'] })
     expect(await screen.findByRole('article', { name: '账号：CodeBuddy' })).toBeVisible()
+    await fireEvent.click(screen.getByRole('button', { name: '完成编辑控制的平台' }))
+    expect(within(await control()).getByLabelText('Claude')).toBeDisabled()
   })
 
   it('limits an instance to chosen managers: all by default, an explicit list, and a warning when none is left', async () => {

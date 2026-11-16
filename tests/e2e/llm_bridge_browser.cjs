@@ -276,6 +276,9 @@ async function main() {
     step(`各自一套账号：在 1 号用 API 密钥登录 CodeBuddy（密钥不回显）${two ? '，2 号的 CodeBuddy 仍是未登录' : ''}；退出后回到未登录，登记保留`)
 
     // ---------------------------------------------------------------- 改控制的平台
+    // 平时只读：先点“编辑”才能勾选
+    check(await control(page).getByLabel('Claude', { exact: true }).isDisabled(), '没点“编辑”时不能改控制的平台')
+    await panel(page).getByRole('button', { name: '编辑控制的平台' }).click()
     // 取消勾选要确认；不确认就不改
     page.once('dialog', (dialog) => dialog.dismiss())
     await control(page).getByLabel('Claude', { exact: true }).click()
@@ -296,7 +299,9 @@ async function main() {
     await page.getByText(`已让「${ONE}」控制 Claude。`).waitFor()
     await account(page, 'Claude').waitFor()
     check((await statusOf(oneId)).platforms.join() === 'claude,workbuddy', '重新勾选后应恢复')
-    step('改控制的平台：取消要确认（不确认不改）；取消后账号和卡片上的平台跟着消失；最后一个不能取消；重新勾选后恢复')
+    await panel(page).getByRole('button', { name: '完成编辑控制的平台' }).click()
+    check(await control(page).getByLabel('Claude', { exact: true }).isDisabled(), '点“完成”后又回到只读')
+    step('改控制的平台：先点“编辑”；取消要确认（不确认不改）；取消后账号和卡片上的平台跟着消失；最后一个不能取消；重新勾选后恢复；点“完成”回到只读')
 
     // ---------------------------------------------------------------- Claude 订阅登录：先确认风险
     await account(page, 'Claude').getByRole('button', { name: '登录Claude' }).click()

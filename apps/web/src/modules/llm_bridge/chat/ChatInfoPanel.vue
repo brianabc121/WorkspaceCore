@@ -8,9 +8,9 @@ import { DIGEST_REASON, DIGEST_STATE, TURN_KIND, TURN_STATUS, contextText, owner
 // 右栏：会话详情。“概览”里是运行配置、会话、用量（上下文与这个平台的额度，T-0242）、会话纪要和最近的执行记录；
 // “执行记录”是全部回合。只显示，操作都发事件给对话那一栏。
 // quota 来自管理器的状态；旧版本的管理器没有，这一块不显示。
-// models：这个会话能换成哪些模型（Claude / CodeBuddy 的会话才给；不给就只显示现在的）
-const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; managerName: string; quota?: Quota | null; models?: { id: string; name: string }[]; changing?: boolean; digest?: ChatDigest | null; canWrite?: boolean }>()
-defineEmits<{ close: []; model: [id: string]; digest: [action: 'on' | 'off' | 'write' | 'promote' | 'delete']; shape: [action: 'compact' | 'continue'] }>()
+// 换模型在对话头部的模型标签上（Claude / CodeBuddy 的会话）；这里只显示现在的
+const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; managerName: string; quota?: Quota | null; changing?: boolean; digest?: ChatDigest | null; canWrite?: boolean }>()
+defineEmits<{ close: []; digest: [action: 'on' | 'off' | 'write' | 'promote' | 'delete']; shape: [action: 'compact' | 'continue'] }>()
 // 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2、5.3）：写在知识库里、标为未确认；可以关掉、现在整理、转成正式笔记、删除
 const digestNote = computed(() => (props.digest?.note_id && !['deleted', 'purged'].includes(props.digest.state) ? props.digest : null))
 
@@ -46,14 +46,7 @@ const hasUsage = computed(() => (!!props.session.context && !external.value) || 
         <dl class="lc-kv">
           <dt><Server aria-hidden="true" />平台</dt><dd>{{ platformName(session.platform) }}</dd>
           <dt><Cpu aria-hidden="true" />模型</dt>
-          <dd v-if="models?.length">
-            <select :value="session.model ?? ''" :disabled="changing" aria-label="之后的回合用的模型" @change="$emit('model', ($event.target as HTMLSelectElement).value)">
-              <option v-if="session.model && !models.some(m => m.id === session.model)" :value="session.model">{{ session.model }}</option>
-              <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name || m.id }}</option>
-            </select>
-            <span class="lc-sub">换了之后从下一回合起用新的模型。</span>
-          </dd>
-          <dd v-else>{{ session.model || '平台默认' }}</dd>
+          <dd>{{ session.model || '平台默认' }}</dd>
           <dt><Code2 aria-hidden="true" />用法</dt><dd>{{ MODES[session.mode] ?? session.mode }}<span v-if="session.mode === 'chat'" class="lc-sub">{{ CHAT_NO_TOOLS }}</span></dd>
           <template v-if="session.environment">
             <dt><Layers aria-hidden="true" />开发环境</dt><dd>{{ session.environment.name }}<span class="lc-sub">{{ sandbox(session.environment.sandbox) }}{{ session.environment.network ? '，可联网' : '，不联网' }}</span></dd>
