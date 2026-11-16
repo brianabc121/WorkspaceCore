@@ -5,7 +5,7 @@ owner: claude
 status: done
 priority: P2
 branch: claude/gracious-euler-ldkldx
-paths: apps/web/src/components/JobProgress.vue,apps/web/src/components/job-progress.css,apps/web/src/modules/llm_bridge,apps/web/src/features/agents/SshJob.vue,apps/web/src/features/agents/ssh-job.css,apps/web/tests,tests/e2e/mcp_manager_browser.cjs
+paths: apps/web/src/components/JobProgress.vue,apps/web/src/components/job-progress.css,apps/web/src/modules/llm_bridge,apps/web/src/features/agents/SshJob.vue,apps/web/src/features/agents/ssh-job.css,apps/web/tests,tests/e2e/mcp_manager_browser.cjs,tests/e2e/llm_chat_browser.cjs
 depends_on:
 created: 2026-11-16
 updated: 2026-11-16
@@ -34,3 +34,4 @@ updated: 2026-11-16
 - 2026-11-16 20:30 UTC · claude · 创建任务（编号由集成会话在 #235 预留；人类在对话中指派），开始任务
 - 2026-11-16 20:38 UTC · claude · 完成：新的共用组件 apps/web/src/components/JobProgress.vue（+ job-progress.css，由 features/agents/ssh-job.css 挪过来，类名不变），只收标题、状态、时间、步骤、日志、失败原因、成功文字等参数；features/agents/SshJob.vue 改成它的薄包装（区块 aria-label、data-status、.ssh-step-title 不变，T-0269 的测试与 e2e 照常）；modules/llm_bridge/DeployJob.vue 也改成它的包装：标题“部署「名字」”+ 状态、下面一行写在哪台服务器与网络方式、分格进度条、步骤时间线、失败原因挂在失败那一步、进行中那一步下面的最新输出、折叠的命令输出（密码、令牌已替换成 ***）、成功后收起成成功条；只删除登记的卸载不收起，并在下面提示服务器上还留着什么。刷新丢进度：新增 DeployProgress.vue（按任务号读进度，结束时报一次结果），LlmBridgeWorkspace 不再只用内存里的一个 jobId：页面第一次读到 GET /llm_bridge/deployments 时把还在进行的任务都接着显示（一键部署表单里刚开始的由表单显示，不重复），找回来的部署成功后照常刷新列表、选中新管理器并提示；重新部署 / 重启 / 卸载的 sudo 密码重试不变。接口与后端没改。删除 llm_bridge.css 里不再用的 .lb-job*。测试：llm_bridge_deploy 更新 4 处依赖旧文字结构的断言，新增 2 个测试（刷新后找回进行中的部署并在成功后选中、只找回进行中的任务）；tests/e2e/mcp_manager_browser.cjs 改为按区块 data-status 判断结束，并在部署进行中刷新一次页面确认进度还在。本地 lint、typecheck、vitest 83 个文件 902 个测试、build、check:api 通过；Vite + Playwright 拦截接口：部署进行中刷新页面后进度还在，截图核对进行中 / 失败（亮色 1440）、暗色 1440、390 宽度，没有横向滚动。浏览器验收（真实部署）以本 PR 的 CI 为准，合并前确认。
 - 2026-11-16 20:38 UTC · claude · status in_progress → done：MCP 管理器的部署进度改成与服务器初始化一致的共用组件，刷新页面后接着显示进行中的任务（CI 浏览器验收合并前确认）
+- 2026-11-16 20:47 UTC · claude · PR #240 的 ci-llm-bridge / workspace 在聊天页验收（tests/e2e/llm_chat_browser.cjs）“输入 /clear 后应再多一条分隔”失败（run 43951988764）；管理页验收 llm_bridge_browser 全部通过。本 PR 没有改聊天页。原因是脚本的时序竞态：看到回答里的“history=0”就输入 /clear，但回答文字先出来、回合随后才结束，回合进行中清空会被页面拒绝（“还有消息在排队或进行中”），于是等不到第二条分隔线；第一次清空前多调了一次接口，碰巧给了回合结束的时间。修法：两次清空前都先等“停止”按钮消失（回合结束，新增 turnDone）。越界改了 tests/e2e/llm_chat_browser.cjs（已加进 paths），只改测试脚本、不改产品代码、不放宽断言。
