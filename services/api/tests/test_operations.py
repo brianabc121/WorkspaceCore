@@ -308,7 +308,8 @@ async def test_services_without_monitoring(ops: Ops) -> None:
         assert items[name]["status"] == "not_configured", name
     kinds = {"core", "monitoring", "integration", "agents"}
     assert all(item["kind"] in kinds for item in data["items"])
-    assert "9090" not in json.dumps(data)  # 不透露内部地址
+    # 不透露内部地址；查带冒号的端口形式，免得 checked_at 的微秒（如 .909042）凑巧含 9090（T-0265）
+    assert ":9090" not in json.dumps(data)
 
     redis = ops.app.state.redis
     await redis.set(WORKER_HEARTBEAT_KEY, datetime.now(UTC).isoformat())
