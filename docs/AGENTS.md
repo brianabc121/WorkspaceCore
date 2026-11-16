@@ -6,11 +6,16 @@
 |---|---|---|
 | `claude` | Claude Code | 做 owner 是 claude 的任务 |
 | `codex` | OpenAI Codex | 做 owner 是 codex 的任务 |
-| `human` | 仓库所有者 | 派活、裁决分歧、审批决策、批准进入下一个 Sprint；PR 合并规则见 `.collab/decisions/D-0004-auto-merge.md` |
+| `human` | 仓库所有者 | 派活、裁决分歧、审批决策、批准进入下一个 Sprint；PR 合并规则见 `.collab/decisions/D-0008-stable-pr-integration.md` |
 
 **你每次会话都没有之前的记忆——仓库里的 `.collab/` 就是你和对方共同的记忆。**
 你是 Codex 就用身份 `codex`；你是 Claude Code 就用 `claude`（CLAUDE.md 里也会写明）。
 所有 `scripts/collab.py` 命令都要带 `--as <你的身份>`。
+
+**当前生效规则：[D-0008](../.collab/decisions/D-0008-stable-pr-integration.md)。** 开工和合并前读取
+[README 首页协作规则](../README.md)与[通知 / 人工集成队列 #235](https://github.com/brianabc121/WorkspaceCore/issues/235)。
+固定 PR 验证提交，不机械追赶 main；由唯一登记会话排队集成，按改动范围验证。D-0004 / D-0007 为历史。
+当前工具尚未提供自动门禁或原子锁，按 D-0008 的人工流程执行并如实记录。Codex 按人类指派并行工作，既有任务不自动转移 owner。
 
 - 第 1–7 节：两个代理之间怎么分工和交接（协作协议）。
 - **第 8 节：项目本身的工程规则，由人类制定**；与 1–7 节冲突时以第 8 节为准，并在任务日志里指出冲突。
@@ -44,7 +49,7 @@
 
 ## 3. 开工
 
-1. 从最新的 main 开始（Claude 云端会话会给你一个专属分支，在它上面工作即可）。
+1. 开工从最新的 main 开始（Claude 云端会话会给你一个专属分支，在它上面工作即可）；PR 进入验证后固定 head SHA，不因 main 无关推进而自动 merge/rebase。
 2. 运行 `python3 scripts/collab.py inbox --as <你>`。
 3. 处理顺序：人类本次对话里的明确指令 > 待你接手的交接 > 你进行中的任务 > 已分配给你的 todo。
    未分配的任务只有人类指派或同意后才能认领。
@@ -56,6 +61,7 @@
    `python3 scripts/collab.py set T-xxxx --as human --owner <你> -m "人类在对话中指派：<要点>"`，再 `start`。
    这是代理唯一可以用 `--as human` 执行的操作，而且必须有人类的明确指派。
 6. 人类的指令与球权冲突时（例如要你改对方 `in_progress` 的东西），先指出冲突一次；人类坚持就照做，并在日志里记录。
+7. 正式任务号先由唯一集成者在 #235 登记预留后分配。`collab.py new` 仍使用最大号加一，不能用作跨会话原子占号；工具改造前由集成者按模板创建正式任务，已有任务不追溯改号。
 
 ## 4. 干活中
 
@@ -82,10 +88,12 @@
 1. `python3 scripts/collab.py check` 必须通过（CI 也会跑）。
 2. 代码改动和 `.collab/` 改动放在**同一个 PR**。
 3. PR 标题 `[T-xxxx] 简述`，按 `.github/pull_request_template.md` 填写（它包含第 8 节要求的报告结构）。
-4. 推送你自己的分支并开 PR（或按你所在环境的方式产出 PR）。合并按 D-0004：
-   - claude 的 PR：最新提交上所有 CI 检查成功、没有冲突、没有未处理的阻塞审查意见时，claude 直接合并；
-   - codex 的 PR：开好 PR 后停下，由 claude 审查，没有阻塞问题且 CI 全绿时由 claude 合并；
-   - D-0004 第 3 节列出的情况（改人类负责的文件或协作协议、不可逆的数据迁移、进入下一个 Sprint）仍等人类决定。
+4. 推送自己的分支并开 PR，按 D-0008 在 #235 登记 PR、head SHA、改动类别、验证结果和关联风险：
+   - 默认由 Claude 的一个明确登记会话担任唯一集成者；其他 Claude 会话和 Codex 均排队，开发仍可并行。
+   - Codex 的 PR 默认由 Claude 审查；相关必需验证成功、无阻塞意见后，由集成者验证最终合并候选并发布。
+   - 纯文档 / 元数据按轻量门禁处理；涉及业务、依赖、迁移、安全和不确定关联时扩大验证。不得忽略相关失败、伪造状态或把旧 SHA 检查冒充新 SHA 通过。
+   - 候选验证期间，其他 PR 不插队更新 main。完成、失败或中断都记录并释放窗口；已有绿色检查不因无关 main 推进而全套重跑。
+   - 人类已明确指派某次集成者或批准本次规则发布时，按该授权执行并留记录；未授权的规范 / 协议改动、不可逆操作或进入新 Sprint 仍由人类决定，不重复询问已获批准的同一事项。
 
 交接类型：
 
@@ -98,7 +106,7 @@
 ## 6. 红线
 
 - 不推送到对方的分支；不 force-push 共享分支。
-- **只有 claude 可以合并 PR，而且必须满足 D-0004 的全部条件**；codex 不合并任何 PR。绝不绕过失败的检查。
+- **只有 #235 中唯一登记的集成会话可以更新 main**，默认是 Claude；人类明确指派的集成与本次启动发布按 D-0008 执行。相关必需验证必须成功，不能绕过失败检查；其他会话不得自行并行合并。
 - 不修改已提交的交接单；要更正就再发一份新的。
 - 不改 owner 不是你的任务的状态。
 - 不擅自修改协作协议本身（本文件 1–7 节、`.collab/templates/`、`scripts/collab.py` 的字段和状态集合）：
@@ -108,8 +116,9 @@
 ## 7. 审查与小改动
 
 - 审查在 PR 上进行：审查方在 PR 上留评论，不往作者的分支推送。作者负责回应审查意见。
-- codex 的每个 PR 合并前都由 claude 审查（D-0004）；claude 的 PR 可以由人类在 PR 下评论 `@codex review` 请 codex 审查，
+- codex 的 PR 默认由 claude 审查（D-0008）；claude 的 PR 可以由人类在 PR 下评论 `@codex review` 请 codex 审查，
   合并后才收到的审查意见按新任务或 `rework` 处理。
+- 本次人类已明确指派的协作规则启动发布采用纯文档门禁和独立复核；此例外不自动扩展到其他业务 PR。
 - 不建任务的小改动：只改错字、注释、格式这类不超过 20 行、且不碰别人占用路径的修改，
   PR 标题用 `[chore] 简述`。其余改动都要先有任务。
 
@@ -175,7 +184,7 @@ Claude 专属的说明在 CLAUDE.md；Codex 所在环境的注意事项写在这
 - 使用现有 `/workspace/WorkspaceCore` 隔离工作区，不自动创建额外 worktree；每个交付使用 `codex/<任务>-<主题>` 分支，从最新 `origin/main` 开始。
 - 本机 Python 3.12.14；Node 24 为默认工具链，前端契约验证使用隔离安装的 Node 22.23.4。未来任务应使用 Node 22 和 `npm ci`。
 - 默认沙箱限制网络和监听端口；经平台允许的执行路径已验证 Git HTTPS fetch/push、npm 安装和本地 Vite HTTP 请求。保留平台代理和 TLS 校验，不自行改认证。
-- GitHub REST / GraphQL 在实际请求中均返回 Forbidden，Git 可读写不代表 API 可用。`gh auth status` 不能作为 Git 访问失败的依据；不要要求用户在聊天里提供 token。
-- API 不可用时先推送自己的分支，保存 PR 正文并提供 GitHub 创建 PR 链接；不声称 PR 已创建或远程 CI 已通过。按 D-0004 由 Claude 审查并在条件满足时合并，Codex 不合并。
+- GitHub 访问以当前实测为准，优先使用已连接的 GitHub 工具；CLI 受限不代表所有 API 不可用。Git 可读写也不代表 API 可用，不要求用户在聊天里提供 token。
+- API 不可用时先推送自己的分支，保存 PR 正文并提供 GitHub 创建 PR 链接；不声称 PR 已创建或远程 CI 已通过。准备就绪的 PR 按 D-0008 登记队列，由唯一集成者处理。
 - `start` / `handoff` 能识别上述分支名，无需额外 `--branch`；`inbox --no-fetch` 用于本地检查，开工仍应先显式 fetch 最新 main。
 - 本次未验证 Docker daemon、镜像拉取或全栈 Compose；这部分由 Claude 的平台与验收任务负责。
