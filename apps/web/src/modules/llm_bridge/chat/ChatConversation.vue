@@ -82,8 +82,10 @@ function unbadge() { if (!document.hidden && titleBefore !== null) { document.ti
 document.addEventListener('visibilitychange', unbadge)
 onBeforeUnmount(() => { document.removeEventListener('visibilitychange', unbadge); if (titleBefore !== null) document.title = titleBefore })
 async function submit() {
+  // 清空上下文还没做完（页面上可能已经画出分隔线）就按了发送：等它做完再发，不能把这条吞掉
+  if (clearRun) await clearRun
   const text = draft.value.trim()
-  if (!text || sending.value || clearing.value || blocked.value) return
+  if (!text || sending.value || blocked.value) return
   // 只输入 /clear：清空上下文，不发给模型（官方程序在这里不执行斜杠命令，T-0255）
   if (isClearCommand(text)) { await clearContext(true); return }
   if (foreign.value && !allowTakeover()) return
@@ -119,6 +121,7 @@ async function submit() {
 }
 // ---- 清空上下文（T-0255）：管理器给会话换一个新的官方会话，之后的消息从头开始，上面的记录保留 ----
 const clearing = ref(false)
+let clearRun: Promise<void> | null = null
 const canClear = computed(() => !!session.value && session.value.origin === 'bridge' && session.value.status === 'active' && props.bridge.enabled)
 function clearText(other: boolean) {
   const s = session.value
@@ -132,7 +135,11 @@ function clearText(other: boolean) {
 }
 // typed：在输入框里输入了 /clear。那是明确要清空，自己的会话不再问；按钮和别人的会话先确认
 async function clearContext(typed = false) {
-  if (!session.value || clearing.value) return
+  if (!session.value || clearRun) return
+  clearRun = runClear(typed)
+  try { await clearRun } finally { clearRun = null }
+}
+async function runClear(typed: boolean) {
   sendError.value = sendNotice.value = ''
   if (activeTurn.value) { sendError.value = '还有消息在排队或进行中：等它们做完或停止后再清空。'; return }
   if (!hasContext(messages.value)) {
@@ -368,7 +375,7 @@ function archive() {
             <button type="button" class="lc-icon" :aria-label="imagesOnly ? '添加图片' : '添加图片或文件'" :title="imagesOnly ? '添加图片（对话会话只能带图片）' : '添加图片或文件（文件会放进工作目录）'" :disabled="sending" @click="picker?.click()"><Paperclip aria-hidden="true" /></button>
             <textarea v-model="draft" rows="2" maxlength="100000" aria-label="消息内容" :placeholder="`输入消息：Enter 发送，Shift + Enter 换行；可以粘贴或拖入${imagesOnly ? '图片' : '图片、文件'}`" @keydown="onKey" @paste="onPaste" />
             <button v-if="activeTurn" type="button" class="secondary-button" :disabled="stopping" @click="stop"><Square aria-hidden="true" />{{ stopping ? '正在停止…' : '停止' }}</button>
-            <button type="submit" class="primary-button" :disabled="sending || clearing || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : clearing ? '正在清空…' : isClearCommand(draft) ? '清空' : '发送' }}</button>
+            <button type="submit" class="primary-button" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : clearing ? '正在清空…' : isClearCommand(draft) ? '清空' : '发送' }}</button>
           </div>
           <p v-if="isClearCommand(draft)" class="lc-hint">发送后清空这个会话的上下文，不会发给模型：之后的消息从头开始，上面的记录保留。</p>
           <p v-else-if="slashCommand(draft)" class="lc-hint">以 / 开头的命令在这里不会执行，这段文字会原样发给模型。要清空上下文，只输入 /clear 发送，或点上面的“清空上下文”。</p>
