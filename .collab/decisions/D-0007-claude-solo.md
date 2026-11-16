@@ -1,13 +1,15 @@
 ---
 id: D-0007
 title: codex 暂停期间由 claude 独立完成所有任务
-status: accepted
+status: superseded
 date: 2026-10-31
 author: claude
 supersedes:
 ---
 
 # D-0007 codex 暂停期间由 claude 独立完成所有任务
+
+> 当前并行开发与集成规则见 [D-0008](D-0008-stable-pr-integration.md)。Codex 暂停的默认假设已取消；以下为历史记录，既有任务不自动转移 owner。
 
 ## 背景
 2026-10-31 人类在对话中说：“codex没有额度了 你直接给我修吧。 从现在开始所有任务由你自己独立完成”。本决策由人类作出，claude 记录。
