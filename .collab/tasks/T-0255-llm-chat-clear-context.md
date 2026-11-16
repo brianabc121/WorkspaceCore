@@ -44,3 +44,4 @@ updated: 2026-11-16
 - 2026-11-16 05:15 UTC · claude · 开始任务
 - 2026-11-16 05:34 UTC · claude · 管理器：POST /admin/sessions/{id}/clear 换新的原生会话、记 context_resets、会话内容插分隔、取消等着的自动续跑；工作台：POST .../chat/sessions/{id}/clear（takeover、审计）；聊天页：清空按钮、输入 /clear 直接清空、其他斜杠命令提示、分隔线。管理器 pytest 75 passed（3 skipped）、ruff/mypy 通过；工作台 llm_bridge 四个测试文件 46 passed、ruff/mypy/openapi 通过；前端 lint/typecheck/880 个测试/build 通过；浏览器验收（tests/e2e/llm_chat_browser.cjs 新增清空一步）在本 PR 的 CI workspace job 里跑。
 - 2026-11-16 05:34 UTC · claude · status in_progress → done：代码、测试、文档完成；浏览器验收以本 PR 的 CI 为准，合并前确认
+- 2026-11-16 07:53 UTC · claude · 合并后 main 上 ci-llm-bridge 的浏览器验收失败（run 43818013261）：点“清空上下文”后分隔线先画出来，清空请求还没收尾时按 Enter 发的消息被丢掉（submit 里 clearing 为真直接返回）。PR 上那次是碰巧时序对了。修法：清空进行中按发送就等清空做完再发；新增前端测试（旧代码上失败、修复后通过）。前端 lint/typecheck/881 个测试/build 通过。
