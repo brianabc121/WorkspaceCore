@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, toRef, watch } from 'vue'
-import { Archive, ArrowLeft, Download, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
+import { Archive, ArrowLeft, Download, Eraser, Info, Paperclip, Pencil, RefreshCw, Send, Square, X } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { CHAT_NO_TOOLS, MODES, platformName, seconds, type Bridge, type Platform, type Quota } from '../api'
-import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, needsTakeover, newRequestId, ownerText, type ChatAttachment, type LlmChatApi } from './chatApi'
+import { ATTACHMENTS, IMAGE_ACCEPT, chatError, fileSize, hasContext, isClearCommand, needsTakeover, newRequestId, ownerText, slashCommand, type ChatAttachment, type LlmChatApi } from './chatApi'
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
 import ChatInfoPanel from './ChatInfoPanel.vue'
@@ -81,7 +81,9 @@ document.addEventListener('visibilitychange', unbadge)
 onBeforeUnmount(() => { document.removeEventListener('visibilitychange', unbadge); if (titleBefore !== null) document.title = titleBefore })
 async function submit() {
   const text = draft.value.trim()
-  if (!text || sending.value || blocked.value) return
+  if (!text || sending.value || clearing.value || blocked.value) return
+  // 只输入 /clear：清空上下文，不发给模型（官方程序在这里不执行斜杠命令，T-0255）
+  if (isClearCommand(text)) { await clearContext(true); return }
   if (foreign.value && !allowTakeover()) return
   if (uploading.value) { sendError.value = '附件还在上传，传完再发。'; return }
   if (pending?.text !== text) pending = { text, id: newRequestId() }
@@ -113,6 +115,49 @@ async function submit() {
     sendError.value = needsTakeover(e) ? '没有发送：接着别人建的会话发消息前需要确认。' : chatError(e)
   } finally { sending.value = false }
 }
+// ---- 清空上下文（T-0255）：管理器给会话换一个新的官方会话，之后的消息从头开始，上面的记录保留 ----
+const clearing = ref(false)
+const canClear = computed(() => !!session.value && session.value.origin === 'bridge' && session.value.status === 'active' && props.bridge.enabled)
+function clearText(other: boolean) {
+  const s = session.value
+  const lines = ['清空这个会话的上下文？', '', '之后发的消息从头开始：模型不再记得上面的内容，每条消息用的 token 也回到开头的水平。上面的记录还在，可以照常查看和导出。']
+  if (s?.mode === 'dev') lines.push('开发会话工作目录里的文件不受影响。')
+  if (other) {
+    const who = s && s.owner_kind === 'agent' ? `智能体「${ownerText(s)}」` : s && s.owner_kind !== 'me' ? `「${ownerText(s)}」` : '别人'
+    lines.push('', `这是${who}建的会话：清空后对方再用这个会话时也是从头开始。`)
+  }
+  return lines.join('\n')
+}
+// typed：在输入框里输入了 /clear。那是明确要清空，自己的会话不再问；按钮和别人的会话先确认
+async function clearContext(typed = false) {
+  if (!session.value || clearing.value) return
+  sendError.value = sendNotice.value = ''
+  if (activeTurn.value) { sendError.value = '还有消息在排队或进行中：等它们做完或停止后再清空。'; return }
+  if (!hasContext(messages.value)) {
+    sendNotice.value = '上次清空之后还没有发过消息，不用再清空。'
+    if (typed) draft.value = ''
+    return
+  }
+  if ((!typed || foreign.value) && !window.confirm(clearText(foreign.value))) return
+  clearing.value = true
+  try {
+    let out
+    try { out = await props.chat.clearContext(props.bridge.id, props.sessionId, foreign.value) }
+    catch (e) {
+      // 列表里显示的“谁建的”可能已经过时：服务器说要确认，就在这里补问一次
+      if (!needsTakeover(e) || !window.confirm(clearText(true))) throw e
+      out = await props.chat.clearContext(props.bridge.id, props.sessionId, true)
+    }
+    if (typed) draft.value = ''
+    sendNotice.value = out.cleared ? '已清空上下文：之后的消息从头开始，上面的记录还在。' : '上次清空之后还没有发过消息，不用再清空。'
+    stick = true
+    await reload()
+    emit('changed')
+  } catch (e) {
+    sendError.value = needsTakeover(e) ? '没有清空：清空别人建的会话前需要确认。' : `没能清空：${chatError(e)}`
+  } finally { clearing.value = false }
+}
+
 // ---- 附件：先上传到管理器，发送时带上编号；对话会话只能带图片 ----
 const attached = ref<ChatAttachment[]>([]), uploading = ref(0), picker = ref<HTMLInputElement | null>(null)
 const imagesOnly = computed(() => session.value?.mode !== 'dev')
@@ -261,6 +306,7 @@ function archive() {
         <div v-if="session" class="lc-head-actions">
           <button v-if="session.origin === 'external'" type="button" class="lc-icon" aria-label="重新导入" title="重新向官方程序读一次内容" :disabled="working" @click="reimport"><RefreshCw aria-hidden="true" /></button>
           <button v-if="!renaming && session.origin !== 'external'" type="button" class="lc-icon" aria-label="改标题" title="改标题" :disabled="working" @click="startRename"><Pencil aria-hidden="true" /></button>
+          <button v-if="canClear" type="button" class="lc-icon" aria-label="清空上下文" title="清空上下文：之后的消息从头开始，上面的记录保留（也可以在输入框里输入 /clear）" :disabled="clearing" @click="clearContext()"><Eraser aria-hidden="true" /></button>
           <button type="button" class="lc-icon" aria-label="导出会话" title="导出成 Markdown 文件" :disabled="working" @click="exportSession"><Download aria-hidden="true" /></button>
           <button v-if="session.status !== 'archived'" type="button" class="lc-icon" aria-label="归档会话" title="归档" :disabled="working" @click="archive"><Archive aria-hidden="true" /></button>
           <button type="button" class="lc-icon" :aria-pressed="infoOpen" aria-label="会话信息" title="会话信息" @click="infoOpen = !infoOpen"><Info aria-hidden="true" /></button>
@@ -299,8 +345,10 @@ function archive() {
             <button type="button" class="lc-icon" :aria-label="imagesOnly ? '添加图片' : '添加图片或文件'" :title="imagesOnly ? '添加图片（对话会话只能带图片）' : '添加图片或文件（文件会放进工作目录）'" :disabled="sending" @click="picker?.click()"><Paperclip aria-hidden="true" /></button>
             <textarea v-model="draft" rows="2" maxlength="100000" aria-label="消息内容" :placeholder="`输入消息：Enter 发送，Shift + Enter 换行；可以粘贴或拖入${imagesOnly ? '图片' : '图片、文件'}`" @keydown="onKey" @paste="onPaste" />
             <button v-if="activeTurn" type="button" class="secondary-button" :disabled="stopping" @click="stop"><Square aria-hidden="true" />{{ stopping ? '正在停止…' : '停止' }}</button>
-            <button type="submit" class="primary-button" :disabled="sending || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : '发送' }}</button>
+            <button type="submit" class="primary-button" :disabled="sending || clearing || !draft.trim()"><Send aria-hidden="true" />{{ sending ? '正在发送…' : clearing ? '正在清空…' : isClearCommand(draft) ? '清空' : '发送' }}</button>
           </div>
+          <p v-if="isClearCommand(draft)" class="lc-hint">发送后清空这个会话的上下文，不会发给模型：之后的消息从头开始，上面的记录保留。</p>
+          <p v-else-if="slashCommand(draft)" class="lc-hint">以 / 开头的命令在这里不会执行，这段文字会原样发给模型。要清空上下文，只输入 /clear 发送，或点上面的“清空上下文”。</p>
           <fieldset v-if="activeTurn?.status === 'running'" class="lc-mode" aria-label="上一条还没答完时怎么发">
             <label class="check-field"><input v-model="sendMode" type="radio" name="lc-send-mode" value="queue" />排队</label>
             <label class="check-field"><input v-model="sendMode" type="radio" name="lc-send-mode" value="insert" />插入</label>

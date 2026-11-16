@@ -168,6 +168,10 @@ transcript.parent.mkdir(parents=True, exist_ok=True)
 reply = f"model={value('--model')} tools={value('--tools')!r} perm={value('--permission-mode')} leak={os.environ.get('BRIDGE_ADMIN_TOKEN')} extra={os.environ.get('EXTRA_VAR')} :: {text}"
 if images:
     reply += f" images={images}"
+if text == "history":
+    # 这个官方会话里之前有几条提问：看得出续接的是哪个会话、清空上下文后是不是从头开始（T-0255）
+    lines = transcript.read_text().splitlines() if transcript.exists() else []
+    reply += f" history={sum(1 for line in lines if json.loads(line).get('type') == 'user')}"
 if text == "read":
     # 读文件这类工具调用：先报调用，结果作为一条 user 消息报回来
     emit(

@@ -109,10 +109,17 @@ const interrupted = computed(() => {
   return { text, canNow: state !== 'done' && state !== 'forced', canCancel: state === 'pending' }
 })
 const busy = computed(() => !!props.resuming && props.resuming === props.message.turn_id)
+// 清空上下文的位置（T-0255）：之前的内容模型已经不记得
+const cleared = computed(() => props.message.role === 'context_cleared')
+const clearedText = computed(() => {
+  const by = props.message.by ? `，${props.message.by}清空的` : ''
+  return `上下文已清空${props.message.at ? `（${seconds(props.message.at)}${by}）` : by}：之后的回答不记得上面的内容`
+})
 </script>
 
 <template>
-  <li class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine, 'is-target': target }]" :data-status="status || undefined" :data-turn="message.turn_id || undefined">
+  <li v-if="cleared" class="lc-cleared" role="separator" :aria-label="clearedText"><span>{{ clearedText }}</span></li>
+  <li v-else class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine, 'is-target': target }]" :data-status="status || undefined" :data-turn="message.turn_id || undefined">
     <div class="lc-msg-head">
       <strong>{{ who }}</strong>
       <time v-if="message.at">{{ seconds(message.at) }}</time>

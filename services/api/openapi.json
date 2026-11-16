@@ -15194,6 +15194,49 @@
         "title": "LlmChatAttachmentOut",
         "type": "object"
       },
+      "LlmChatClearIn": {
+        "additionalProperties": false,
+        "properties": {
+          "takeover": {
+            "default": false,
+            "description": "清空不是自己建的会话时必须为 true（页面先让人确认）",
+            "title": "Takeover",
+            "type": "boolean"
+          }
+        },
+        "title": "LlmChatClearIn",
+        "type": "object"
+      },
+      "LlmChatClearedOut": {
+        "properties": {
+          "cleared": {
+            "description": "这次清空了没有：上次清空之后还没发过消息时什么也不做，为 false",
+            "title": "Cleared",
+            "type": "boolean"
+          },
+          "cleared_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "清空的时间",
+            "title": "Cleared At"
+          },
+          "session": {
+            "$ref": "#/components/schemas/LlmChatSessionOut"
+          }
+        },
+        "required": [
+          "session",
+          "cleared"
+        ],
+        "title": "LlmChatClearedOut",
+        "type": "object"
+      },
       "LlmChatConversationOut": {
         "properties": {
           "last_event_id": {
@@ -15819,8 +15862,20 @@
                 "type": "null"
               }
             ],
-            "description": "谁发的（只有 user 消息有）",
+            "description": "谁发的（user 消息）；谁清空的（context_cleared）",
             "title": "By"
+          },
+          "cleared_turns": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "context_cleared：清空的那段上下文里有几个回合",
+            "title": "Cleared Turns"
           },
           "delivery": {
             "anyOf": [
@@ -15900,7 +15955,7 @@
             "description": "被额度打断的回合（status=interrupted）：什么时候自动继续"
           },
           "role": {
-            "description": "user / assistant",
+            "description": "user / assistant；context_cleared：在这里清空了上下文，它之前的内容模型已经不记得",
             "title": "Role",
             "type": "string"
           },
@@ -58997,6 +59052,155 @@
           }
         ],
         "summary": "聊天：下载一个附件（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/clear": {
+      "post": {
+        "description": "之后的消息从头开始：MCP 管理器给这个会话换一个新的官方会话，之前的记录、附件、开发会话工作目录里的文件都保留，会话内容里在清空的位置有一条 role=context_cleared 的分隔。有消息在排队或进行中时 409 CONFLICT；已归档 409；官方程序里已有的会话 422 NOT_SUPPORTED；不是自己建的会话要带 takeover=true，否则 409 TAKEOVER_REQUIRED；上次清空之后还没发过消息时什么也不做（cleared=false）。",
+        "operationId": "llm_chat_clear_context",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmChatClearIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatClearedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "聊天：清空会话的上下文（admin）",
         "tags": [
           "llm_bridge"
         ]

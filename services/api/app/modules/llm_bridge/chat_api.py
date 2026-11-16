@@ -18,6 +18,8 @@ from app.core.errors import ApiError
 from app.modules.llm_bridge.chat import LlmChatService
 from app.modules.llm_bridge.chat_schemas import (
     LlmChatAttachmentOut,
+    LlmChatClearedOut,
+    LlmChatClearIn,
     LlmChatConversationOut,
     LlmChatCreatedOut,
     LlmChatCreateIn,
@@ -324,6 +326,26 @@ async def llm_chat_set_model(
 ) -> LlmChatSessionOut:
     row = await bridges.bridge(access.workspace.id, bridge_id)
     return await LlmChatService(bridges).set_model(access, row, session_id, body.model)
+
+
+@router.post(
+    f"{prefix}/sessions/{{session_id}}/clear",
+    summary="聊天：清空会话的上下文（admin）",
+    description="之后的消息从头开始：MCP 管理器给这个会话换一个新的官方会话，之前的记录、附件、"
+    "开发会话工作目录里的文件都保留，会话内容里在清空的位置有一条 role=context_cleared 的分隔。"
+    "有消息在排队或进行中时 409 CONFLICT；已归档 409；官方程序里已有的会话 422 NOT_SUPPORTED；"
+    "不是自己建的会话要带 takeover=true，否则 409 TAKEOVER_REQUIRED；"
+    "上次清空之后还没发过消息时什么也不做（cleared=false）。",
+    dependencies=write,
+    responses=write_errors,
+)
+async def llm_chat_clear_context(
+    access: Admin, bridges: Bridges, bridge_id: UUID, session_id: SessionId, body: LlmChatClearIn
+) -> LlmChatClearedOut:
+    row = await bridges.bridge(access.workspace.id, bridge_id)
+    return await LlmChatService(bridges).clear_context(
+        access, row, session_id, takeover=body.takeover
+    )
 
 
 @router.patch(

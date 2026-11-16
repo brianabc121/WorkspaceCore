@@ -937,6 +937,21 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 
 - `PUT .../chat/sessions/{session_id}/model`（admin，`{model}`）：换这个会话之后的回合用的模型，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换（每个回合起一次官方程序，模型是那一次的参数）；ChatGPT / Codex 的会话 422 `NOT_SUPPORTED`，已归档的 409。记审计 `chat_session_model_changed`。
 - 会话的标题在发出第一条消息时就定下来（之前要等第一回合做完）。
+
+**清空上下文**（T-0255）：
+
+- `POST .../chat/sessions/{session_id}/clear`（admin，CSRF，`{takeover?}`）：之后的消息从头开始。MCP 管理器给这个会话换一个新的官方会话
+  （Claude / CodeBuddy 下一回合用新的 `--session-id`，Codex 新开一个线程），之前的回合、过程、附件、开发会话工作目录里的文件都保留；
+  返回 `{session, cleared, cleared_at}`，上次清空之后还没发过消息时什么也不做（`cleared=false`）。
+  有消息在排队或进行中 409 `CONFLICT`；已归档 409；官方程序里已有的会话 422 `NOT_SUPPORTED`；
+  不是自己建的会话要 `takeover=true`，否则 409 `TAKEOVER_REQUIRED`；停用的管理器 409 `BRIDGE_DISABLED`。
+  被额度打断、等着自动继续的回合不再自动继续。审计 `chat_session_context_cleared`（别人的会话是 `chat_takeover_context_cleared`）。
+- 会话内容（`GET .../chat/sessions/{session_id}`）在清空的位置多一条 `role=context_cleared`：`at`、`by`（谁清空的）、`cleared_turns`
+  （清空的那段有几个回合）。智能体的 `llm_bridge_session_get` 在同样的位置有一条 `role=status`、`text=context_cleared`。
+- 为什么不能直接发 `/clear`：管理器用官方程序的非交互模式（`-p`）跑每个回合，斜杠命令不执行，会当成普通文字发给模型；
+  而且续接同一个会话号时整段记录又会被读回来。聊天页输入框里只输入 `/clear` 时调用上面的接口，不发给模型。
+- MCP 管理器的管理接口：`POST /admin/sessions/{id}/clear`（`{by?, owner?}`；带 `owner` 时只清这个调用方自己建的会话，别人的 409 `NOT_OWNER`）。
+  清空前的官方会话号记在管理器的 `context_resets` 表里：同步官方程序的会话时不会被再登记成“官方程序里已有”的会话。
 - 其余都在页面上，没有新接口：回答按 Markdown 显示（沿用知识库的安全渲染：不允许原始 HTML、链接只允许 http / https / mailto、外部图片不自动加载、DOMPurify 消毒），代码块和整条回答可以复制；没做成的回合可以“重试”、最后一条回答可以“重新生成”（都是把那一问原样再发一次，新的回合接在后面）；草稿按会话存在浏览器里；回答到了而人不在这个页面时在标签页标题上标出来；会话列表可以“加载更多”（最多 200 个，更早的到“会话记录”里找）；Esc 停止正在回答的回合，输入框空着时按 ↑ 把自己上一条发的消息放回来。
 
 **管理员回溯：回合详情、改动补丁、审计、通知、保留期、导出**（T-0252，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.2 的 B2、B3、B6、B7、B8）：
