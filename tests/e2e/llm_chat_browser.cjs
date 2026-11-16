@@ -409,6 +409,8 @@ async function main() {
     page.once('dialog', (dialog) => { clearAsked = dialog.message(); void dialog.accept() })
     await page.getByRole('button', { name: '清空上下文' }).click()
     await thread(page).getByRole('separator', { name: /上下文已清空/ }).waitFor({ timeout: 30000 })
+    // 提示出来时清空已经做完、输入框已放开（之前在这之前按 Enter 会偶尔被吞掉）
+    await page.getByText('已清空上下文：之后的消息从头开始，上面的记录还在。').waitFor()
     check(clearAsked.includes('建的会话：清空后对方再用这个会话时也是从头开始'), `清空别人建的会话前应写明后果：${clearAsked}`)
     await composer(page).fill('history')
     await composer(page).press('Enter')

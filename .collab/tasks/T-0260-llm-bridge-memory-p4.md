@@ -5,7 +5,7 @@ owner: claude
 status: done
 priority: P1
 branch: claude/amazing-faraday-6ey29e
-paths: services/llm-bridge,services/api/app/modules/llm_bridge,services/api/tests/test_module_llm_bridge_memory.py,services/api/tests/test_contract.py,services/api/openapi.json,apps/web/src/modules/llm_bridge,apps/web/src/services/schema.d.ts,apps/web/tests,docs/AGENTS.md,docs/api-contract.md,docs/decisions/2026-11-16-llm-bridge-context-verification.md,docs/v2/LLM_BRIDGE_MEMORY_PLAN.md,docs/v2/README.md
+paths: services/llm-bridge,tests/e2e/llm_chat_browser.cjs,services/api/app/modules/llm_bridge,services/api/tests/test_module_llm_bridge_memory.py,services/api/tests/test_contract.py,services/api/openapi.json,apps/web/src/modules/llm_bridge,apps/web/src/services/schema.d.ts,apps/web/tests,docs/AGENTS.md,docs/api-contract.md,docs/decisions/2026-11-16-llm-bridge-context-verification.md,docs/v2/LLM_BRIDGE_MEMORY_PLAN.md,docs/v2/README.md
 depends_on:
 created: 2026-11-16
 updated: 2026-11-16
@@ -39,3 +39,4 @@ updated: 2026-11-16
 - 2026-11-16 08:31 UTC · claude · 开始任务
 - 2026-11-16 08:39 UTC · claude · 第 4 期完成。管理器：钩子脚本 bridge/hooks.py（PreCompact / PostCompact，开关 hooks_enabled 默认关，只给 Claude / CodeBuddy），compaction_summaries 表，固定带着的参考资料（对话会话随系统提示、开发会话写记忆文件）。工作台：纪要并进平台摘要、另开会话直接用平台摘要（summary_from）、pinned_notes（聊天页与智能体）、设置页开关。本地：管理器 91 passed / 3 skipped，ruff / mypy 通过；工作台 ruff / format / mypy（586 文件）/ openapi --check 通过，test_module_llm_bridge_chat / memory（12）/ llm_bridge / contract / integration 87 passed，llm_bridge* + knowledge* + contract 173 passed；前端 lint / typecheck / vitest 893 passed / build 通过。
 - 2026-11-16 08:39 UTC · claude · status in_progress → done：第 4 期完成，验收标准全部勾选；钩子默认关，待真实账号验证
+- 2026-11-16 08:53 UTC · claude · PR #228 的 workspace 检查（tests/e2e/llm_chat_browser.cjs）失败：清空上下文后输入的 history 没有发出去。原因是前端竞态——chatApi.clearContext 已经重新读取过一次（分隔线这时出现），之后 reload() 又读一次，clearing 要等第二次读取完才复位，期间按 Enter 的消息被 submit() 悄悄丢掉（#225 较早的提交 8252c64 上也出现过一次）。修复：清空请求一返回就复位 clearing；e2e 在分隔线之后再等“已清空上下文”提示。新增前端测试复现（不修时失败、修后通过）。为此越界改了 tests/e2e/llm_chat_browser.cjs（已加进 paths；T-0224 的 codex 已暂停）。

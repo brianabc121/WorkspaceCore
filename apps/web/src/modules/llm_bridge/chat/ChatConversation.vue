@@ -150,6 +150,8 @@ async function clearContext(typed = false) {
       if (!needsTakeover(e) || !window.confirm(clearText(true))) throw e
       out = await props.chat.clearContext(props.bridge.id, props.sessionId, true)
     }
+    // 清空已经做完：马上放开输入框。之后的重新读取期间（分隔线可能已经显示）按 Enter 的消息不能被悄悄丢掉
+    clearing.value = false
     if (typed) draft.value = ''
     sendNotice.value = out.cleared ? '已清空上下文：之后的消息从头开始，上面的记录还在。' : '上次清空之后还没有发过消息，不用再清空。'
     stick = true
