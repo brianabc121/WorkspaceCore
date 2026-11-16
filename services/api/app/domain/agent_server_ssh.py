@@ -18,7 +18,7 @@ import asyncssh
 
 from app import agent_provisioning as prov
 from app.domain.agent_server_credentials import ServerCredentialError, resolve_server_password
-from app.domain.agent_ssh_install import HostInfo, InstallFailed, parse_inspect
+from app.domain.agent_ssh_install import SUPPORTED_OS_LABEL, HostInfo, InstallFailed, parse_inspect
 from app.domain.credentials import CredentialBox
 from app.integrations import ssh
 from app.models import AgentSshTarget
@@ -102,7 +102,7 @@ async def _inspect(
         if (not info.docker or not info.compose) and not info.supported:
             notes.append(
                 f"系统 {info.os_id} {info.os_version} {info.arch} 不在自动安装 Docker 的支持范围"
-                "（Ubuntu 22.04 / 24.04、Debian 12，amd64 / arm64）："
+                f"（{SUPPORTED_OS_LABEL}，amd64 / arm64）："
                 "请先手动安装 Docker 与 Compose 插件"
             )
         if not info.root:
