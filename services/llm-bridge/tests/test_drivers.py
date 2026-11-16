@@ -489,3 +489,50 @@ def test_turn_usage_prefers_the_turn_total_and_reads_credits() -> None:
     plain = {"usage": {"input_tokens": 5, "output_tokens": 6}}
     assert _turn_usage(plain) == {"input_tokens": 5, "output_tokens": 6}
     assert _turn_usage({"usage": None, "_meta": "x"}) == {"input_tokens": 0, "output_tokens": 0}
+
+
+# ---- 上下文与压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）----
+async def test_cli_context_usage_and_compaction(tmp_path: Path) -> None:
+    """Claude Code：上下文取主模型最后一次调用的 usage，窗口取 modelUsage 里主模型的；
+    compact_boundary 报成一次压缩（触发方式、压缩前后的 token 数）。子代理的调用不算。"""
+    driver = _cli(tmp_path)
+    await driver.login("oauth_token", {"oauth_token": "tok"})
+    spec = SessionSpec(
+        mode="chat", model="sonnet", workdir=tmp_path / "w", native_id=await driver.create(None)
+    )  # type: ignore[arg-type]
+    first = await driver.run_turn(spec, "你好", Sink())
+    assert first.context is not None
+    assert (first.context.used, first.context.window) == (1000, 200000)
+    sink = Sink()
+    second = await driver.run_turn(spec, "compact-auto", sink)
+    compacted = [p for k, p in sink.events if k == "compacted"]
+    assert compacted == [{"trigger": "auto", "pre_tokens": 150000, "post_tokens": 9000}]
+    assert second.context is not None and second.context.used == 2000
+
+
+async def test_codebuddy_context_usage_and_compaction(tmp_path: Path) -> None:
+    """CodeBuddy Code：上下文在 result._meta；压缩只有“正在压缩”的状态事件，开始到结束算一次。"""
+    driver = _cli(tmp_path, codebuddy_profile)
+    await driver.login("api_key", {"api_key": "cb-key"})
+    spec = SessionSpec(
+        mode="chat", model="auto", workdir=tmp_path / "w", native_id=await driver.create(None)
+    )  # type: ignore[arg-type]
+    sink = Sink()
+    outcome = await driver.run_turn(spec, "compact-auto", sink)
+    assert [p for k, p in sink.events if k == "compacted"] == [{"trigger": "auto"}]
+    assert outcome.context is not None
+    assert (outcome.context.used, outcome.context.window) == (1007, 168000)
+
+
+async def test_codex_context_usage_and_compaction(codex: CodexDriver, tmp_path: Path) -> None:
+    """Codex：窗口是 tokenUsage.modelContextWindow，用量是最近一次的 totalTokens 去掉推理输出；
+    contextCompaction 条目算一次压缩。"""
+    spec = SessionSpec(mode="chat", model="gpt-a", workdir=tmp_path / "w")
+    spec = replace(spec, native_id=await codex.create(spec))
+    first = await codex.run_turn(spec, "你好", Sink())
+    assert first.context is not None
+    assert (first.context.used, first.context.window) == (5, 200000)
+    sink = Sink()
+    second = await codex.run_turn(spec, "compact-auto", sink)
+    assert [p for k, p in sink.events if k == "compacted"] == [{"trigger": "auto"}]
+    assert second.context is not None and second.context.used == 1005

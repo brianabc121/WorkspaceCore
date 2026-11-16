@@ -83,6 +83,10 @@ GRAPH_MAX_NODES = 2000
 CORRECTIONS_TITLE = "收到的纠正"
 CORRECTIONS_MAX_LINES = 200
 SYSTEM = Author(kind="system", id=None, name="工作台")
+# 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：工作台按大模型会话的记录整理，未经确认
+DIGEST_TYPE = "digest"
+DIGEST_FOLDER = "会话纪要"
+DIGEST_MAX_BYTES = 20 * 1024  # 每篇最多 20 KB（5.3）
 _SIMILAR = 0.75
 
 _ENSURE = (
@@ -385,6 +389,7 @@ class KnowledgeBase:
                     archived=state.archived,
                     agent_access=space.agent_access,
                     writes_enabled=space.writes_enabled,
+                    external_llm_allowed=space.external_llm_allowed,
                     deletes_paused_at=space.deletes_paused_at,
                     notes=count,
                     last_updated_at=last_at,
@@ -775,6 +780,13 @@ class KnowledgeBase:
                 raise _err(403, "BRIEF_HUMAN_ONLY", "项目简报只有人能修改")
             if kind == "correction":
                 raise _err(403, "SYSTEM_NOTE", "《收到的纠正》由工作台维护，不能修改")
+            if kind == DIGEST_TYPE:
+                raise _err(
+                    403,
+                    "SYSTEM_NOTE",
+                    "会话纪要由工作台按会话记录整理，智能体不能写或改；"
+                    "觉得值得留下的内容，用 knowledge_write 另写一篇笔记",
+                )
         if deleting and own.deletes_paused_at is not None:
             raise _err(
                 403,
@@ -867,6 +879,8 @@ class KnowledgeBase:
             await self._check_agent_write(editor, state, None, note_type)
         elif note_type == "correction":
             raise _err(422, "SYSTEM_NOTE", "《收到的纠正》由工作台维护，不能新建这种类型")
+        elif note_type == DIGEST_TYPE:
+            raise _err(422, "SYSTEM_NOTE", "会话纪要由工作台按大模型会话整理，不能新建这种类型")
         title = " ".join(fields.title.split())
         self._check_content(editor, fields, None)
         await self._scan(editor, fields, title)
@@ -975,6 +989,8 @@ class KnowledgeBase:
             await self._check_agent_write(editor, state, note, fields.type)
         elif fields.type == "correction" and note.type != "correction":
             raise _err(422, "SYSTEM_NOTE", "不能把笔记改成《收到的纠正》这种类型")
+        elif fields.type == DIGEST_TYPE and note.type != DIGEST_TYPE:
+            raise _err(422, "SYSTEM_NOTE", "不能把笔记改成会话纪要这种类型")
         self._check_content(editor, fields, note)
         title = " ".join(fields.title.split()) if fields.title is not None else note.title
         await self._scan(editor, fields, title)
@@ -1262,6 +1278,90 @@ class KnowledgeBase:
             .execution_options(synchronize_session=False)
         )
 
+    # ================================================================ 系统写入（会话纪要）
+
+    async def system_write(
+        self,
+        space: KnowledgeSpace,
+        note: KnowledgeNote | None,
+        *,
+        title: str,
+        body: str,
+        note_type: str,
+        folder: str,
+        reason: str,
+        audit: dict[str, Any],
+    ) -> KnowledgeNote:
+        """工作台自己写一篇笔记（会话纪要，docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2、5.3）。
+
+        不新增绕过检查的写入路径：同样过密钥扫描（命中就不写，422 SECRET_DETECTED）、大小上限、
+        知识库的笔记总数；每次写留一个版本，作者是“工作台”，记审计（不含内容）。note 为空时新建。"""
+        if _bytes(body) > DIGEST_MAX_BYTES:
+            raise _err(422, "NOTE_TOO_LARGE", "内容超过上限", limit_bytes=DIGEST_MAX_BYTES)
+        title = " ".join(title.split())[:200]
+        found = secret_scan.scan(title, body)
+        if found:
+            raise _err(422, "SECRET_DETECTED", "内容里像有密钥或密码，没有保存", kinds=found)
+        options = SaveOptions(reason=reason, source_kind="conversation")
+        if note is None:
+            await self._space_capacity(space.id)
+            note = KnowledgeNote(
+                workspace_id=space.workspace_id,
+                space_id=space.id,
+                folder=_clean_folder(folder),
+                title=title,
+                title_key=links.normalize(title),
+                body=body,
+                type=note_type,
+                source_kind="conversation",
+                version=1,
+            )
+            self.db.add(note)
+            await self._flush_title(note)
+            added, _ = _line_stats("", body)
+            self._revision(note, None, "create", options, added, 0)
+            action = "knowledge_note.created"
+        else:
+            old_body = note.body
+            note.body = body
+            note.updated_by_user = note.updated_by_instance = None
+            note.version += 1
+            await self.db.flush()
+            added, removed = _line_stats(old_body, body)
+            self._revision(note, None, "update", options, added, removed)
+            action = "knowledge_note.updated"
+        await self.relink(note, space)
+        await self.audit.record(
+            action,
+            workspace_ids=[note.workspace_id],
+            actor_id=None,
+            resource_type="knowledge_note",
+            resource_id=note.id,
+            metadata={"space_id": str(note.space_id), "version": note.version, **audit},
+        )
+        return note
+
+    async def trash_system(self, note: KnowledgeNote, *, reason: str) -> None:
+        """工作台把自己写的笔记放进回收站（会话纪要随会话内容按保留期清除，5.3）。
+
+        30 天内可以恢复。"""
+        if note.deleted_at is not None:
+            return
+        now = _now()
+        note.deleted_at = now
+        note.purge_after = now + timedelta(days=TRASH_DAYS)
+        note.version += 1
+        options = SaveOptions(reason=reason, source_kind="system")
+        self._revision(note, None, "delete", options, 0, len(note.body.splitlines()))
+        await self.audit.record(
+            "knowledge_note.deleted",
+            workspace_ids=[note.workspace_id],
+            actor_id=None,
+            resource_type="knowledge_note",
+            resource_id=note.id,
+            metadata={"by": "会话纪要", "reason": reason},
+        )
+
     # ================================================================ 纠正回写
 
     async def write_correction(
@@ -1406,6 +1506,7 @@ class KnowledgeBase:
         include_resources: bool = True,
         include_files: bool = False,
         include_task_readmes: bool = False,
+        include_digests: bool = False,
     ) -> GraphOut:
         spaces = await self.space_map(workspace_id)
         alive = and_(KnowledgeNote.workspace_id == workspace_id, KnowledgeNote.deleted_at.is_(None))
@@ -1437,6 +1538,9 @@ class KnowledgeBase:
         if not include_task_readmes and center is None:
             # 任务 README 数量多，图谱默认不显示（T-0122，方案 9.2）
             stmt = stmt.where(KnowledgeNote.task_id.is_(None))
+        if not include_digests and center is None:
+            # 会话纪要未经确认，图谱默认不显示（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.3）
+            stmt = stmt.where(KnowledgeNote.type != DIGEST_TYPE)
         if note_ids is not None:
             stmt = stmt.where(KnowledgeNote.id.in_(note_ids))
         if space_ids:

@@ -15,7 +15,15 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.errors import ApiError
 from app.domain.ai_tools import AiToolService, Requester, ToolCallError, validation_message
-from app.domain.knowledge_base import Editor, NoteFields, SaveOptions, SpaceState, request_hash
+from app.domain.knowledge_base import (
+    DIGEST_FOLDER,
+    DIGEST_TYPE,
+    Editor,
+    NoteFields,
+    SaveOptions,
+    SpaceState,
+    request_hash,
+)
 from app.domain.knowledge_views import KnowledgeService, excerpt
 from app.models import AgentInstance, KnowledgeBriefRead, KnowledgeNote, KnowledgeSpace
 from app.schemas.ai_tools import ToolSpec
@@ -231,6 +239,9 @@ async def _list(ctx: _Context, args: KnowledgeListInput) -> KnowledgeListOutput:
     )
     if args.folder is not None:
         stmt = stmt.where(KnowledgeNote.folder == args.folder)
+    if args.folder != DIGEST_FOLDER:
+        # 会话纪要未经确认：只在列“会话纪要”文件夹时列出（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.3）
+        stmt = stmt.where(KnowledgeNote.type != DIGEST_TYPE)
     rows = (
         await ctx.kb.db.scalars(
             stmt.order_by(KnowledgeNote.folder, KnowledgeNote.title)

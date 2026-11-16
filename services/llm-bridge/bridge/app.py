@@ -448,6 +448,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def admin_session(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
         return await engine_of(request).conversation(session_id)
 
+    @app.get("/admin/sessions/{session_id}/digest")
+    async def admin_session_digest(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
+        """会话纪要的素材（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：按记录排好，不调模型。"""
+        return engine_of(request).digest(session_id)
+
     @app.get("/admin/sessions/{session_id}/events")
     async def admin_session_events(
         request: Request, session_id: str, _: Admin, after: int = 0, wait_seconds: float = 0

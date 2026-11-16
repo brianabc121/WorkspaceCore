@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/vue'
+import { fireEvent, screen, waitFor, within } from '@testing-library/vue'
 import { describe, expect, it, vi } from 'vitest'
 import { emptyPage, fail, mockApi, openApp } from './helpers'
 import { createRenderer, inlineTags, outline, parseTarget, stats } from '../src/features/kb/markdown'
@@ -10,7 +10,7 @@ import type { Schema } from '../src/services/api'
 // 知识库前端（T-0099）
 const path = (r: Request) => new URL(r.url).pathname
 const agent = { kind: 'agent' as const, id: 'inst-a', name: 'ops-claw' }
-const publicSpace: Schema['SpaceOut'] = { id: 'space-public', kind: 'public', name: '公共知识库', description: '', project_id: null, instance_id: null, archived: false, agent_access: 'read_write', writes_enabled: true, deletes_paused_at: null, notes: 2, last_updated_at: '2026-11-03T10:00:00Z', brief_note_id: null, brief_version: null, agents: [], version: 1 }
+const publicSpace: Schema['SpaceOut'] = { id: 'space-public', kind: 'public', name: '公共知识库', description: '', project_id: null, instance_id: null, archived: false, agent_access: 'read_write', writes_enabled: true, external_llm_allowed: true, deletes_paused_at: null, notes: 2, last_updated_at: '2026-11-03T10:00:00Z', brief_note_id: null, brief_version: null, agents: [], version: 1 }
 const projectSpace: Schema['SpaceOut'] = { ...publicSpace, id: 'space-p1', kind: 'project', name: '工作台 V2', project_id: 'project-a', agent_access: 'none', notes: 1, brief_note_id: 'note-brief', brief_version: 6, agents: [{ instance_id: 'inst-a', name: 'ops-claw', access: 'read_write', brief_version_read: 5, added_at: '2026-11-01T00:00:00Z' }] }
 const agentSpace: Schema['SpaceOut'] = { ...publicSpace, id: 'space-a', kind: 'agent', name: 'ops-claw', instance_id: 'inst-a', agent_access: 'read', notes: 1 }
 const spaces = { items: [publicSpace, projectSpace, agentSpace] }
@@ -289,6 +289,19 @@ describe('知识库页面', () => {
     expect(agents).toHaveTextContent('简报更新后还没读（停在第 5 版）')
     expect(within(agents).getByRole('button', { name: '改为只读' })).toBeVisible()
     expect(await screen.findByText('目标：11 月上线')).toBeVisible()
+  })
+
+  it('lets admins stop a space from being sent to external model platforms', async () => {
+    const patches: unknown[] = []
+    kbApi(async r => {
+      if (path(r) === '/api/v1/knowledge/spaces/space-p1' && r.method === 'PATCH') { patches.push(await r.clone().json()); return Response.json({ ...projectSpace, external_llm_allowed: false, version: 2 }) }
+      return undefined
+    })
+    await openApp('/knowledge/spaces/space-p1')
+    const box = await screen.findByRole('checkbox', { name: /允许发给外部大模型平台/ })
+    expect(box).toBeChecked()
+    await fireEvent.click(box)
+    await waitFor(() => expect(patches).toEqual([{ version: 1, external_llm_allowed: false }]))
   })
 
   it('charts weekly edits by people and agents and sends an unread brief over IM once per version', async () => {

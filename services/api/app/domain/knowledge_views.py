@@ -15,7 +15,7 @@ from sqlalchemy.sql import ColumnElement
 
 from app.core.errors import ApiError
 from app.domain import knowledge_links as links
-from app.domain.knowledge_base import KnowledgeBase, SpaceState, _alias_match
+from app.domain.knowledge_base import DIGEST_TYPE, KnowledgeBase, SpaceState, _alias_match
 from app.domain.policy import WorkspaceAccess
 from app.domain.tasks import decode_cursor, encode_cursor
 from app.models import (
@@ -120,7 +120,8 @@ class KnowledgeService(KnowledgeBase):
         order: list[Any] = [KnowledgeNote.pinned.desc()]
         if q:
             stmt = stmt.where(_text_match(q))
-            order = [_bucket(q), *order]
+            # 会话纪要未经确认：搜索时排在最后（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）
+            order = [KnowledgeNote.type == DIGEST_TYPE, _bucket(q), *order]
         stmt = stmt.order_by(*order, KnowledgeNote.updated_at.desc(), KnowledgeNote.id)
         rows = (await self.db.scalars(stmt.offset(offset).limit(limit + 1))).all()
         spaces = await self.space_map(workspace_id)
@@ -464,6 +465,8 @@ class KnowledgeService(KnowledgeBase):
         )
         if note_type is not None:
             stmt = stmt.where(KnowledgeNote.type == note_type)
+        else:  # 会话纪要未经确认：明确指定 type=digest 才搜（LLM_BRIDGE_MEMORY_PLAN.md 5.3）
+            stmt = stmt.where(KnowledgeNote.type != DIGEST_TYPE)
         stmt = stmt.order_by(
             _bucket(q),
             KnowledgeNote.source_kind == "external",

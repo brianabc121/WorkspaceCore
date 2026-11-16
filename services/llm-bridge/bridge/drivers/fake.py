@@ -1,6 +1,7 @@
 """测试用的驱动：不访问任何外部服务。BRIDGE_ENABLE_FAKE=true 时才会登记成平台 fake。
 
-消息约定：`sleep:<秒>` 等这么久再回答；`fail:<错误类别>` 抛出对应的错误；其余原样回显。
+消息约定：`sleep:<秒>` 等这么久再回答；`fail:<错误类别>` 抛出对应的错误；
+`compact` / `compact:manual` 模拟平台压缩上下文；其余原样回显。
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from typing import Any
 
 from bridge.drivers.base import (
     AccountStatus,
+    ContextUsage,
     Driver,
     DriverError,
     EventSink,
@@ -144,6 +146,13 @@ class FakeDriver(Driver):
                 target.write_text("generated\n")
                 files = [name]
                 await sink("files", {"paths": files})
+            if text.startswith("compact"):
+                # 模拟平台压缩上下文（compact / compact:manual）：之后上下文只剩摘要
+                trigger = "manual" if text.startswith("compact:manual") else "auto"
+                await sink(
+                    "compacted", {"trigger": trigger, "pre_tokens": 8000, "post_tokens": 500}
+                )
+                self.history[spec.native_id] = []
             history = self.history.setdefault(spec.native_id, [])
             history += [
                 Message("user", text, time.time()),
@@ -159,11 +168,14 @@ class FakeDriver(Driver):
             if text.startswith("credits:"):
                 # 模拟报积分的平台（CodeBuddy）：credits:<这一回合消耗的积分>
                 usage |= {"credits": float(text[8:].split()[0]), "credit_status": "known"}
+            # 上下文：每一回合多 1000 个 token，窗口 10000（压缩后从 500 起算）
+            used = (500 if text.startswith("compact") else 0) + 1000 * (len(history) // 2)
             return TurnOutcome(
                 text=reply,
                 usage=usage,
                 commands=commands,
                 files=files,
+                context=ContextUsage(used, 10000),
             )
         finally:
             self.running -= 1

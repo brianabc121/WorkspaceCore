@@ -61,6 +61,8 @@ const pausedAgents = computed(() => items.value.filter(s => s.kind === 'agent' &
 const resume = (spaceId: string, version: number) => act(() => kb.updateSpace(spaceId, { version, resume_deletes: true }), '已恢复删除')
 const editingDesc = ref(false), desc = ref('')
 function editDesc() { desc.value = space.value?.description ?? ''; editingDesc.value = true }
+// 能不能附在发给外部大模型平台的消息里（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2，默认允许）
+const setExternal = (allowed: boolean) => space.value && act(() => kb.updateSpace(space.value!.id, { version: space.value!.version, external_llm_allowed: allowed }), allowed ? '已允许发给外部大模型平台' : '已不允许发给外部大模型平台')
 const saveDesc = () => space.value && act(async () => { await kb.updateSpace(space.value!.id, { version: space.value!.version, description: desc.value.trim() }); editingDesc.value = false }, '说明已保存')
 function readState(a: { brief_version_read: number | null }) {
   const latest = space.value?.brief_version
@@ -211,6 +213,10 @@ const newBriefHref = computed(() => space.value ? `/knowledge/notes/new?space=${
                 <input type="radio" name="kb-project-access" :checked="space.agents.length > 0 && space.agents.every(a => a.access === o.v)" @change="setAll(o.v)"><span class="kb-stack"><strong>{{ o.t }}</strong><span class="kb-meta">{{ o.d }}</span></span>
               </label>
             </fieldset>
+            <label class="kb-radio">
+              <input type="checkbox" :checked="space.external_llm_allowed" :disabled="!auth.canManage || busy" @change="setExternal(($event.target as HTMLInputElement).checked)">
+              <span class="kb-stack"><strong>允许发给外部大模型平台</strong><span class="kb-meta">在“大模型聊天”里提问时，人或智能体可以挑这个知识库的笔记附在消息里，发到 OpenAI、Anthropic 或腾讯。关掉后它的笔记不出现在候选里，智能体带它也会被拒绝。每次带了哪几篇都记在审计里。</span></span>
+            </label>
             <div class="kb-notice"><ShieldCheck aria-hidden="true" style="stroke: var(--kb-good)" /><span class="kb-grow">安全保护一直开着：写入里有密钥会被拦下；每个智能体每小时最多写 20 次、删 5 篇，删除超过上限会自动暂停并通知管理员；每篇最多 20 KB。要让某个智能体只读所有知识库，到它的主页关掉“允许写入和删除”。</span></div>
           </section>
         </div>

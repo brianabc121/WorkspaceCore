@@ -8063,7 +8063,8 @@
                   "design",
                   "template",
                   "correction",
-                  "readme"
+                  "readme",
+                  "digest"
                 ],
                 "type": "string"
               },
@@ -13008,6 +13009,225 @@
         "title": "LlmBridgeDeployTargetOut",
         "type": "object"
       },
+      "LlmBridgeDigestItem": {
+        "properties": {
+          "bridge_id": {
+            "format": "uuid",
+            "title": "Bridge Id",
+            "type": "string"
+          },
+          "bridge_name": {
+            "title": "Bridge Name",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "note_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "纪要笔记；还没写过为空",
+            "title": "Note Id"
+          },
+          "note_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Title"
+          },
+          "owner": {
+            "description": "会话是谁建的",
+            "title": "Owner",
+            "type": "string"
+          },
+          "owner_kind": {
+            "title": "Owner Kind",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "session_title": {
+            "title": "Session Title",
+            "type": "string"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          },
+          "space_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Name"
+          },
+          "state": {
+            "description": "active 照常更新；off 关掉了；converted 已转成正式笔记；edited 人改过，不再自动覆盖；deleted 删进了回收站；purged 随会话内容按保留期清掉",
+            "title": "State",
+            "type": "string"
+          },
+          "turns_written": {
+            "default": 0,
+            "title": "Turns Written",
+            "type": "integer"
+          },
+          "written_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Written At"
+          }
+        },
+        "required": [
+          "note_id",
+          "state",
+          "id",
+          "bridge_id",
+          "bridge_name",
+          "session_id",
+          "session_title",
+          "owner",
+          "owner_kind"
+        ],
+        "title": "LlmBridgeDigestItem",
+        "type": "object"
+      },
+      "LlmBridgeDigestList": {
+        "properties": {
+          "digests": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeDigestItem"
+            },
+            "title": "Digests",
+            "type": "array"
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset"
+          }
+        },
+        "required": [
+          "digests"
+        ],
+        "title": "LlmBridgeDigestList",
+        "type": "object"
+      },
+      "LlmBridgeDigestPromoteIn": {
+        "additionalProperties": false,
+        "properties": {
+          "folder": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "放到哪个文件夹；默认根目录",
+            "title": "Folder"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "新标题",
+            "title": "Title"
+          },
+          "type": {
+            "default": "record",
+            "description": "转成哪种笔记",
+            "enum": [
+              "record",
+              "decision",
+              "lesson",
+              "process",
+              "runbook",
+              "design",
+              "plan"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "LlmBridgeDigestPromoteIn",
+        "type": "object"
+      },
+      "LlmBridgeDigestToggleIn": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "description": "false：关掉这个会话的纪要（已有的那篇不动）；true：重新打开",
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "LlmBridgeDigestToggleIn",
+        "type": "object"
+      },
       "LlmBridgeEnvironmentIn": {
         "additionalProperties": false,
         "properties": {
@@ -14587,6 +14807,18 @@
             "title": "Concurrency",
             "type": "integer"
           },
+          "digest_enabled": {
+            "default": true,
+            "description": "会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：工作台按会话记录整理纪要，写进知识库的“会话纪要”文件夹（未确认）。默认开；旧版本的管理器没有这一项",
+            "title": "Digest Enabled",
+            "type": "boolean"
+          },
+          "digest_follow_retention": {
+            "default": true,
+            "description": "会话内容按保留期清掉时，纪要一起放进回收站（默认开）",
+            "title": "Digest Follow Retention",
+            "type": "boolean"
+          },
           "max_text_chars": {
             "maximum": 1000000.0,
             "minimum": 1.0,
@@ -14703,6 +14935,28 @@
               }
             ],
             "title": "Concurrency"
+          },
+          "digest_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest Enabled"
+          },
+          "digest_follow_retention": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest Follow Retention"
           },
           "max_text_chars": {
             "anyOf": [
@@ -15237,8 +15491,110 @@
         "title": "LlmChatClearedOut",
         "type": "object"
       },
+      "LlmChatContextOut": {
+        "description": "会话的上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：官方程序报的数，没报的为空。",
+        "properties": {
+          "compactions": {
+            "default": 0,
+            "description": "平台压缩过几次",
+            "title": "Compactions",
+            "type": "integer"
+          },
+          "last_compacted_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次压缩的时间",
+            "title": "Last Compacted At"
+          },
+          "last_trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "最近一次压缩怎么触发的：auto 平台自动 / manual 手动",
+            "title": "Last Trigger"
+          },
+          "near_limit": {
+            "default": false,
+            "description": "快到平台自动压缩的位置了（已用比例到了 warn_percent）",
+            "title": "Near Limit",
+            "type": "boolean"
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "已用百分比",
+            "title": "Percent"
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "上下文现在用了多少 token",
+            "title": "Used"
+          },
+          "warn_percent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "提醒的位置（已用百分比）",
+            "title": "Warn Percent"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "上下文窗口多大（token）",
+            "title": "Window"
+          }
+        },
+        "title": "LlmChatContextOut",
+        "type": "object"
+      },
       "LlmChatConversationOut": {
         "properties": {
+          "digest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LlmChatDigestOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这个会话的纪要；没写过、也没关掉时为空"
+          },
           "last_event_id": {
             "description": "读事件时从它之后开始",
             "title": "Last Event Id",
@@ -15390,6 +15746,97 @@
           "session"
         ],
         "title": "LlmChatCreatedOut",
+        "type": "object"
+      },
+      "LlmChatDigestOut": {
+        "description": "这个会话的纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）。",
+        "properties": {
+          "note_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "纪要笔记；还没写过为空",
+            "title": "Note Id"
+          },
+          "note_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note Title"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          },
+          "space_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Name"
+          },
+          "state": {
+            "description": "active 照常更新；off 关掉了；converted 已转成正式笔记；edited 人改过，不再自动覆盖；deleted 删进了回收站；purged 随会话内容按保留期清掉",
+            "title": "State",
+            "type": "string"
+          },
+          "turns_written": {
+            "default": 0,
+            "title": "Turns Written",
+            "type": "integer"
+          },
+          "written_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Written At"
+          }
+        },
+        "required": [
+          "note_id",
+          "state"
+        ],
+        "title": "LlmChatDigestOut",
         "type": "object"
       },
       "LlmChatEventOut": {
@@ -15943,6 +16390,40 @@
             "description": "进行中：最后一段完整的话之后、已经写出来的增量文字",
             "title": "Partial"
           },
+          "post_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "context_compacted：压缩后的 token 数（平台报了才有）",
+            "title": "Post Tokens"
+          },
+          "pre_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "context_compacted：压缩前的 token 数（平台报了才有）",
+            "title": "Pre Tokens"
+          },
+          "references": {
+            "default": [],
+            "description": "user 消息：随这一问带上的知识库笔记（note_id、title、label、truncated）",
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "References",
+            "type": "array"
+          },
           "resume": {
             "anyOf": [
               {
@@ -15955,7 +16436,7 @@
             "description": "被额度打断的回合（status=interrupted）：什么时候自动继续"
           },
           "role": {
-            "description": "user / assistant；context_cleared：在这里清空了上下文，它之前的内容模型已经不记得",
+            "description": "user / assistant；context_compacted：平台在这一回合压缩了上下文，它前面的内容在模型那里只剩摘要；context_cleared：在这里清空了上下文，它之前的内容模型已经不记得",
             "title": "Role",
             "type": "string"
           },
@@ -16009,6 +16490,18 @@
             ],
             "description": "回答所在回合的 queued_at / started_at / finished_at、waited_seconds（排了多久）、ran_seconds（做了多久）",
             "title": "Timing"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "context_compacted：auto 平台自动压缩 / manual 手动压缩",
+            "title": "Trigger"
           },
           "turn_id": {
             "anyOf": [
@@ -16106,6 +16599,54 @@
           "id"
         ],
         "title": "LlmChatModelOut",
+        "type": "object"
+      },
+      "LlmChatNoteHit": {
+        "properties": {
+          "excerpt": {
+            "description": "正文开头一小段",
+            "title": "Excerpt",
+            "type": "string"
+          },
+          "external_allowed": {
+            "description": "所在知识库允许发给外部大模型平台",
+            "title": "External Allowed",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "description": "来源说明：人已确认 / 智能体写入 / 外部资料，和更新日期",
+            "title": "Label",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "space_name": {
+            "title": "Space Name",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "space_id",
+          "space_name",
+          "label",
+          "excerpt",
+          "external_allowed"
+        ],
+        "title": "LlmChatNoteHit",
         "type": "object"
       },
       "LlmChatOptionsOut": {
@@ -16267,6 +16808,31 @@
         "title": "LlmChatQueueOut",
         "type": "object"
       },
+      "LlmChatRelatedOut": {
+        "description": "输入框里的文字在知识库和以前的会话里找到的相近内容（只在工作台里找，不发给任何平台）。",
+        "properties": {
+          "notes": {
+            "items": {
+              "$ref": "#/components/schemas/LlmChatNoteHit"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/LlmChatSimilarSession"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "notes",
+          "sessions"
+        ],
+        "title": "LlmChatRelatedOut",
+        "type": "object"
+      },
       "LlmChatRenameIn": {
         "additionalProperties": false,
         "properties": {
@@ -16350,6 +16916,17 @@
             "title": "Attachments",
             "type": "array"
           },
+          "knowledge_notes": {
+            "default": [],
+            "description": "随这条消息带上的知识库笔记（人挑的，最多 3 篇；docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）。只附在发给模型的内容后面，包装成资料；合计最多 6000 字，超出的截断。所在知识库不允许发给外部平台时 403",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 3,
+            "title": "Knowledge Notes",
+            "type": "array"
+          },
           "mode": {
             "default": "queue",
             "description": "会话正在处理别的消息时：queue 排队（不打断）；insert 插入——送进正在处理的回合，平台做不到时中断它、合并重发",
@@ -16427,6 +17004,17 @@
             "description": "有排队中或进行中的回合",
             "title": "Busy",
             "type": "boolean"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LlmChatContextOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "上下文用了多少、压缩过几次；旧版本的管理器没有"
           },
           "created_at": {
             "title": "Created At",
@@ -16553,6 +17141,58 @@
           "updated_at"
         ],
         "title": "LlmChatSessionOut",
+        "type": "object"
+      },
+      "LlmChatSimilarSession": {
+        "properties": {
+          "bridge_id": {
+            "format": "uuid",
+            "title": "Bridge Id",
+            "type": "string"
+          },
+          "bridge_name": {
+            "title": "Bridge Name",
+            "type": "string"
+          },
+          "last_turn_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Turn At"
+          },
+          "owner": {
+            "title": "Owner",
+            "type": "string"
+          },
+          "platform": {
+            "title": "Platform",
+            "type": "string"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "bridge_id",
+          "bridge_name",
+          "session_id",
+          "title",
+          "platform",
+          "owner",
+          "last_turn_at"
+        ],
+        "title": "LlmChatSimilarSession",
         "type": "object"
       },
       "LlmChatStepOut": {
@@ -22123,7 +22763,8 @@
               "design",
               "template",
               "correction",
-              "readme"
+              "readme",
+              "digest"
             ],
             "title": "Type",
             "type": "string"
@@ -22308,7 +22949,8 @@
               "design",
               "template",
               "correction",
-              "readme"
+              "readme",
+              "digest"
             ],
             "title": "Type",
             "type": "string"
@@ -22535,7 +23177,8 @@
               "design",
               "template",
               "correction",
-              "readme"
+              "readme",
+              "digest"
             ],
             "title": "Type",
             "type": "string"
@@ -22711,7 +23354,8 @@
                   "design",
                   "template",
                   "correction",
-                  "readme"
+                  "readme",
+                  "digest"
                 ],
                 "type": "string"
               },
@@ -31214,6 +31858,12 @@
             "title": "Description",
             "type": "string"
           },
+          "external_llm_allowed": {
+            "default": true,
+            "description": "笔记能不能附在发给外部大模型平台（OpenAI、Anthropic、腾讯）的消息里；关掉后它的笔记不出现在“参考知识库”的候选里，智能体带它也被拒绝",
+            "title": "External Llm Allowed",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -31335,6 +31985,18 @@
               }
             ],
             "title": "Description"
+          },
+          "external_llm_allowed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "笔记能不能附在发给外部大模型平台的消息里（默认允许）",
+            "title": "External Llm Allowed"
           },
           "resume_deletes": {
             "anyOf": [
@@ -53690,6 +54352,18 @@
             }
           },
           {
+            "description": "显示会话纪要（未经确认，默认不显示；LLM_BRIDGE_MEMORY_PLAN.md 5.3）",
+            "in": "query",
+            "name": "digests",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "显示会话纪要（未经确认，默认不显示；LLM_BRIDGE_MEMORY_PLAN.md 5.3）",
+              "title": "Digests",
+              "type": "boolean"
+            }
+          },
+          {
             "description": "当前工作空间；不是成员时返回 404",
             "in": "header",
             "name": "X-Workspace-Id",
@@ -53817,7 +54491,8 @@
                     "design",
                     "template",
                     "correction",
-                    "readme"
+                    "readme",
+                    "digest"
                   ],
                   "type": "string"
                 },
@@ -55927,7 +56602,7 @@
         ]
       },
       "patch": {
-        "description": "说明、智能体权限（公共库三种，智能体库 read / none）、智能体的写入开关、解除被自动暂停的删除。version 不一致时 409。",
+        "description": "说明、智能体权限（公共库三种，智能体库 read / none）、智能体的写入开关、解除被自动暂停的删除、能不能附在发给外部大模型平台的消息里。version 不一致时 409。",
         "operationId": "update_space",
         "parameters": [
           {
@@ -57905,6 +58580,147 @@
           }
         ],
         "summary": "聊天：新建会话时可选的模型和开发环境（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/related": {
+      "get": {
+        "description": "输入框里停顿一下时用：按输入的文字在知识库（不含会话纪要）和所有 MCP 管理器的会话标题里找相近的。只在工作台里找，不发给任何平台。notes 也是“参考知识库”的候选：external_allowed=false 的不能带上。session_id：不列出当前这个会话。",
+        "operationId": "llm_chat_related",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "session_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^bs_[0-9a-f]{20}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Session Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "maximum": 10,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatRelatedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "聊天：知识库和以前的会话里相近的内容（admin）",
         "tags": [
           "llm_bridge"
         ]
@@ -63447,6 +64263,720 @@
           }
         ],
         "summary": "一键部署：一个任务的步骤和日志（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/digests": {
+      "get": {
+        "description": "每个大模型会话一篇，工作台按会话记录整理（不调模型），写在知识库的“会话纪要”文件夹，标为未确认。state 筛选：active / off / converted / edited / deleted / purged。",
+        "operationId": "llm_bridge_digests",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bridge_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bridge Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeDigestList"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "会话纪要列表（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/digests/{bridge_id}/{session_id}": {
+      "delete": {
+        "description": "纪要笔记放进知识库的回收站（30 天内可以恢复），之后不再为这个会话写纪要。",
+        "operationId": "llm_bridge_digest_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "删除会话纪要（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      },
+      "put": {
+        "description": "enabled=false：之后不再为这个会话写纪要，已有的那篇不动（要删就用 DELETE）；enabled=true：重新打开（转成正式笔记、删掉的也会重新开始，下次触发时新写一篇）。",
+        "operationId": "llm_bridge_digest_toggle",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmBridgeDigestToggleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatDigestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "关掉或重新打开一个会话的纪要（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/digests/{bridge_id}/{session_id}/promote": {
+      "post": {
+        "description": "由人确认：改成普通笔记（默认 record，放到根目录），作者记成这个人；之后不再自动更新。纪要已经不是纪要（转过了）时 409。",
+        "operationId": "llm_bridge_digest_promote",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmBridgeDigestPromoteIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatDigestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "把会话纪要转成正式笔记（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/digests/{bridge_id}/{session_id}/write": {
+      "post": {
+        "description": "不等触发条件，按管理器现在的记录整理一次（不调模型、不花 token）。关掉了、已转成正式笔记、人改过的 409；管理器设置里关掉了纪要也 409。",
+        "operationId": "llm_bridge_digest_write",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmChatDigestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "现在整理一次这个会话的纪要（admin）",
         "tags": [
           "llm_bridge"
         ]

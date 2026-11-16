@@ -56,6 +56,9 @@ NOTE_TYPES = (
     "template",
     "correction",
     "readme",
+    # 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：工作台按大模型会话的记录整理，未经确认；
+    # 检索排在最后、默认不进检索候选和图谱；智能体不能写这种类型
+    "digest",
 )
 SOURCE_KINDS = ("human", "observation", "task", "conversation", "external", "system")
 CHANGE_KINDS = ("create", "update", "delete", "restore", "revert", "rename")
@@ -121,6 +124,9 @@ class KnowledgeSpace(Base):
     writes_enabled: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     deletes_paused_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     corrections_unseen: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    # 笔记能不能附在发给外部大模型平台的消息里（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2，
+    # 人类 2026-11-16 决定默认允许）；关掉后它的笔记不出现在“参考知识库”的候选里，智能体带它也被拒绝
+    external_llm_allowed: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _updated_at()

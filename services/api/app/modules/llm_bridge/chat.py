@@ -24,9 +24,11 @@ from app.domain import secret_scan
 from app.domain.policy import WorkspaceAccess
 from app.integrations.base import ConnectorError
 from app.models import User
+from app.modules.llm_bridge import memory
 from app.modules.llm_bridge.chat_schemas import (
     LlmChatAttachmentOut,
     LlmChatClearedOut,
+    LlmChatContextOut,
     LlmChatConversationOut,
     LlmChatCreatedOut,
     LlmChatCreateIn,
@@ -87,7 +89,16 @@ def session_out(session: dict[str, Any], me: str) -> LlmChatSessionOut:
         environment=LlmBridgeEnvironmentOut(**environment) if environment else None,
         source=session.get("source") if isinstance(session.get("source"), dict) else None,
         purged_at=session.get("purged_at"),
+        context=_context_out(session.get("context")),
     )
+
+
+def _context_out(raw: Any) -> LlmChatContextOut | None:
+    """管理器报的上下文；旧版本的管理器没有这一项，不给。"""
+    if not isinstance(raw, dict):
+        return None
+    keys = LlmChatContextOut.model_fields.keys()
+    return LlmChatContextOut.model_validate({k: v for k, v in raw.items() if k in keys})
 
 
 def _filename(response: httpx.Response) -> str:
@@ -233,6 +244,7 @@ class LlmChatService:
         messages = []
         for item in data.get("messages", []):
             is_user = item.get("role") == "user"
+            compacted = item.get("role") == "context_compacted"
             cleared = item.get("role") == "context_cleared"
             messages.append(
                 LlmChatMessageOut(
@@ -257,12 +269,21 @@ class LlmChatService:
                     attachments=item.get("attachments") or [],
                     imported=bool(item.get("imported")),
                     delivery=item.get("delivery") if is_user else None,
+                    references=item.get("references") or [] if is_user else [],
+                    trigger=item.get("trigger") if compacted else None,
+                    pre_tokens=item.get("pre_tokens") if compacted else None,
+                    post_tokens=item.get("post_tokens") if compacted else None,
                 )
             )
+        from app.modules.llm_bridge.memory_api import digest_out, find_digest
+
         return LlmChatConversationOut(
             session=session_out(data["session"], me),
             messages=messages,
             last_event_id=int(data.get("last_event_id") or 0),
+            digest=await digest_out(
+                self.bridges, await find_digest(self.bridges, row.id, session_id)
+            ),
         )
 
     async def events(
@@ -392,6 +413,7 @@ class LlmChatService:
         no_secrets(body.text)
         caller = await self._caller(access, SCOPES if body.takeover else OWN_SCOPES)
         client, bridge_id, bridge_name = await self.bridges.client(row), row.id, row.name
+        references = await self._references(access, body.knowledge_notes)
         await self.db.commit()
         arguments = {
             "session_id": session_id,
@@ -403,6 +425,8 @@ class LlmChatService:
             arguments["attachments"] = body.attachments
         if body.mode != "queue":
             arguments["mode"] = body.mode
+        if references is not None:  # 没带笔记时不传这一项：旧版本的管理器不认识它
+            arguments["references"] = references.items
         try:
             data = await self._tool(client, caller, "llm_send", arguments)
         except ApiError as error:
@@ -426,8 +450,37 @@ class LlmChatService:
                 **({"delivered": data.get("delivered")} if body.mode == "insert" else {}),
             },
         )
+        if references is not None:
+            # 知识库的内容离开了工作台：记下带了哪几篇、发到哪个平台的哪个会话、谁挑的
+            # （docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2、第 7 节）
+            await self.bridges.audit(
+                access,
+                "knowledge_attached",
+                bridge_id,
+                {
+                    "bridge": bridge_name,
+                    "session": session_id,
+                    "turn": data.get("turn_id"),
+                    "platform": data.get("platform"),
+                    "notes": references.note_ids,
+                    "picked_by": "user",
+                    "truncated": references.truncated,
+                },
+            )
         await self.db.commit()
         return _turn_out(data)
+
+    async def _references(
+        self, access: WorkspaceAccess, note_ids: list[uuid.UUID]
+    ) -> memory.References | None:
+        """人挑的知识库笔记 → 参考资料（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）。"""
+        if not note_ids:
+            return None
+        try:
+            return await memory.build(self.db, self.bridges.settings, access.workspace.id, note_ids)
+        except memory.ReferenceProblem as problem:
+            status = {"NOT_FOUND": 404, "FORBIDDEN_CAPABILITY": 403}.get(problem.code, 422)
+            raise ApiError(status, problem.code, problem.message) from None
 
     async def cancel(self, access: WorkspaceAccess, row: LlmBridge, turn_id: str) -> LlmChatTurnOut:
         caller, client = await self._caller(access), await self.bridges.client(row)
@@ -538,6 +591,15 @@ class LlmChatService:
                 if message.at
                 else ""
             )
+            if message.role == "context_compacted":
+                how = "手动压缩" if message.trigger == "manual" else "平台自动压缩"
+                lines += [
+                    "---",
+                    "",
+                    f"*上下文已压缩（{how}，{when}）：这里之前的内容在模型那里只剩摘要*",
+                    "",
+                ]
+                continue
             if message.role == "context_cleared":
                 who = f"，{message.by}" if message.by else ""
                 lines += [

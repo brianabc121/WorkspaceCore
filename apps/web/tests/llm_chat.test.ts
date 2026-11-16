@@ -30,13 +30,13 @@ const account = (slot: string, state: string): Schema['LlmBridgeAccountOut'] => 
 const channel = (platform: string, mode: string, slot: string, over: Partial<Schema['LlmBridgeChannelOut']> = {}): Schema['LlmBridgeChannelOut'] => ({ platform, mode, slot, enabled: true, available: true, note: '', ...over })
 const status = (): Schema['LlmBridgeStatusOut'] => ({
   reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {}, quota: {},
-  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
+  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, digest_enabled: true, digest_follow_retention: true, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
   accounts: [account('openai', 'logged_in'), account('claude', 'logged_in'), account('workbuddy', 'logged_out')],
   channels: [channel('chatgpt', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
 })
 const session = (over: Partial<Session> = {}): Session => ({ session_id: S1, platform: 'claude', mode: 'chat', model: 'sonnet', title: '周报怎么写', status: 'active', origin: 'bridge', owner: '测试用户', owner_kind: 'me', busy: false, turns: 1, created_at: now() - 600, updated_at: now(), environment: null, ...over })
-const asked = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'user', turn_id: turn, text, at: now() - 100, by: '测试用户', mine: true, steps: [], attachments: [], imported: false, ...over })
-const answered = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'assistant', turn_id: turn, text, at: now() - 90, status: 'completed', steps: [], attachments: [], imported: false, ...over })
+const asked = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'user', turn_id: turn, text, at: now() - 100, by: '测试用户', mine: true, steps: [], attachments: [], imported: false, references: [], ...over })
+const answered = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'assistant', turn_id: turn, text, at: now() - 90, status: 'completed', steps: [], attachments: [], imported: false, references: [], ...over })
 const talk = (over: Partial<Session> = {}, messages: Message[] = [asked('写一个周报模板'), answered('好的，模板如下。')], last = 10): Conversation => ({ session: session(over), messages, last_event_id: last })
 const environment = (id: string, name: string): Schema['LlmBridgeEnvironmentOut'] => ({ id, platform: 'codex', mode: 'dev', name, enabled: true, repo_url: 'https://example.com/a.git', branch: 'main', sandbox: 'workspace_write', network: false, description: '' })
 
@@ -576,7 +576,7 @@ describe('大模型聊天', () => {
   it('clears the context with /clear instead of sending it, and marks where the context was cleared', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const bodies: unknown[] = []
-    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 50, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false }
+    const divider: Message = { role: 'context_cleared', turn_id: null, text: '', at: now() - 50, by: '测试用户', cleared_turns: 1, steps: [], attachments: [], imported: false, references: [] }
     const { requests } = setup('owner', {}, async (r, w) => {
       if (path(r) !== `${chat}/sessions/${S1}/clear` || r.method !== 'POST') return undefined
       bodies.push(await r.json())
@@ -676,6 +676,122 @@ describe('大模型聊天', () => {
     expect(within(claude).getByText('已用 62%，剩余 38%')).toBeVisible()
     expect(within(claude).getByText('重置时间')).toBeVisible()
     expect(within(claude).getByText(/最近 5 小时经这个管理器用掉 4,321 个 token/)).toBeVisible()
+  })
+
+  it('shows how much of the context is used, warns near the limit and marks where the platform compacted it', async () => {
+    const context = { used: 170000, window: 200000, percent: 85, compactions: 2, last_compacted_at: now() - 60, last_trigger: 'auto', near_limit: true, warn_percent: 80 }
+    const compactedAt: Message = { role: 'context_compacted', turn_id: T2, text: '', at: now() - 60, trigger: 'auto', pre_tokens: 150000, post_tokens: 9000, steps: [], attachments: [], imported: false, references: [] }
+    setup('owner', { conversations: { [S1]: talk({ context }, [asked('第一问'), answered('第一答'), compactedAt, asked('第二问', T2), answered('第二答', T2, { steps: [{ kind: 'compaction', text: '上下文已压缩（平台自动压缩）：之前的内容变成了摘要', at: now() - 60, truncated: false, error: false }] })]) } })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const line = await screen.findByRole('separator', { name: /这里之前的内容被压缩成了摘要（平台自动压缩/ })
+    expect(line).toHaveTextContent('压缩前约 150k、压缩后约 9k')
+    // 分隔线排在那一问前面
+    expect(messages().indexOf(line)).toBe(2)
+    expect(screen.getByText(/已用 85%（170k \/ 200k），压缩过 2 次/)).toBeVisible()
+    expect(screen.getByText(/上下文已用 85%，快到平台自动压缩的位置了/)).toBeVisible()
+  })
+
+  it('hints at related notes and earlier questions, and attaches picked notes to the message', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const NOTE = '33333333-3333-4333-8333-333333333333', LOCKED = '44444444-4444-4444-8444-444444444444'
+    const related: Schema['LlmChatRelatedOut'] = {
+      notes: [
+        { id: NOTE, title: '部署约定', space_id: 'sp', space_name: '公共知识库', label: '人已确认 · 2026-11-10 更新', excerpt: '先备份数据库', external_allowed: true },
+        { id: LOCKED, title: '内部安排', space_id: 'sp2', space_name: '秘密项目', label: '人已确认 · 2026-11-09 更新', excerpt: '', external_allowed: false },
+      ],
+      sessions: [{ bridge_id: ONE, bridge_name: '主账号', session_id: S2, title: '怎么部署才安全', platform: 'claude', owner: '测试用户', last_turn_at: '2026-11-12T08:00:00Z' }],
+    }
+    const bodies: Schema['LlmChatSendIn'][] = []
+    const { requests } = setup('owner', {}, async (r, w) => {
+      if (path(r) === `${chat}/related`) return Response.json(related)
+      if (path(r) !== `${chat}/sessions/${S1}/messages` || r.method !== 'POST') return undefined
+      bodies.push(await r.json() as Schema['LlmChatSendIn'])
+      w.conversations[S1] = talk({}, [asked('写一个周报模板'), answered('好的'), asked('部署前要做什么', T2, { references: [{ note_id: NOTE, title: '部署约定', truncated: false }] }), answered('先备份。', T2)])
+      return Response.json(turn(T2, 'completed'))
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const box = await composer()
+    await fireEvent.update(box, '部署前要做什么')
+    await vi.advanceTimersByTimeAsync(800)
+    const hint = await screen.findByText(/知识库里有 2 篇相关笔记 · 11月12日问过类似的问题/)
+    expect(hint).toBeVisible()
+    const ask = requests.find(r => path(r) === `${chat}/related`)!
+    expect(query(ask).get('q')).toBe('部署前要做什么')
+    expect(query(ask).get('session_id')).toBe(S1)
+    await fireEvent.click(screen.getByRole('button', { name: '点开看' }))
+    const panel = screen.getByRole('region', { name: '知识库和以前的会话' })
+    // 不允许发给外部平台的知识库里的笔记不能勾
+    expect(within(panel).getByRole('checkbox', { name: '带上《内部安排》' })).toBeDisabled()
+    expect(within(panel).getByText('不允许发给外部平台')).toBeVisible()
+    expect(within(panel).getByRole('link', { name: '怎么部署才安全' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S2}`)
+    await fireEvent.click(within(panel).getByRole('checkbox', { name: '带上《部署约定》' }))
+    expect(within(screen.getByRole('list', { name: '随这条消息带上的笔记' })).getByText('参考：《部署约定》')).toBeVisible()
+    await fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(bodies).toHaveLength(1))
+    expect(bodies[0]).toEqual({ text: '部署前要做什么', request_id: expect.any(String), knowledge_notes: [NOTE], takeover: false })
+    // 发出去后：选中的清空；这一问下面写着参考了哪几篇
+    expect(await screen.findByLabelText('参考了的知识库笔记')).toHaveTextContent('参考了：《部署约定》')
+    expect(screen.queryByRole('list', { name: '随这条消息带上的笔记' })).not.toBeInTheDocument()
+    vi.useRealTimers()
+  })
+
+  it('saves an answer to the knowledge base, offering to append to a similar note', async () => {
+    const SPACE = '55555555-5555-4555-8555-555555555555', OLD = '66666666-6666-4666-8666-666666666666'
+    const patched: unknown[] = []
+    setup('owner', {}, async r => {
+      const p = path(r)
+      if (p === '/api/v1/knowledge/spaces') return Response.json({ items: [{ id: SPACE, kind: 'public', name: '公共知识库', archived: false }] })
+      if (p === '/api/v1/knowledge/notes' && r.method === 'GET') return Response.json({ items: [{ id: OLD, title: '周报模板' }], next_cursor: null, total_estimate: null })
+      if (p === `/api/v1/knowledge/notes/${OLD}` && r.method === 'GET') return Response.json({ id: OLD, title: '周报模板', body: '旧内容', version: 3 })
+      if (p === `/api/v1/knowledge/notes/${OLD}` && r.method === 'PATCH') { patched.push(await r.json()); return Response.json({ id: OLD, title: '周报模板', version: 4 }) }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    await fireEvent.click(await screen.findByRole('button', { name: '存进知识库' }))
+    const dialog = await screen.findByRole('dialog', { name: '存进知识库' })
+    await waitFor(() => expect(within(dialog).getByLabelText('知识库')).toHaveValue(SPACE))
+    expect(within(dialog).getByLabelText('标题')).toHaveValue('写一个周报模板')
+    expect((within(dialog).getByLabelText('内容') as HTMLTextAreaElement).value).toMatch(/^好的，模板如下。\n\n> 出处：会话\[《周报怎么写》\]\(\/llm_bridge\?m=.+&s=.+&t=.+\)$/)
+    await fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    // 已有相近的：问接在后面还是另存
+    expect(await within(dialog).findByText(/这个知识库里已有相近的笔记/)).toBeVisible()
+    await fireEvent.click(within(dialog).getByRole('button', { name: '接在它后面' }))
+    expect(await within(dialog).findByText('已存进《周报模板》。')).toBeVisible()
+    expect(patched).toEqual([{ version: 3, body: expect.stringMatching(/^旧内容\n\n---\n\n好的，模板如下。/), reason: '从大模型会话的回答存入' }])
+  })
+
+  it('shows the session digest in the info panel and acts on it', async () => {
+    const NOTE = '77777777-7777-4777-8777-777777777777'
+    const digest: Schema['LlmChatDigestOut'] = { note_id: NOTE, note_title: '会话纪要：周报怎么写（111111）', space_id: 'sp', space_name: '公共知识库', state: 'active', turns_written: 3, written_at: '2026-11-16T01:00:00Z', reason: 'compaction' }
+    const actions: string[] = []
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    setup('owner', { conversations: { [S1]: { ...talk(), digest } } }, async r => {
+      const p = path(r)
+      if (p.startsWith(`/api/v1/llm_bridge/digests/${ONE}/${S1}`) && r.method !== 'GET') { actions.push(`${r.method} ${p.split(S1)[1] || '/'}`); return r.method === 'DELETE' ? new Response(null, { status: 204 }) : Response.json(digest) }
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const panel = await screen.findByRole('region', { name: '会话纪要' })
+    expect(within(panel).getByRole('link', { name: '《会话纪要：周报怎么写（111111）》' })).toHaveAttribute('href', `/knowledge/notes/${NOTE}`)
+    expect(within(panel).getByText(/公共知识库 · 照常更新（未确认）.*（平台压缩了上下文）/)).toBeVisible()
+    const steps = [['现在整理一次', 'POST /write'], ['转成正式笔记', 'POST /promote'], ['关掉这个会话的纪要', 'PUT /'], ['删除纪要', 'DELETE /']] as const
+    for (const [index, [name]] of steps.entries()) {
+      await waitFor(() => expect(within(panel).getByRole('button', { name })).toBeEnabled())
+      await fireEvent.click(within(panel).getByRole('button', { name }))
+      await waitFor(() => expect(actions).toHaveLength(index + 1))
+    }
+    expect(actions).toEqual(steps.map(([, action]) => action))
+  })
+
+  it('lists all digests in their own view', async () => {
+    const item: Schema['LlmBridgeDigestItem'] = { id: 'd1', bridge_id: ONE, bridge_name: '主账号', session_id: S1, session_title: '周报怎么写', owner: 'openclaw-1', owner_kind: 'agent', note_id: 'n1', note_title: '会话纪要：周报怎么写', space_id: 'sp', space_name: 'openclaw-1', state: 'active', turns_written: 4, written_at: '2026-11-16T01:00:00Z', reason: 'idle' }
+    setup('owner', {}, r => (path(r) === '/api/v1/llm_bridge/digests' ? Response.json({ digests: [item], next_offset: null }) : undefined))
+    await openApp('/llm_bridge?view=digests')
+    const table = await screen.findByRole('table', { name: '会话纪要' })
+    expect(within(table).getByRole('link', { name: '会话纪要：周报怎么写' })).toHaveAttribute('href', '/knowledge/notes/n1')
+    expect(within(table).getByRole('link', { name: '周报怎么写' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S1}`)
+    expect(within(table).getByText('24 小时没有新回合')).toBeVisible()
+    expect(screen.getByRole('link', { name: '会话纪要' })).toHaveAttribute('aria-current', 'page')
   })
 
   it('says that CodeBuddy gives no quota instead of promising one after a turn', async () => {

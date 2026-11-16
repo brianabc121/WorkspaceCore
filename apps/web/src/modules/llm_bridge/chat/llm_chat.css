@@ -233,3 +233,28 @@
 .lc-step-kind.is-error { color: var(--danger); }
 .lc-col .lc-files { max-width: 100%; }
 .lc-mode { display: flex; gap: 14px; margin: 0; padding: 0; border: 0; font-size: .82rem; }
+
+/* 平台压缩上下文的位置（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：一条横线，中间写明之前的内容只剩摘要 */
+.lc-compacted { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .78rem; text-align: center; }
+.lc-compacted::before, .lc-compacted::after { content: ""; flex: 1; min-width: 16px; border-top: 1px dotted var(--line); }
+.lc-compacted > span { max-width: 80%; overflow-wrap: anywhere; }
+.lc-context-warn { background: var(--warning-soft); color: var(--warning); }
+
+/* 提问前用上知识库（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 6 节）：相近内容的提示、挑选的笔记 */
+.lc-kb { display: grid; gap: 6px; }
+.lc-kb-hint { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; color: var(--muted); font-size: .8rem; }
+.lc-kb-panel { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); max-height: 320px; overflow: auto; }
+.lc-kb-panel h4 { margin: 6px 0 0; font-size: .82rem; }
+.lc-kb-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lc-kb-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lc-kb-list li { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: center; min-width: 0; }
+.lc-kb-excerpt { flex-basis: 100%; color: var(--muted); font-size: .76rem; overflow-wrap: anywhere; }
+.lc-kb-picked { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.lc-kb-picked li { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: .78rem; }
+.lc-refs { margin: 0; color: var(--muted); font-size: .76rem; display: flex; flex-wrap: wrap; gap: 2px 4px; justify-content: flex-end; }
+.lc-digest { display: grid; gap: 6px; }
+.lc-digest-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.lc-save { display: grid; gap: 10px; }
+.lc-save textarea { width: 100%; min-height: 160px; }
+.lc-save-actions { display: flex; gap: 8px; }
+.lc-save-done { display: grid; gap: 8px; }

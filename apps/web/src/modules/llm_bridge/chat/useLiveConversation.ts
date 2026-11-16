@@ -105,12 +105,12 @@ export function useLiveConversation(
   onBeforeUnmount(() => { alive = false; abort.abort(); clearInterval(idle) })
 
   /** 发出去之后：先把这一问和等待中的回答放上去，然后开始读进度 */
-  function sent(turn: ChatTurn, text: string, attachments: ChatAttachment[] = []) {
+  function sent(turn: ChatTurn, text: string, attachments: ChatAttachment[] = [], references: ChatMessage['references'] = []) {
     if (!messages.value.some(m => m.turn_id === turn.turn_id)) {
       const at = Date.now() / 1000
       messages.value.push(
-        { role: 'user', turn_id: turn.turn_id, text, at, mine: true, steps: [], attachments, imported: false },
-        { role: 'assistant', turn_id: turn.turn_id, text: '', at, status: turn.status, steps: [], ahead_in_session: turn.ahead_in_session ?? null, attachments: [], imported: false },
+        { role: 'user', turn_id: turn.turn_id, text, at, mine: true, steps: [], attachments, imported: false, references },
+        { role: 'assistant', turn_id: turn.turn_id, text: '', at, status: turn.status, steps: [], ahead_in_session: turn.ahead_in_session ?? null, attachments: [], imported: false, references: [] },
       )
     }
     hooks.activity?.()

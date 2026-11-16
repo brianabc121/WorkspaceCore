@@ -149,7 +149,7 @@ export function useLlmChat(scope: string) {
       return out
     },
     // attachments、mode 没有就不传（生成的类型把有默认值的字段也标成必填）
-    async send(bridge: string, session: string, body: Omit<Schema['LlmChatSendIn'], 'attachments' | 'mode'> & { attachments?: string[]; mode?: Schema['LlmChatSendIn']['mode'] }) {
+    async send(bridge: string, session: string, body: Omit<Schema['LlmChatSendIn'], 'attachments' | 'mode' | 'knowledge_notes'> & { attachments?: string[]; mode?: Schema['LlmChatSendIn']['mode']; knowledge_notes?: string[] }) {
       return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/messages', { params: sessionAt(bridge, session), body: body as Schema['LlmChatSendIn'] }))
     },
     // ---- 附件与旧会话的导入（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 3 节）----
@@ -224,6 +224,38 @@ export function useLlmChat(scope: string) {
       await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }), cache.invalidateQueries({ queryKey: key(bridge, 'session', session) })])
       return out
     },
+    // ---- 提问前用上知识库、会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 5、6 节）----
+    /** 输入框里的文字在知识库和以前的会话里找相近的（只在工作台里找，不发给任何平台） */
+    async related(bridge: string, q: string, session?: string, signal?: AbortSignal) {
+      return dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/chat/related', {
+        params: { ...at(bridge), query: { q: q.slice(0, 2000), ...(session ? { session_id: session } : {}) } }, signal,
+      }))
+    },
+    useDigests: (state: Ref<string | null>, wanted: Ref<boolean>) => useQuery({
+      queryKey: computed(() => key('digests', state.value)), enabled: computed(() => active() && wanted.value),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/digests', { params: { header, query: { limit: 200, ...(state.value ? { state: state.value } : {}) } }, signal })),
+    }),
+    /** 会话纪要的操作：关掉 / 打开、现在整理、转成正式笔记、删除（进回收站） */
+    async digest(bridge: string, session: string, action: 'on' | 'off' | 'write' | 'promote' | 'delete') {
+      const params = { header, path: { bridge_id: bridge, session_id: session } }
+      if (action === 'on' || action === 'off') await auth.api.PUT('/api/v1/llm_bridge/digests/{bridge_id}/{session_id}', { params, body: { enabled: action === 'on' } }).then(dataOf)
+      else if (action === 'write') await auth.slowApi.POST('/api/v1/llm_bridge/digests/{bridge_id}/{session_id}/write', { params }).then(dataOf)
+      else if (action === 'promote') await auth.api.POST('/api/v1/llm_bridge/digests/{bridge_id}/{session_id}/promote', { params, body: { type: 'record' } }).then(dataOf)
+      else await auth.api.DELETE('/api/v1/llm_bridge/digests/{bridge_id}/{session_id}', { params })
+      await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'session', session) }), cache.invalidateQueries({ queryKey: key('digests') })])
+    },
+    // 把一条回答存进知识库（5.2 的第二层：人写的笔记，走人的权限）
+    async kbSpaces() { return dataOf(await auth.api.GET('/api/v1/knowledge/spaces', { params: { header } })).items },
+    /** 同一个知识库里标题或开头相近的笔记：保存前提示“已有这几篇，是更新它还是另存” */
+    async kbSimilar(space: string, q: string) {
+      return dataOf(await auth.api.GET('/api/v1/knowledge/notes', { params: { header, query: { space_id: space, q: q.slice(0, 100), limit: 5 } } })).items
+    },
+    async kbCreate(body: Schema['NoteCreate']) { return dataOf(await auth.api.POST('/api/v1/knowledge/notes', { params: { header }, body })) },
+    /** 接在一篇已有笔记的后面（带版本号，别人刚改过时 409） */
+    async kbAppend(noteId: string, text: string, reason: string) {
+      const note = dataOf(await auth.api.GET('/api/v1/knowledge/notes/{note_id}', { params: { header, path: { note_id: noteId } } }))
+      return dataOf(await auth.api.PATCH('/api/v1/knowledge/notes/{note_id}', { params: { header, path: { note_id: noteId } }, body: { version: note.version, body: `${note.body.trimEnd()}\n\n---\n\n${text}`, reason } }))
+    },
     async rename(bridge: string, session: string, title: string) {
       const out = dataOf(await auth.api.PATCH('/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}', { params: sessionAt(bridge, session), body: { title } }))
       await Promise.all([cache.invalidateQueries({ queryKey: key(bridge, 'sessions') }), cache.invalidateQueries({ queryKey: key(bridge, 'session', session) })])
@@ -245,6 +277,30 @@ const MESSAGES: Record<string, string> = {
 }
 export const chatError = (error: unknown) => (error instanceof ApiError && MESSAGES[error.code]) || bridgeError(error)
 export const needsTakeover = (error: unknown) => error instanceof ApiError && error.code === 'TAKEOVER_REQUIRED'
+/** token 数写成 124k / 1.2M 这样，看得快 */
+export function tokens(count: number) {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(count >= 10_000_000 ? 0 : 1)}M`
+  if (count >= 1000) return `${Math.round(count / 1000)}k`
+  return String(count)
+}
+export type ChatContext = Schema['LlmChatContextOut']
+export type ChatRelated = Schema['LlmChatRelatedOut']
+export type ChatNoteHit = Schema['LlmChatNoteHit']
+export type ChatDigest = Schema['LlmChatDigestOut']
+export type DigestItem = Schema['LlmBridgeDigestItem']
+export const DIGEST_STATE: Record<string, string> = { active: '照常更新', off: '已关掉', converted: '已转成正式笔记', edited: '人改过，不再自动更新', deleted: '已删除（在回收站里）', purged: '随会话内容按保留期清掉' }
+export const DIGEST_REASON: Record<string, string> = { compaction: '平台压缩了上下文', archived: '会话归档', idle: '24 小时没有新回合', continued: '带着摘要另开会话', manual: '管理员要求现在整理' }
+/** 一条消息最多带几篇笔记（和后端一致） */
+export const MAX_REFERENCES = 3
+/** 会话的上下文用了多少、压缩过几次（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）；平台没报就说没有 */
+export function contextText(context: ChatContext | null | undefined) {
+  if (!context) return ''
+  const used = context.percent != null && context.used && context.window
+    ? `已用 ${context.percent}%（${tokens(context.used)} / ${tokens(context.window)}）`
+    : context.used ? `已用约 ${tokens(context.used)} token（平台没有报窗口大小）` : '还没有数据（跑过一个回合后显示）'
+  const times = context.compactions ? `，压缩过 ${context.compactions} 次` : ''
+  return `${used}${times}`
+}
 // 输入框里的斜杠命令：官方程序在管理器调用它的方式下不执行这些命令（T-0255）。
 // 只有 /clear 由工作台自己处理（清空上下文）；别的会原样发给模型，发之前提示一句
 export const isClearCommand = (text: string) => /^\/clear$/i.test(text.trim())

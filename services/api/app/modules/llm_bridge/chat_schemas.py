@@ -18,6 +18,23 @@ class _In(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class LlmChatContextOut(BaseModel):
+    """会话的上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：官方程序报的数，没报的为空。"""
+
+    used: int | None = Field(default=None, description="上下文现在用了多少 token")
+    window: int | None = Field(default=None, description="上下文窗口多大（token）")
+    percent: int | None = Field(default=None, description="已用百分比")
+    compactions: int = Field(default=0, description="平台压缩过几次")
+    last_compacted_at: float | None = Field(default=None, description="最近一次压缩的时间")
+    last_trigger: str | None = Field(
+        default=None, description="最近一次压缩怎么触发的：auto 平台自动 / manual 手动"
+    )
+    near_limit: bool = Field(
+        default=False, description="快到平台自动压缩的位置了（已用比例到了 warn_percent）"
+    )
+    warn_percent: int | None = Field(default=None, description="提醒的位置（已用百分比）")
+
+
 class LlmChatSessionOut(BaseModel):
     session_id: str
     platform: str
@@ -43,6 +60,9 @@ class LlmChatSessionOut(BaseModel):
     )
     purged_at: float | None = Field(
         default=None, description="对话内容按保留期清掉的时间；没清过为空"
+    )
+    context: LlmChatContextOut | None = Field(
+        default=None, description="上下文用了多少、压缩过几次；旧版本的管理器没有"
     )
 
 
@@ -91,7 +111,8 @@ class LlmChatResumeOut(BaseModel):
 
 class LlmChatMessageOut(BaseModel):
     role: str = Field(
-        description="user / assistant；context_cleared：在这里清空了上下文，"
+        description="user / assistant；context_compacted：平台在这一回合压缩了上下文，"
+        "它前面的内容在模型那里只剩摘要；context_cleared：在这里清空了上下文，"
         "它之前的内容模型已经不记得"
     )
     turn_id: str | None = None
@@ -143,6 +164,19 @@ class LlmChatMessageOut(BaseModel):
         default=[], description="提问带上的图片 / 文件，或这一回合模型产出的图片 / 文件"
     )
     imported: bool = Field(default=False, description="官方程序里原有的内容（第一次打开时导入的）")
+    trigger: str | None = Field(
+        default=None, description="context_compacted：auto 平台自动压缩 / manual 手动压缩"
+    )
+    references: list[dict[str, Any]] = Field(
+        default=[],
+        description="user 消息：随这一问带上的知识库笔记（note_id、title、label、truncated）",
+    )
+    pre_tokens: int | None = Field(
+        default=None, description="context_compacted：压缩前的 token 数（平台报了才有）"
+    )
+    post_tokens: int | None = Field(
+        default=None, description="context_compacted：压缩后的 token 数（平台报了才有）"
+    )
     delivery: str | None = Field(
         default=None,
         description="提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；"
@@ -150,10 +184,29 @@ class LlmChatMessageOut(BaseModel):
     )
 
 
+class LlmChatDigestOut(BaseModel):
+    """这个会话的纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）。"""
+
+    note_id: UUID | None = Field(description="纪要笔记；还没写过为空")
+    note_title: str | None = None
+    space_id: UUID | None = None
+    space_name: str | None = None
+    state: str = Field(
+        description="active 照常更新；off 关掉了；converted 已转成正式笔记；edited 人改过，"
+        "不再自动覆盖；deleted 删进了回收站；purged 随会话内容按保留期清掉"
+    )
+    turns_written: int = 0
+    written_at: datetime | None = None
+    reason: str | None = None
+
+
 class LlmChatConversationOut(BaseModel):
     session: LlmChatSessionOut
     messages: list[LlmChatMessageOut]
     last_event_id: int = Field(description="读事件时从它之后开始")
+    digest: LlmChatDigestOut | None = Field(
+        default=None, description="这个会话的纪要；没写过、也没关掉时为空"
+    )
 
 
 class LlmChatEventOut(BaseModel):
@@ -259,6 +312,13 @@ class LlmChatSendIn(_In):
     )
     attachments: list[Annotated[str, Field(pattern=r"^ba_[0-9a-f]{20}$")]] = Field(
         default=[], max_length=8, description="随这条消息带上的附件（先上传得到编号）"
+    )
+    knowledge_notes: list[UUID] = Field(
+        default=[],
+        max_length=3,
+        description="随这条消息带上的知识库笔记（人挑的，最多 3 篇；"
+        "docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）。只附在发给模型的内容后面，包装成资料；"
+        "合计最多 6000 字，超出的截断。所在知识库不允许发给外部平台时 403",
     )
 
 
@@ -397,4 +457,62 @@ class LlmChatGroupSendIn(_In):
         default={},
         description="随这个问题带上的附件：成员的位置（position）→ 传到它那个会话里的附件编号。"
         "附件属于会话，所以每个成员各传各的",
+    )
+
+
+# ---- 提问前用上知识库（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 6 节）----
+class LlmChatNoteHit(BaseModel):
+    id: UUID
+    title: str
+    space_id: UUID
+    space_name: str
+    label: str = Field(description="来源说明：人已确认 / 智能体写入 / 外部资料，和更新日期")
+    excerpt: str = Field(description="正文开头一小段")
+    external_allowed: bool = Field(description="所在知识库允许发给外部大模型平台")
+
+
+class LlmChatSimilarSession(BaseModel):
+    bridge_id: UUID
+    bridge_name: str
+    session_id: str
+    title: str
+    platform: str
+    owner: str
+    last_turn_at: datetime | None
+
+
+class LlmChatRelatedOut(BaseModel):
+    """输入框里的文字在知识库和以前的会话里找到的相近内容（只在工作台里找，不发给任何平台）。"""
+
+    notes: list[LlmChatNoteHit]
+    sessions: list[LlmChatSimilarSession]
+
+
+# ---- 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2、5.3）----
+class LlmBridgeDigestItem(LlmChatDigestOut):
+    id: UUID
+    bridge_id: UUID
+    bridge_name: str
+    session_id: str
+    session_title: str
+    owner: str = Field(description="会话是谁建的")
+    owner_kind: str
+
+
+class LlmBridgeDigestList(BaseModel):
+    digests: list[LlmBridgeDigestItem]
+    next_offset: int | None = None
+
+
+class LlmBridgeDigestToggleIn(_In):
+    enabled: bool = Field(description="false：关掉这个会话的纪要（已有的那篇不动）；true：重新打开")
+
+
+class LlmBridgeDigestPromoteIn(_In):
+    title: str | None = Field(default=None, min_length=1, max_length=200, description="新标题")
+    folder: str | None = Field(
+        default=None, max_length=200, description="放到哪个文件夹；默认根目录"
+    )
+    type: Literal["record", "decision", "lesson", "process", "runbook", "design", "plan"] = Field(
+        default="record", description="转成哪种笔记"
     )

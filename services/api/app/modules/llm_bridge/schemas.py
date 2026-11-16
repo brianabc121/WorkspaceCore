@@ -151,6 +151,15 @@ class LlmBridgeSettings(BaseModel):
         description="对话内容保留多少天（按会话最后活动算）；0 是一直保留。到期只清内容："
         "会话、回合的状态和用量留着。旧版本的管理器没有这一项",
     )
+    digest_enabled: bool = Field(
+        default=True,
+        description="会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：工作台按会话记录整理纪要，"
+        "写进知识库的“会话纪要”文件夹（未确认）。默认开；旧版本的管理器没有这一项",
+    )
+    digest_follow_retention: bool = Field(
+        default=True,
+        description="会话内容按保留期清掉时，纪要一起放进回收站（默认开）",
+    )
     platforms: list[str] = Field(
         default=list(ALL_PLATFORMS), description="这个 MCP 管理器控制的平台"
     )
@@ -167,6 +176,8 @@ class LlmBridgeSettingsPatch(_In):
     auto_resume_max: int | None = Field(default=None, ge=1, le=10)
     resume_text: str | None = Field(default=None, min_length=1, max_length=200)
     retention_days: int | None = Field(default=None, ge=0, le=3650)
+    digest_enabled: bool | None = None
+    digest_follow_retention: bool | None = None
     platforms: list[Platform] | None = Field(
         default=None,
         min_length=1,

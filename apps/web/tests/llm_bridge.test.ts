@@ -19,7 +19,7 @@ const lbModule: Schema['ModuleOut'] = { ...newsModule, key: 'llm_bridge', name: 
 
 const bridge: Schema['LlmBridgeOut'] = { id: BRIDGE, name: '主账号', base_url: 'http://10.0.0.5:8787', enabled: true, has_token: true, created_at: at, updated_at: at }
 const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', enabled: true, state: 'logged_out', registered: false, identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
-const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
+const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, digest_enabled: true, digest_follow_retention: true, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
 const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBridgeStatusOut'] => ({
   reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 1, running: 2, load: {}, quota: {}, settings,
   accounts: [
@@ -517,6 +517,22 @@ describe('大模型客户端管理', () => {
 
     const bodies = await Promise.all(writes(requests).map(r => r.clone().json()))
     expect(bodies.map(b => b.bridge_ids)).toEqual([[BRIDGE, OTHER], [OTHER], [], null])
+  })
+
+  it('turns session digests off in the settings, sending only what changed', async () => {
+    const requests = setup('owner', async r => (path(r) === `${base}/settings` ? Response.json({ ...settings, ...(await r.clone().json()) }) : undefined))
+    await openApp('/llm_bridge?view=manage')
+    const set = await openTab('设置')
+    // 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2）：默认开；只在改了的时候提交（旧版本的管理器不认识这两项）
+    const digest = await within(set).findByRole('group', { name: '会话纪要' })
+    expect(within(digest).getByLabelText(/把会话的重点自动整理成纪要/)).toBeChecked()
+    expect(within(digest).getByLabelText(/纪要一起放进回收站/)).toBeChecked()
+    await fireEvent.click(within(digest).getByLabelText(/把会话的重点自动整理成纪要/))
+    await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(writes(requests)).toHaveLength(1))
+    const body = await writes(requests)[0]!.clone().json()
+    expect(body).toMatchObject({ digest_enabled: false })
+    expect(body).not.toHaveProperty('digest_follow_retention')
   })
 
   it('saves settings within the backend limits and environments in dev mode with an exec warning', async () => {

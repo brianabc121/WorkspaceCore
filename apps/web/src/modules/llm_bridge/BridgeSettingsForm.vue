@@ -23,11 +23,14 @@ type Key = (typeof FIELDS)[number]['key']
 const form = reactive<Record<Key, string>>({ concurrency: '', min_start_interval_seconds: '', turn_timeout_seconds: '', send_per_hour: '', max_text_chars: '', retention_days: '', auto_resume_max: '' })
 // 额度用完后的自动继续：开关和发的那句话
 const resume = reactive({ on: true, text: '' })
+// 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2、5.3）：默认开；会话内容按保留期清掉时纪要跟着进回收站
+const digest = reactive({ on: true, follow: true })
 const settings = computed(() => (props.status?.reachable ? props.status.settings ?? null : null))
 watch(settings, value => {
   if (!value) return
   for (const f of FIELDS) form[f.key] = String(value[f.key])
   Object.assign(resume, { on: value.auto_resume, text: value.resume_text })
+  Object.assign(digest, { on: value.digest_enabled, follow: value.digest_follow_retention })
 }, { immediate: true })
 // 旧版本的管理器没有“自动继续”：那三项不显示也不提交
 const hasResume = computed(() => !!settings.value?.resume_text)
@@ -47,6 +50,9 @@ async function save() {
     if (!text || text.length > 200) { error.value = '「自动继续时发的那句话」要填 1–200 个字。'; notice.value = ''; return }
     Object.assign(body, { auto_resume: resume.on, resume_text: text })
   }
+  // 只在改了的时候提交：旧版本的管理器不认识这两项
+  if (digest.on !== settings.value?.digest_enabled) body.digest_enabled = digest.on
+  if (digest.follow !== settings.value?.digest_follow_retention) body.digest_follow_retention = digest.follow
   busy.value = true; error.value = notice.value = ''
   try { await props.api.saveSettings(props.bridge.id, body); notice.value = '设置已保存。' } catch (e) { error.value = bridgeError(e) } finally { busy.value = false }
 }
@@ -76,6 +82,12 @@ async function save() {
           <input id="lb-set-resume_text" v-model="resume.text" type="text" maxlength="200" required />
           <p class="form-help">到重置时间后，管理器替人往每个被打断的会话里发这句话，排在这个会话队列的最前面。关掉开关后不自动发，可以在聊天页点“现在就试”。</p>
         </div>
+      </fieldset>
+      <fieldset class="lb-checks" :disabled="!canWrite || busy" aria-label="会话纪要">
+        <legend>会话纪要</legend>
+        <label class="check-field"><input v-model="digest.on" type="checkbox" />把会话的重点自动整理成纪要，存进知识库的“会话纪要”文件夹</label>
+        <p class="form-help">会话有 3 个以上回合，并且平台压缩了上下文、会话归档、或者 24 小时没有新回合时整理一次。按记录排好（每一问、回答的开头、改过的文件、跑过的命令），不调模型、不花 token。纪要标为“未确认”：检索时排在最后，默认不会被带进提问；值得留下的可以转成正式笔记。智能体的会话放进它自己的知识库，人的放进公共知识库，关联了项目的放进项目知识库。</p>
+        <label class="check-field"><input v-model="digest.follow" type="checkbox" />会话内容按保留期清掉时，纪要一起放进回收站</label>
       </fieldset>
       <p class="form-help">Claude 订阅登录的风险确认：{{ settings.claude_subscription_ack ? '已确认' : '未确认（在“平台与账号”里用订阅方式登录 Claude 时确认）' }}。</p>
       <div v-if="canWrite" class="lb-actions"><button type="submit" class="primary-button" :disabled="busy">{{ busy ? '正在保存…' : '保存设置' }}</button></div>

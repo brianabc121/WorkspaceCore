@@ -242,24 +242,68 @@ if "--include-partial-messages" in args:
     partial({"type": "text_delta", "text": "子代理说的"}, parent="toolu_1")
     partial({"type": "text_delta", "text": reply[:half]})
     partial({"type": "text_delta", "text": reply[half:]})
+CODEBUDDY = "CODEBUDDY_CONFIG_DIR" in os.environ
+turns = sum(1 for line in transcript.read_text().splitlines() if '"type": "user"' in line)
+if text in ("compact-auto", "/compact") or text.startswith("/compact "):
+    # 压缩上下文：Claude Code 报一条 compact_boundary（Agent SDK 0.3.323 的形状）；
+    # CodeBuddy Code 只报“正在压缩”的状态事件，结束时状态变回 null（2.184.0 的 StreamJsonView）
+    trigger = "auto" if text == "compact-auto" else "manual"
+    if CODEBUDDY:
+        emit({"type": "system", "subtype": "status", "status": "compacting", "session_id": session})
+        emit({"type": "system", "subtype": "status", "status": None, "session_id": session})
+    else:
+        emit(
+            {
+                "type": "system",
+                "subtype": "compact_boundary",
+                "session_id": session,
+                "compact_metadata": {"trigger": trigger, "pre_tokens": 150000, "post_tokens": 9000},
+            }
+        )
+# 上下文：每一回合多用 1000 个 token（主模型的这次调用）；子代理的调用不算
+used = 1000 * turns
 emit(
     {
         "type": "assistant",
+        "parent_tool_use_id": "toolu_sub",
         "message": {
-            "content": [
-                {"type": "tool_use", "name": "Bash", "input": {"command": "ls -la"}},
-                {"type": "tool_use", "name": "Edit", "input": {"file_path": "src/a.py"}},
-                {"type": "text", "text": reply},
-            ]
+            "model": "claude-haiku-sub",
+            "content": [{"type": "text", "text": ""}],
+            "usage": {"input_tokens": 99999, "output_tokens": 1},
         },
     }
 )
 emit(
     {
-        "type": "result",
-        "subtype": "success",
-        "is_error": False,
-        "result": reply,
-        "usage": {"input_tokens": 5, "output_tokens": 6},
+        "type": "assistant",
+        "message": {
+            "model": "claude-main",
+            "content": [
+                {"type": "tool_use", "name": "Bash", "input": {"command": "ls -la"}},
+                {"type": "tool_use", "name": "Edit", "input": {"file_path": "src/a.py"}},
+                {"type": "text", "text": reply},
+            ],
+            "usage": {
+                "input_tokens": used - 400,
+                "cache_read_input_tokens": 200,
+                "cache_creation_input_tokens": 100,
+                "output_tokens": 100,
+            },
+        },
     }
 )
+result = {
+    "type": "result",
+    "subtype": "success",
+    "is_error": False,
+    "result": reply,
+    "usage": {"input_tokens": 5, "output_tokens": 6},
+}
+if CODEBUDDY:  # 上下文在 _meta 里（官方文档 stream-json-turn-usage 第 9 节）
+    result["_meta"] = {"codebuddy.ai/contextUsed": used + 7, "codebuddy.ai/contextWindow": 168000}
+else:  # 窗口在 modelUsage 里，按模型分（Agent SDK 0.3.323 的 ModelUsage）
+    result["modelUsage"] = {
+        "claude-haiku-sub": {"contextWindow": 100000},
+        "claude-main": {"contextWindow": 200000},
+    }
+emit(result)

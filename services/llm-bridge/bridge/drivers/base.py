@@ -83,6 +83,25 @@ class TurnOutcome:
     usage: dict[str, Any] = field(default_factory=dict)
     commands: list[str] = field(default_factory=list)
     files: list[str] = field(default_factory=list)
+    # 这一回合结束时会话的上下文用了多少、窗口多大（token；官方程序报的，没报为 None）。
+    # 压缩发生时驱动另外用 sink("compacted", {...}) 报出来（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）
+    context: ContextUsage | None = None
+
+
+@dataclass(frozen=True)
+class ContextUsage:
+    """会话现在的上下文：用了多少 token、窗口多大。两个数都可能没报（None）。"""
+
+    used: int | None = None
+    window: int | None = None
+
+
+def positive_int(value: Any) -> int | None:
+    """官方程序报的 token 数：正整数才算数（布尔、负数、小数、字符串都不要）。"""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    number = int(value)
+    return number if number > 0 and number == value else None
 
 
 @dataclass(frozen=True)

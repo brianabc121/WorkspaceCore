@@ -21,6 +21,7 @@ from typing import Any
 from bridge import __version__, quota
 from bridge.drivers.base import (
     AccountStatus,
+    ContextUsage,
     Driver,
     DriverError,
     ErrorKind,
@@ -32,6 +33,7 @@ from bridge.drivers.base import (
     NativeSession,
     SessionSpec,
     TurnOutcome,
+    positive_int,
 )
 
 logger = logging.getLogger("bridge.codex")
@@ -69,6 +71,22 @@ def _error_kind(info: Any) -> ErrorKind:
     if name in _INVALID:
         return "invalid"
     return "platform_error"
+
+
+def token_context(usage: Any) -> ContextUsage | None:
+    """`thread/tokenUsage/updated` 的 tokenUsage → 上下文用了多少、窗口多大。
+
+    0.169.0 的 ThreadTokenUsage：last（最近一次模型调用）、total（会话累计）、modelContextWindow。
+    上下文里有多少取最近一次的 totalTokens 去掉推理用的输出（推理内容不留在上下文里）。"""
+    if not isinstance(usage, dict):
+        return None
+    raw = usage.get("last")
+    last: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    total = positive_int(last.get("totalTokens")) or 0
+    reasoning = positive_int(last.get("reasoningOutputTokens")) or 0
+    used = total - reasoning if total > reasoning else None
+    window = positive_int(usage.get("modelContextWindow"))
+    return ContextUsage(used, window) if used or window else None
 
 
 class CodexDriver(Driver):
@@ -443,16 +461,22 @@ class CodexDriver(Driver):
                         )
                 elif kind == "webSearch" and item.get("query"):
                     await sink("tool", {"name": "web_search", "input": str(item["query"])})
+                elif kind == "contextCompaction":
+                    # 压缩了一次（0.169.0 的 ContextCompactionThreadItem 只有 id，
+                    # 没有前后的 token 数）
+                    await sink("compacted", {"trigger": "auto"})
                 elif kind == "imageGeneration" and isinstance(item.get("savedPath"), str):
                     # 模型画的图：官方程序已经存成文件，交给 engine 收进附件
                     await sink("image", {"path": item["savedPath"]})
             elif method == "thread/tokenUsage/updated":
-                last = (params.get("tokenUsage") or {}).get("last") or {}
+                usage = params.get("tokenUsage") or {}
+                last = usage.get("last") or {}
                 outcome.usage = {
                     "input_tokens": int(last.get("inputTokens") or 0),
                     "output_tokens": int(last.get("outputTokens") or 0),
                     "total_tokens": int(last.get("totalTokens") or 0),
                 }
+                outcome.context = token_context(usage)
             elif method == "error":
                 detail = params.get("error") or {}
                 last_error = str(detail.get("additionalDetails") or detail.get("message") or "")
