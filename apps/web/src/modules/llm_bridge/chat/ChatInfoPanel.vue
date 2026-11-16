@@ -9,7 +9,7 @@ import { DIGEST_REASON, DIGEST_STATE, TURN_STATUS, contextText, ownerText, type 
 // quota 来自管理器的状态；旧版本的管理器没有，这一块不显示。
 // models：这个会话能换成哪些模型（Claude / CodeBuddy 的会话才给；不给就只显示现在的）
 const props = defineProps<{ session: ChatSession; messages: ChatMessage[]; managerName: string; quota?: Quota | null; models?: { id: string; name: string }[]; changing?: boolean; digest?: ChatDigest | null; canWrite?: boolean }>()
-defineEmits<{ close: []; model: [id: string]; digest: [action: 'on' | 'off' | 'write' | 'promote' | 'delete'] }>()
+defineEmits<{ close: []; model: [id: string]; digest: [action: 'on' | 'off' | 'write' | 'promote' | 'delete']; shape: [action: 'compact' | 'continue'] }>()
 // 会话纪要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 5.2、5.3）：写在知识库里、标为未确认；可以关掉、现在整理、转成正式笔记、删除
 const digestNote = computed(() => (props.digest?.note_id && !['deleted', 'purged'].includes(props.digest.state) ? props.digest : null))
 
@@ -51,11 +51,19 @@ const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
       <dt>开始</dt><dd>{{ seconds(session.created_at) }}</dd>
       <dt>最后活动</dt><dd>{{ seconds(session.updated_at) }}</dd>
       <dt>状态</dt><dd>{{ session.status === 'archived' ? '已归档' : session.busy ? '正在回答' : '进行中' }}</dd>
+      <template v-if="session.pinned?.length">
+        <dt>固定带着</dt>
+        <dd><span v-for="p in session.pinned" :key="p.note_id" class="lc-pinned-item">《{{ p.title }}》</span><span class="lc-sub">新建会话时选的笔记，整个会话一直带着</span></dd>
+      </template>
       <template v-if="session.context && session.origin !== 'external'">
         <dt>上下文</dt>
         <dd>
           {{ contextText(session.context) }}
           <span v-if="session.context.last_compacted_at" class="lc-sub">最近一次压缩：{{ seconds(session.context.last_compacted_at) }}（{{ session.context.last_trigger === 'manual' ? '手动' : '平台自动' }}）</span>
+          <span v-if="canWrite && session.status === 'active'" class="lc-context-actions">
+            <button type="button" class="asv-link" :disabled="changing" title="让平台把之前的内容压成摘要" @click="$emit('shape', 'compact')">压缩一下</button>
+            <button type="button" class="asv-link" :disabled="changing" title="要一份交接摘要，清空上下文后把摘要作为第一条发出" @click="$emit('shape', 'continue')">带着摘要另开会话</button>
+          </span>
         </dd>
       </template>
     </dl>

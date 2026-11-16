@@ -74,6 +74,13 @@ class SessionSpec:
     env: dict[str, str] = field(default_factory=dict)  # 管理员给环境勾选的变量
     # 这一回合随提问带上的图片：(绝对路径, 类型)。别的文件由 engine 放进工作目录，在提问里注明
     images: tuple[tuple[str, str], ...] = ()
+    # 自动压缩的触发点（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）：0 是用平台自己的。
+    # Claude / CodeBuddy 是上下文的百分比，Codex 是 token 数（各自官方程序的设置方式）
+    autocompact: int = 0
+    # 压缩钩子（4.3，管理器设置里打开才有）：压缩前给说明、压缩后把平台写的摘要留下来
+    hooks: bool = False
+    # 固定带着的参考资料（6.3）：对话会话随系统提示带上；开发会话由 engine 写进工作目录的记忆文件
+    pinned: str = ""
 
 
 @dataclass
@@ -86,6 +93,7 @@ class TurnOutcome:
     # 这一回合结束时会话的上下文用了多少、窗口多大（token；官方程序报的，没报为 None）。
     # 压缩发生时驱动另外用 sink("compacted", {...}) 报出来（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）
     context: ContextUsage | None = None
+    compactions: int = 0  # 这一回合里平台压缩了几次（手动压缩据此判断有没有压成）
 
 
 @dataclass(frozen=True)
@@ -172,6 +180,12 @@ class Driver:
 
     async def cancel(self, spec: SessionSpec) -> None:
         return None
+
+    async def compact(self, spec: SessionSpec, instructions: str, sink: EventSink) -> TurnOutcome:
+        """手动压缩这个会话的上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）。
+
+        结果的 compactions 是平台实际压缩了几次：0 说明平台没有压缩（不支持或者没有可压的）。"""
+        raise DriverError("not_supported", "这个平台不能手动压缩上下文")
 
     # 能不能随时向平台查额度（不能的只在跑回合时由官方程序顺带报出来）
     can_query_quota = False

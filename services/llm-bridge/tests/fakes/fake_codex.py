@@ -237,6 +237,7 @@ def main():
                 "turns": [],
                 "archived": False,
                 "instructions": params.get("developerInstructions"),
+                "config": params.get("config"),
             }
             save(state)
             loaded.add(thread_id)
@@ -246,7 +247,22 @@ def main():
                 out({"id": mid, "error": {"code": -32602, "message": "no such thread"}})
             else:
                 loaded.add(params["threadId"])
+                state["threads"][params["threadId"]]["resume_config"] = params.get("config")
+                save(state)
                 out({"id": mid, "result": {"thread": {"id": params["threadId"]}}})
+        elif method == "thread/compact/start":
+            # 手动压缩（0.169.0）：应答是空的；压缩在后台做，报一个 contextCompaction 条目后回合结束
+            thread_id = params["threadId"]
+            out({"id": mid, "result": {}})
+            turn_id = str(uuid.uuid4())
+            note("turn/started", {"threadId": thread_id, "turn": {"id": turn_id}})
+            item = {"type": "contextCompaction", "id": "item_m"}
+            note("item/started", {"threadId": thread_id, "turnId": turn_id, "item": item})
+            note("item/completed", {"threadId": thread_id, "turnId": turn_id, "item": item})
+            note(
+                "turn/completed",
+                {"threadId": thread_id, "turn": {"id": turn_id, "status": "completed"}},
+            )
         elif method == "turn/start":
             if params["threadId"] not in loaded:
                 out({"id": mid, "error": {"code": -32600, "message": "thread not loaded"}})

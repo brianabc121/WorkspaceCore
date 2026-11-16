@@ -24,6 +24,19 @@ class ChannelInput(_Input):
     mode: ModeName = Field(description="模式：chat（聊天）/ dev（开发）/ cloud（云端）")
 
 
+class ReferenceInput(_Input):
+    """随消息带上的一篇参考资料（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）：由工作台从知识库取出并检查过权限。"""
+
+    note_id: str = Field(
+        default="", max_length=60, description="知识库笔记的编号（显示“参考了”用）"
+    )
+    title: str = Field(min_length=1, max_length=200, description="笔记标题")
+    label: str = Field(
+        default="", max_length=80, description="来源说明，例如“人已确认 · 2026-11-10 更新”"
+    )
+    text: str = Field(default="", max_length=8000, description="正文（可能已经截断）")
+
+
 class SessionCreateInput(ChannelInput):
     model: str | None = Field(default=None, description="模型；不填用默认。可选值见 llm_models")
     environment: str | None = Field(
@@ -37,19 +50,13 @@ class SessionCreateInput(ChannelInput):
         max_length=100,
         description="幂等号（建议带）：没等到结果时用同一个重试，得到的是同一个会话，不会建出两个",
     )
-
-
-class ReferenceInput(_Input):
-    """随消息带上的一篇参考资料（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.2）：由工作台从知识库取出并检查过权限。"""
-
-    note_id: str = Field(
-        default="", max_length=60, description="知识库笔记的编号（显示“参考了”用）"
+    pinned: list[ReferenceInput] = Field(
+        default=[],
+        max_length=5,
+        description="固定带着的参考资料（由工作台从知识库取出）：整个会话都带着，合计最多 4000 字。"
+        "开发会话写进工作目录里官方程序会自动读的记忆文件（压缩后程序会重新读）；"
+        "对话会话随系统提示带上",
     )
-    title: str = Field(min_length=1, max_length=200, description="笔记标题")
-    label: str = Field(
-        default="", max_length=80, description="来源说明，例如“人已确认 · 2026-11-10 更新”"
-    )
-    text: str = Field(default="", max_length=8000, description="正文（可能已经截断）")
 
 
 class SendInput(_Input):
@@ -133,6 +140,26 @@ class QueueInput(_Input):
     session_id: str
 
 
+class CompactInput(_Input):
+    session_id: str
+    instructions: str = Field(
+        default="",
+        max_length=500,
+        description="压缩时要保留什么（Claude 会用；Codex 的接口带不了，会忽略）",
+    )
+    request_id: str = Field(
+        min_length=1, max_length=100, description="幂等号：重试时用同一个，不会压两次"
+    )
+    wait_seconds: float = Field(default=0, ge=0, le=50)
+
+
+class ContinueInput(_Input):
+    session_id: str
+    request_id: str = Field(
+        min_length=1, max_length=100, description="幂等号：重试时用同一个，不会排两次"
+    )
+
+
 @dataclass(frozen=True)
 class ToolDef:
     name: str
@@ -206,6 +233,21 @@ TOOLS: tuple[ToolDef, ...] = (
         "查看一个会话的消息队列：正在处理的那一条和排队中的各条（按将要处理的顺序）。",
         QueueInput,
         True,
+    ),
+    ToolDef(
+        "llm_session_compact",
+        "手动压缩一个会话的上下文：排一个回合，轮到时让平台把之前的内容压成摘要，之后每回合花的 token 变少。"
+        "结果的 summary.compacted 说明平台有没有真的压缩；没有时建议改用 llm_session_continue。",
+        CompactInput,
+        False,
+    ),
+    ToolDef(
+        "llm_session_continue",
+        "带着摘要另开会话（比一直在老会话里聊省 token）：先在老的上下文里要一份交接摘要，"
+        "再清空这个会话的上下文（换新的官方会话、记录保留），把摘要作为新上下文的第一条发出去。"
+        "排两个回合；之后接着往同一个 session_id 发消息即可。",
+        ContinueInput,
+        False,
     ),
     ToolDef(
         "llm_session_archive",

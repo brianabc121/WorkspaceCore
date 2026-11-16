@@ -165,7 +165,7 @@ if text == "hang":
 
     time.sleep(60)
 transcript.parent.mkdir(parents=True, exist_ok=True)
-reply = f"model={value('--model')} tools={value('--tools')!r} perm={value('--permission-mode')} leak={os.environ.get('BRIDGE_ADMIN_TOKEN')} extra={os.environ.get('EXTRA_VAR')} :: {text}"
+reply = f"model={value('--model')} tools={value('--tools')!r} perm={value('--permission-mode')} leak={os.environ.get('BRIDGE_ADMIN_TOKEN')} extra={os.environ.get('EXTRA_VAR')} ac={os.environ.get('CLAUDE_AUTOCOMPACT_PCT_OVERRIDE') or os.environ.get('CODEBUDDY_AUTOCOMPACT_PCT_OVERRIDE')} :: {text}"
 if images:
     reply += f" images={images}"
 if text == "history":
@@ -248,6 +248,32 @@ if text in ("compact-auto", "/compact") or text.startswith("/compact "):
     # 压缩上下文：Claude Code 报一条 compact_boundary（Agent SDK 0.3.323 的形状）；
     # CodeBuddy Code 只报“正在压缩”的状态事件，结束时状态变回 null（2.184.0 的 StreamJsonView）
     trigger = "auto" if text == "compact-auto" else "manual"
+    if value("--settings"):
+        # 带了钩子（--settings 的 JSON）：像官方程序那样，压缩前跑 PreCompact（输出并进压缩说明），
+        # 压缩后跑 PostCompact（标准输入给 compact_summary）
+        import shlex
+        import subprocess
+
+        hooks = json.loads(value("--settings"))["hooks"]
+
+        def run_hook(event, payload):
+            command = hooks[event][0]["hooks"][0]["command"]
+            done = subprocess.run(
+                shlex.split(command),
+                input=json.dumps(payload),
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            return done.stdout
+
+        base = {"session_id": session, "trigger": trigger}
+        kept = run_hook("PreCompact", {**base, "hook_event_name": "PreCompact"})
+        summary = f"结论和决定：先备份再升级\n没解决的问题：回滚脚本还没写\n（压缩说明：{kept}）"
+        run_hook(
+            "PostCompact", {**base, "hook_event_name": "PostCompact", "compact_summary": summary}
+        )
     if CODEBUDDY:
         emit({"type": "system", "subtype": "status", "status": "compacting", "session_id": session})
         emit({"type": "system", "subtype": "status", "status": None, "session_id": session})

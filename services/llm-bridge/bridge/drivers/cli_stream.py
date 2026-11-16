@@ -18,12 +18,13 @@ import json
 import math
 import os
 import re
+import sys
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from bridge import quota
+from bridge import hooks, quota
 from bridge.drivers.base import (
     AccountStatus,
     ContextUsage,
@@ -95,6 +96,8 @@ class CliProfile:
     reports_quota: bool = True
     # 能不能用“容器里已有的登录”（要进容器操作官方程序；有网页登录的平台不再提供）
     allow_existing: bool = True
+    # 自动压缩触发点（上下文的百分比）的环境变量（核验记录第 1、2 节）
+    autocompact_env: str = ""
 
 
 CLAUDE_MODELS = (
@@ -113,6 +116,7 @@ def claude_profile(binary: str) -> CliProfile:
         secret_envs={"api_key": "ANTHROPIC_API_KEY", "oauth_token": "CLAUDE_CODE_OAUTH_TOKEN"},
         models=CLAUDE_MODELS,
         auth_cli=True,
+        autocompact_env="CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
     )
 
 
@@ -130,6 +134,7 @@ def codebuddy_profile(binary: str) -> CliProfile:
         web_login={"web_cn": "internal", "web_intl": "external"},
         allow_existing=False,
         reports_quota=False,
+        autocompact_env="CODEBUDDY_AUTOCOMPACT_PCT_OVERRIDE",
     )
 
 
@@ -326,6 +331,9 @@ class CliStreamDriver(Driver):
         # 工具调用的编号 → 工具名：结果报回来时知道是哪个工具的
         self._tool_names: dict[str, str] = {}
         self._help_models: list[ModelInfo] | None = None
+        # 压缩钩子（4.3）：钩子脚本放在哪、平台写的摘要放在哪（engine 启动时设好）
+        self.hook_script: Path | None = None
+        self.hook_dir: Path | None = None
 
     def supports(self, mode: Mode) -> bool:
         return mode in ("chat", "dev")
@@ -475,7 +483,8 @@ class CliStreamDriver(Driver):
         if spec.model:
             args += ["--model", spec.model]
         if spec.mode == "chat":
-            args += ["--tools", "", "--append-system-prompt", CHAT_NOTICE]
+            prompt = CHAT_NOTICE + (f"\n\n{spec.pinned}" if spec.pinned else "")
+            args += ["--tools", "", "--append-system-prompt", prompt]
         elif spec.sandbox == "read_only":
             args += ["--tools", _READ_TOOLS]
         elif spec.sandbox == "workspace_write":
@@ -484,6 +493,9 @@ class CliStreamDriver(Driver):
             args += ["--permission-mode", "bypassPermissions"]
         if spec.images:  # 带图片时提问按一条 stream-json 的用户消息从标准输入给
             args += ["--input-format", "stream-json"]
+        if spec.hooks and self.hook_script is not None:
+            # 压缩钩子：按回合经 --settings 带上（两个官方程序都有这个参数，核验记录第 1、2 节）
+            args += ["--settings", hooks.settings_json(sys.executable, self.hook_script)]
         return args
 
     @staticmethod
@@ -521,7 +533,7 @@ class CliStreamDriver(Driver):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(spec.workdir),
-                env=self._env(spec.env),
+                env=self._env({**spec.env, **self._autocompact(spec), **self._hook_env(spec)}),
                 limit=16 * 1024 * 1024,
             )
         except OSError as error:
@@ -576,6 +588,7 @@ class CliStreamDriver(Driver):
             if seen.compacting:  # 报了“正在压缩”却没等到结束：回合结束时也算压缩过一次
                 await self._compacted(seen, sink, {"trigger": "manual" if manual else "auto"})
             outcome.context = _result_context(result, seen.model, seen.used)
+            outcome.compactions = seen.compactions
             return self._finish(result, messages, outcome, limited)
         finally:
             self._procs.pop(spec.native_id, None)
@@ -583,6 +596,41 @@ class CliStreamDriver(Driver):
                 proc.kill()
                 with contextlib.suppress(ProcessLookupError):
                     await proc.wait()
+
+    def _hook_env(self, spec: SessionSpec) -> dict[str, str]:
+        if spec.hooks and self.hook_dir is not None:
+            return {"BRIDGE_HOOK_DIR": str(self.hook_dir)}
+        return {}
+
+    def take_summaries(self, native_id: str) -> list[dict[str, Any]]:
+        """压缩后钩子留下的摘要（按先后），取走后删掉文件。没有就是空的。"""
+        if self.hook_dir is None or not re.fullmatch(r"[\w.\-:]{1,100}", native_id):
+            return []
+        path = self.hook_dir / "summaries" / f"{native_id}.jsonl"
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+            path.unlink()
+        except OSError:
+            return []
+        out = []
+        for line in lines:
+            with contextlib.suppress(ValueError):
+                item = json.loads(line)
+                if isinstance(item, dict) and isinstance(item.get("summary"), str):
+                    out.append(item)
+        return out
+
+    def _autocompact(self, spec: SessionSpec) -> dict[str, str]:
+        """自动压缩的触发点（管理员在设置里填了才有）：上下文用到百分之多少时压缩。"""
+        if spec.autocompact and self.profile.autocompact_env:
+            return {self.profile.autocompact_env: str(min(max(spec.autocompact, 1), 100))}
+        return {}
+
+    async def compact(self, spec: SessionSpec, instructions: str, sink: EventSink) -> TurnOutcome:
+        """手动压缩：把 `/compact [要保留什么]` 当提问发（Claude Code 的非交互模式支持；
+        CodeBuddy 没核实，结果以有没有收到压缩事件为准）。"""
+        command = "/compact" + (f" {instructions.strip()}" if instructions.strip() else "")
+        return await self._turn(replace(spec, images=()), command, sink, manual=True)
 
     async def _on_system(
         self, event: dict[str, Any], seen: _Seen, sink: EventSink, *, manual: bool

@@ -68,7 +68,21 @@ DEFAULTS: dict[str, Any] = {
     "digest_enabled": True,
     # 会话内容按保留期清掉时，工作台把这个会话的纪要也放进回收站（5.3）
     "digest_follow_retention": True,
+    # 自动压缩的触发点（4.2）：0 是用平台自己的（默认，不改）。Claude、CodeBuddy 是上下文的百分比，
+    # Codex 是 token 数（各自官方程序的设置方式，核验记录第 4 节）
+    "autocompact_claude_percent": 0,
+    "autocompact_workbuddy_percent": 0,
+    "autocompact_codex_tokens": 0,
+    # 压缩钩子（4.3）：压缩前告诉平台要保留什么、压缩后把平台写的摘要留下来
+    # （并进纪要、另开会话时用）。
+    # 三家的钩子都没在真实账号上验证过：默认关，在自己的服务器上验证后再打开（方案第 8 节）
+    "hooks_enabled": False,
 }
+# 固定带着的参考资料（6.3）：每个回合都算钱，上限比随消息带的更紧
+MAX_PINNED_CHARS = 4000
+PINNED_FILE = {"claude": "CLAUDE.md", "workbuddy": "CODEBUDDY.md"}  # 别的平台用 AGENTS.md
+PINNED_BEGIN = "<!-- 工作台固定带着的参考资料：开始（由 MCP 管理器维护，不要手改这一段） -->"
+PINNED_END = "<!-- 工作台固定带着的参考资料：结束 -->"
 SETTING_LIMITS = {
     "concurrency": (1, 16),
     "min_start_interval_seconds": (0, 60),
@@ -77,7 +91,27 @@ SETTING_LIMITS = {
     "max_text_chars": (1, 1_000_000),
     "auto_resume_max": (1, 10),
     "retention_days": (0, 3650),
+    "autocompact_claude_percent": (0, 100),
+    "autocompact_workbuddy_percent": (0, 100),
+    "autocompact_codex_tokens": (0, 10_000_000),
 }
+AUTOCOMPACT_SETTING = {
+    "claude": "autocompact_claude_percent",
+    "workbuddy": "autocompact_workbuddy_percent",
+    "openai": "autocompact_codex_tokens",
+}
+# 带着摘要另开会话（4.2 第 1 个动作，复用清空上下文）：
+# 没有平台压缩留下的摘要时，在老的上下文里问这一句
+SUMMARY_PROMPT = (
+    "接下来要清空这个会话的上下文，在新的上下文里接着做。请把到目前为止的情况整理成一份交接摘要，"
+    "按下面四栏用短句列出：1. 结论和决定；2. 没解决的问题；3. 涉及的文件和命令；4. 后续要做的。"
+    "只写摘要，不要做别的事。"
+)
+HANDOFF_PENDING = (
+    "（带着摘要另开会话：等上一条写出摘要后，清空上下文，把摘要作为新上下文的第一条发出）"
+)
+HANDOFF_BY = "带着摘要另开会话"
+COMPACT_TEXT = "（手动压缩上下文）"
 # 参考资料（6.2）：一条消息最多带几篇、正文合计多少字
 MAX_REFERENCES = 5
 MAX_REFERENCE_CHARS = 8000
@@ -505,7 +539,21 @@ class Engine:
             effort=options.get("effort"),
             native_id=session["native_id"],
             turn_count=session["turn_count"],
+            autocompact=self._autocompact(session["slot"]),
+            hooks=bool(self.setting("hooks_enabled")),
+            pinned=str(options.get("pinned") or "") if session["mode"] == "chat" else "",
         )
+
+    def _autocompact(self, slot: str) -> int:
+        key = AUTOCOMPACT_SETTING.get(slot)
+        return int(self.setting(key) or 0) if key else 0
+
+    def _warn_percent(self, slot: str) -> int:
+        """提醒“快到压缩的位置了”的位置：管理员调早了触发点（百分比）时提前提醒。"""
+        percent = AUTOCOMPACT_SETTING.get(slot, "").endswith("_percent")
+        if percent and self._autocompact(slot):
+            return max(10, min(CONTEXT_WARN_PERCENT, self._autocompact(slot) - 10))
+        return CONTEXT_WARN_PERCENT
 
     async def _pick_model(self, channel: Channel, model: str | None) -> str | None:
         models = await self.models(channel.platform, channel.mode)
@@ -560,6 +608,7 @@ class Engine:
         title: str = "",
         effort: str | None = None,
         request_id: str | None = None,
+        pinned: list[Row] | None = None,
     ) -> Row:
         """新建会话。带 request_id 时同一个调用方重试得到的是同一个会话：
         克隆仓库可能比调用方等的时间长，调用方超时后重试不能建出两个。"""
@@ -568,7 +617,7 @@ class Engine:
             raise BridgeError("FORBIDDEN", f"管理员没有给你开 {platform} 这个平台")
         if request_id is None:
             return await self._create_session(
-                caller, platform, mode, model, environment, title, effort, None
+                caller, platform, mode, model, environment, title, effort, None, pinned
             )
         if not _REQUEST_ID_RE.match(request_id):
             raise BridgeError(
@@ -582,7 +631,7 @@ class Engine:
         if task is None:  # 同一个幂等号的另一次调用还在建：等它，不再建一个
             task = asyncio.ensure_future(
                 self._create_session(
-                    caller, platform, mode, model, environment, title, effort, request_id
+                    caller, platform, mode, model, environment, title, effort, request_id, pinned
                 )
             )
             self._creating[key] = task
@@ -599,6 +648,7 @@ class Engine:
         title: str,
         effort: str | None,
         request_id: str | None,
+        pinned: list[Row] | None = None,
     ) -> Row:
         channel = self._channel(platform, mode)
         await self.require_ready(channel.slot)
@@ -627,6 +677,10 @@ class Engine:
             }
         if effort:
             options["effort"] = effort
+        # 固定带着的参考资料（6.3）
+        held = pinned_data(pinned or [])
+        if held is not None:
+            options["pinned"], options["pinned_titles"] = held
         picked = await self._pick_model(channel, model)
         from bridge.store import new_id
 
@@ -637,6 +691,9 @@ class Engine:
             if env_config.get("repo_url"):
                 await self._clone(env_config, workdir)
             workdir.mkdir(parents=True, exist_ok=True)
+            if held is not None and channel.mode != "chat":
+                # 开发会话：写进工作目录里官方程序会自动读的记忆文件，压缩后程序会重新读它
+                write_pinned(workdir / PINNED_FILE.get(channel.slot, "AGENTS.md"), held[0])
             spec = SessionSpec(
                 mode=channel.mode,
                 model=picked,
@@ -644,6 +701,8 @@ class Engine:
                 sandbox=options["sandbox"],
                 network=options["network"],
                 effort=effort,
+                autocompact=self._autocompact(channel.slot),
+                pinned=str(options.get("pinned") or "") if channel.mode == "chat" else "",
             )
             native = await self._driver(channel.slot).create(spec)
         except DriverError as error:
@@ -1065,10 +1124,24 @@ class Engine:
             await self._run(turn, session)
         finally:
             await limiter.release()
+            self._harvest(session["id"])
 
     async def _run(self, turn: Row, session: Row) -> None:
         turn_id, session_id = turn["id"], session["id"]
         driver = self._driver(session["slot"])
+        if turn.get("kind") == "handoff":
+            # 带着摘要另开会话：先清空上下文（换新的官方会话），再把摘要作为第一条发出
+            try:
+                turn, session = await self._handoff(turn, session)
+            except DriverError as error:
+                self.store.add_event(session_id, turn_id, "failed", {"kind": error.kind})
+                self._finish(
+                    turn_id,
+                    status="failed",
+                    error_kind=error.kind,
+                    error_message=redact(f"没能清空上下文：{error.message}"),
+                )
+                return
         spec = self._spec(session)
 
         text = turn["text"]
@@ -1130,9 +1203,14 @@ class Engine:
                 role, message_kind, text, data = made
                 self.store.add_message(session_id, turn_id, role, message_kind, text, data=data)
 
+        compact = turn.get("kind") == "compact"
         try:
             async with asyncio.timeout(self.setting("turn_timeout_seconds")):
-                outcome = await driver.run_turn(spec, text, sink)
+                if compact:  # 手动压缩（4.2 第 2 个动作）
+                    instructions = str(((first or {}).get("data") or {}).get("instructions") or "")
+                    outcome = await driver.compact(spec, instructions, sink)
+                else:
+                    outcome = await driver.run_turn(spec, text, sink)
         except TimeoutError:
             await driver.cancel(spec)
             self.store.add_event(session_id, turn_id, "failed", {"kind": "timeout"})
@@ -1174,11 +1252,19 @@ class Engine:
                 turn_id, status=status, error_kind=error.kind, error_message=redact(error.message)
             )
             return
-        summary = {
+        summary: Row = {
             "usage": outcome.usage,
             "commands": outcome.commands[:50],
             "files": outcome.files[:200],
         }
+        if compact:
+            summary["compacted"] = outcome.compactions > 0
+            outcome.text = (
+                "已压缩上下文：之前的内容在模型那里变成了摘要。"
+                if outcome.compactions
+                else "平台没有压缩上下文（这个平台在管理器调用它的方式下可能不支持手动压缩，"
+                "或者没有可压缩的内容）。要省 token 可以改用“带着摘要另开会话”。"
+            )
         fields: Row = {"turn_count": session["turn_count"] + 1}
         if not session["title"]:
             fields["title"] = " ".join(turn["text"].split())[:120]
@@ -1206,6 +1292,30 @@ class Engine:
             native_turn_id=outcome.native_turn_id,
         )
 
+    # ---- 压缩钩子留下的摘要（4.3）----
+    def _harvest(self, session_id: str) -> None:
+        """取走压缩后钩子写下的摘要（这个会话现在用的官方会话号），存进 compaction_summaries。"""
+        session = self.store.get_session(session_id)
+        driver = self.drivers.get(session["slot"]) if session else None
+        take = getattr(driver, "take_summaries", None)
+        if session is None or take is None or not session["native_id"]:
+            return
+        for item in take(session["native_id"]):
+            trigger = item.get("trigger")
+            self.store.add_compaction_summary(
+                session_id,
+                session["native_id"],
+                float(item.get("at") or time.time()),
+                trigger if trigger in ("auto", "manual") else None,
+                redact(str(item["summary"]))[:20_000],
+            )
+
+    def _latest_summary(self, session_id: str) -> Row | None:
+        """这段上下文里平台最近一次压缩时写的摘要（清空之后的才算）。"""
+        since = self._context_start(session_id)
+        latest = self.store.compaction_summaries(session_id, limit=1)
+        return latest[0] if latest and latest[0]["at"] > since else None
+
     # ---- 上下文与压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）----
     def _context(self, session_id: str) -> Row:
         current = self.store.get_session(session_id)
@@ -1226,6 +1336,9 @@ class Engine:
             context["used"] = usage.used
         if usage.window:
             context["window"] = usage.window
+        current = self.store.get_session(session_id)
+        if current is not None:
+            context["warn_percent"] = self._warn_percent(current["slot"])
         context["observed_at"] = time.time()
         return context
 
@@ -1352,6 +1465,8 @@ class Engine:
         }
         # 统一的回合状态（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.1）：三条链路都读这几项
         view["timing"] = _timing(turn)
+        if turn.get("kind"):  # summary / handoff / compact（4.2）
+            view["kind"] = turn["kind"]
         if session:  # 会话现在的上下文：已用比例、压缩过几次（智能体据此决定要不要换会话）
             view["context"] = context_view(session)
         if turn.get("source"):
@@ -1555,6 +1670,11 @@ class Engine:
             "session": self.admin_session_view(session),
             "turns_total": len(turns),
             "turns": turns[-DIGEST_MAX_TURNS:],
+            # 平台压缩时写的摘要（钩子留下的，4.3）：工作台并进纪要的“结论和决定”“没解决的问题”
+            "summaries": [
+                {"at": s["at"], "trigger": s["trigger"], "summary": s["text"]}
+                for s in reversed(self.store.compaction_summaries(session_id, limit=3))
+            ],
             "generated_at": time.time(),
         }
 
@@ -1913,6 +2033,7 @@ class Engine:
                     "delivery": asked["delivery"] if asked else None,
                     "attachments": files.get((turn["id"], "input"), []),
                     "references": ((asked or {}).get("data") or {}).get("references") or [],
+                    "kind": turn.get("kind"),
                 }
             )
             # 回合中途插进来的消息：排在这一问之后、回答之前
@@ -2383,9 +2504,18 @@ class Engine:
             with contextlib.suppress(DriverError):
                 await driver.archive(native)
             raise BridgeError("CONFLICT", busy_message)
+        reset = self._swap(session, native, len(turns), by)
+        refreshed = self._required_session(session_id)
+        return {**self.admin_session_view(refreshed), "cleared": True, "cleared_at": reset["at"]}
+
+    def _swap(
+        self, session: Row, native: str, turns: int, by: str | None, at: float | None = None
+    ) -> Row:
+        """换上新的官方会话（清空上下文和带着摘要另开会话共用）：记下清空的位置，用量清零。"""
+        session_id = session["id"]
         label = " ".join(redact(by or "").split())[:120] or None
         reset = self.store.add_context_reset(
-            session_id, session["slot"], session["native_id"], len(turns), label
+            session_id, session["slot"], session["native_id"], turns, label, at
         )
         # 新的官方会话从空的上下文开始：用量清零
         # （窗口大小、压缩过几次留着，纪要按次数判断有没有新的压缩）
@@ -2398,9 +2528,183 @@ class Engine:
                 self.store.add_event(
                     session_id, turn["id"], "resume_skipped", {"reason": "上下文已清空"}
                 )
-        self.store.add_event(session_id, None, "cleared", {"by": label, "turns": len(turns)})
+        self.store.add_event(session_id, None, "cleared", {"by": label, "turns": turns})
+        return reset
+
+    # ---- 带着摘要另开会话、手动压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）----
+    def _check_writable(self, session: Row, owner: str | None, what: str) -> None:
+        if owner is not None and session["caller_id"] != owner:
+            raise BridgeError("NOT_OWNER", f"这不是你建的会话：确认后再{what}")
+        if session["status"] != "active":
+            raise BridgeError("CONFLICT", f"会话已归档，不能{what}")
+        if session["origin"] != "bridge":
+            raise BridgeError(
+                "NOT_SUPPORTED", f"官方程序里已有的会话不能在这里{what}：要从头开始就新建一个会话"
+            )
+        self._require_platform(session["platform"])
+
+    async def continue_with_summary(
+        self, caller: Caller, session_id: str, request_id: str, *, owner: str | None = None
+    ) -> Row:
+        """带着摘要另开会话：复用清空上下文，在它上面加“带上摘要”这一步。
+
+        排两个回合：先在老的上下文里问一句要交接摘要（SUMMARY_PROMPT）；轮到第二个回合时清空上下文
+        （换新的官方会话、画分隔线），把摘要作为新上下文的第一条发出去。老的上下文没写出摘要时
+        （失败、中断），用管理器的记录排一份（每一问的原话），不再花钱问。会话里有消息在排队时
+        也可以点：这两条排在后面。返回两个回合的编号。同一个 request_id 重试得到原来的两个回合。"""
+        self._need(caller, "write")
+        if not _REQUEST_ID_RE.match(request_id or ""):
+            raise BridgeError(
+                "VALIDATION_FAILED", "request_id 只能用字母、数字和 . - _ :，最多 100 个字符"
+            )
+        existing = self.store.turn_by_request(caller.id, f"{request_id}.handoff")
+        session = self._session(caller, session_id)
+        if existing is None:
+            self._check_writable(session, owner, "带着摘要另开会话")
+            await self.require_ready(session["slot"])
+            since = self._context_start(session_id)
+            if not any(
+                t["queued_at"] > since
+                for t in self.store.list_turns(session_id=session_id, limit=10_000)
+            ):
+                raise BridgeError("CONFLICT", "上次清空之后还没有发过消息：没有可交接的内容")
+            # 平台压缩时写过摘要（钩子留下的）：直接用，不再花钱问（4.2）
+            platform_summary = self._latest_summary(session_id)
+            if platform_summary is None:
+                asked: Row | None = self.store.create_turn(
+                    session_id,
+                    caller.id,
+                    f"{request_id}.summary",
+                    SUMMARY_PROMPT,
+                    by=caller.label,
+                    source=caller.source,
+                    kind="summary",
+                )
+                data: Row = {"summary_turn": asked["id"]} if asked else {}
+            else:
+                asked, data = None, {"summary_id": platform_summary["id"]}
+            handoff = self.store.create_turn(
+                session_id,
+                caller.id,
+                f"{request_id}.handoff",
+                HANDOFF_PENDING,
+                by=caller.label,
+                source=caller.source,
+                kind="handoff",
+                data=data,
+            )
+            for turn in (asked, handoff):
+                if turn is not None:
+                    self.store.add_event(session_id, turn["id"], "queued", {"by": caller.label})
+                    self._enqueue(turn)
+        asked_turn = self.store.turn_by_request(caller.id, f"{request_id}.summary")
+        handoff_turn = self.store.turn_by_request(caller.id, f"{request_id}.handoff")
         refreshed = self._required_session(session_id)
-        return {**self.admin_session_view(refreshed), "cleared": True, "cleared_at": reset["at"]}
+        return {
+            **session_view(refreshed, full=True),
+            "summary_turn_id": asked_turn["id"] if asked_turn else None,
+            "handoff_turn_id": handoff_turn["id"] if handoff_turn else None,
+            "summary_from": "asked" if asked_turn else "compaction",
+        }
+
+    async def _handoff(self, turn: Row, session: Row) -> tuple[Row, Row]:
+        """轮到“带着摘要另开会话”的第二个回合：取摘要、清空上下文、改好要发的第一条。"""
+        first = self.store.user_message(turn["id"])
+        data = (first or {}).get("data") or {}
+        asked = self.store.get_turn(str(data.get("summary_turn") or ""))
+        stored = (
+            self.store.compaction_summary(int(data["summary_id"]))
+            if data.get("summary_id")
+            else None
+        )
+        if stored is not None:
+            source, summary = "平台压缩上下文时写的摘要", stored["text"]
+        elif asked is not None and asked["status"] == "completed" and asked["result_text"]:
+            source, summary = "上一个上下文写出的摘要", asked["result_text"]
+        else:  # 没写出摘要：按记录排一份（不调模型）
+            source, summary = (
+                "管理器按记录整理（上一个上下文没有写出摘要）",
+                self._recorded(session),
+            )
+        old = session["native_id"]
+        text = (
+            f"这是同一项工作的接续：之前的上下文已经清空，下面是到目前为止的交接摘要（{source}）。"
+            "先读一下，用几句话说出你理解的当前状态，然后等我的下一条消息。\n\n"
+            f"<交接摘要>\n{redact(summary).strip()}\n</交接摘要>"
+        )
+        native = await self._driver(session["slot"]).create(
+            replace(self._spec(session), native_id=None)
+        )
+        since = self._context_start(session["id"])
+        turns = [
+            t
+            for t in self.store.list_turns(session_id=session["id"], limit=10_000)
+            if since < t["queued_at"] < turn["queued_at"]
+        ]
+        # 分隔线画在摘要那一问和这一条之间（这一条排队的时间早于真正清空的时间）
+        at = (asked["queued_at"] + turn["queued_at"]) / 2 if asked else turn["queued_at"] - 0.001
+        self._swap(session, native, len(turns), HANDOFF_BY, at)
+        self.store.update_turn(turn["id"], text=text)
+        if first is not None:
+            self.store.update_message_text(first["id"], text)
+        logger.info(
+            "session %s continued with a summary (native %s → %s)", session["id"], old, native
+        )
+        refreshed = self.store.get_turn(turn["id"]) or turn
+        return refreshed, self._required_session(session["id"])
+
+    def _recorded(self, session: Row) -> str:
+        """管理器按记录排的交接摘要：清空之后每一问的原话和回答的开头（最近 20 个回合）。"""
+        since = self._context_start(session["id"])
+        lines = []
+        for turn in self.store.list_turns(session_id=session["id"], limit=10_000):
+            if turn["queued_at"] <= since or turn.get("kind") in ("summary", "handoff", "compact"):
+                continue
+            answer = _first_paragraph(turn["result_text"] or "")
+            lines.append(f"- 问：{_clip(turn['text'], 300)}")
+            if answer:
+                lines.append(f"  答：{_clip(answer, 300)}")
+        return "\n".join(lines[-40:]) or "（之前的上下文里没有记录）"
+
+    async def compact(
+        self,
+        caller: Caller,
+        session_id: str,
+        instructions: str,
+        request_id: str,
+        wait_seconds: float = 0,
+        *,
+        owner: str | None = None,
+    ) -> Row:
+        """手动压缩（4.2 第 2 个动作）：排一个回合，轮到时让平台压缩这个会话的上下文。
+
+        instructions 是“要保留什么”（Claude 会用；Codex 的接口带不了）。平台没有压缩时回合照常完成，
+        结果里写明（summary.compacted=false），并建议改用带着摘要另开会话。"""
+        self._need(caller, "write")
+        if not _REQUEST_ID_RE.match(request_id or ""):
+            raise BridgeError(
+                "VALIDATION_FAILED", "request_id 只能用字母、数字和 . - _ :，最多 100 个字符"
+            )
+        existing = self.store.turn_by_request(caller.id, request_id)
+        if existing is not None:
+            return await self.wait_turn(existing["id"], wait_seconds)
+        session = self._session(caller, session_id)
+        self._check_writable(session, owner, "压缩上下文")
+        await self.require_ready(session["slot"])
+        clean = " ".join(redact(instructions or "").split())[:500]
+        turn = self.store.create_turn(
+            session_id,
+            caller.id,
+            request_id,
+            COMPACT_TEXT + (f"要保留：{clean}" if clean else ""),
+            by=caller.label,
+            source=caller.source,
+            kind="compact",
+            data={"instructions": clean},
+        )
+        self.store.add_event(session_id, turn["id"], "queued", {"by": caller.label})
+        self._enqueue(turn)
+        return await self.wait_turn(turn["id"], wait_seconds)
 
     # ---- 管理页用 ----
     async def overview(self) -> Row:
@@ -2552,6 +2856,44 @@ def reference_data(references: list[Row]) -> Row | None:
     return {"references": listed, "reference_text": block}
 
 
+def pinned_data(references: list[Row]) -> tuple[str, list[Row]] | None:
+    """固定带着的参考资料（6.3）→（给模型的那一段，显示用的清单）。合计最多 4000 字。"""
+    if not references:
+        return None
+    if len(references) > MAX_REFERENCES:
+        raise BridgeError("VALIDATION_FAILED", f"最多固定带着 {MAX_REFERENCES} 篇参考资料")
+    budget, parts, listed = MAX_PINNED_CHARS, [], []
+    for ref in references:
+        title = " ".join(str(ref.get("title") or "").split())[:200]
+        label = " ".join(str(ref.get("label") or "").split())[:80]
+        body = redact(str(ref.get("text") or "").strip())
+        cut = len(body) > budget
+        body = body[: max(budget, 0)]
+        budget -= len(body)
+        head = f"《{title}》" + (f"（{label}）" if label else "")
+        tail = "\n（后面的内容超过上限，没有带上）" if cut else ""
+        parts.append(head + ("\n" + body if body else "") + tail)
+        listed.append({"note_id": str(ref.get("note_id") or "")[:60], "title": title})
+    opening = REFERENCE_OPEN.replace("说明=", '用途="整个会话一直带着" 说明=')
+    return "\n".join([opening, "\n\n".join(parts), REFERENCE_CLOSE]), listed
+
+
+def write_pinned(path: Path, block: str) -> None:
+    """把固定带着的参考资料写进记忆文件里有标记的一段；文件原来就有时只动这一段。"""
+    section = f"{PINNED_BEGIN}\n{block}\n{PINNED_END}\n"
+    try:
+        current = path.read_text(encoding="utf-8")
+    except OSError:
+        current = ""
+    if PINNED_BEGIN in current and PINNED_END in current:
+        head, _, rest = current.partition(PINNED_BEGIN)
+        _, _, tail = rest.partition(PINNED_END)
+        text = head + section + tail.lstrip("\n")
+    else:
+        text = (current.rstrip("\n") + "\n\n" if current.strip() else "") + section
+    path.write_text(text, encoding="utf-8")
+
+
 def _compacted_view(turn_id: str, message: Row) -> Row:
     """会话内容里的一条分隔：平台在这一回合压缩了上下文，前面的内容在模型那里只剩摘要。"""
     data = message["data"] or {}
@@ -2653,9 +2995,13 @@ def session_view(session: Row, *, full: bool = False) -> Row:
         "updated_at": session["updated_at"],
     }
     if full:
+        options = dict(session["options"] or {})
         view["environment_id"] = session["environment_id"]
         view["turns"] = session["turn_count"]
-        view["options"] = session["options"]
+        # 固定带着的参考资料只给标题（正文只发给模型）
+        view["pinned"] = options.pop("pinned_titles", [])
+        options.pop("pinned", None)
+        view["options"] = options
         view["context"] = context_view(session)
     return view
 
@@ -2667,6 +3013,7 @@ def context_view(session: Row) -> Row:
     context = session.get("context") or {}
     used, window = context.get("used"), context.get("window")
     percent = min(100, round(used * 100 / window)) if used and window else None
+    warn = int(context.get("warn_percent") or CONTEXT_WARN_PERCENT)
     return {
         "used": used,
         "window": window,
@@ -2674,8 +3021,8 @@ def context_view(session: Row) -> Row:
         "compactions": int(context.get("compactions") or 0),
         "last_compacted_at": context.get("last_compacted_at"),
         "last_trigger": context.get("last_trigger"),
-        "near_limit": percent is not None and percent >= CONTEXT_WARN_PERCENT,
-        "warn_percent": CONTEXT_WARN_PERCENT,
+        "near_limit": percent is not None and percent >= warn,
+        "warn_percent": warn,
         "observed_at": context.get("observed_at"),
     }
 

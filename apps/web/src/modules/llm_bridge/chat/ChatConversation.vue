@@ -167,6 +167,38 @@ async function runClear(typed: boolean) {
   } finally { clearing.value = false }
 }
 
+// ---- 管得了上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）：手动压缩、带着摘要另开会话 ----
+// 两件事都排在会话队列里（有消息在跑也可以点）；别人建的会话先确认一次，和发送一样
+const shaping = ref('')
+const CONTEXT_ACTIONS = {
+  compact: { ask: '压缩这个会话的上下文？\n\n平台会把之前的内容压成摘要（这一步本身要花一次模型调用），之后每回合花的 token 变少，但前面的细节只剩摘要。', done: '已排上手动压缩：轮到时平台会把之前的内容压成摘要。', fail: '没能压缩' },
+  continue: { ask: '带着摘要另开会话？\n\n先在现在的上下文里要一份交接摘要，然后清空上下文，把摘要作为新上下文的第一条发出去。上面的记录都还在；之后的消息接着在这个会话里发。比一直在长会话里聊省 token。', done: '已排上“带着摘要另开会话”：先要摘要，再清空上下文、发出摘要。', fail: '没能带着摘要另开会话' },
+} as const
+async function shapeContext(action: keyof typeof CONTEXT_ACTIONS) {
+  if (!session.value || shaping.value) return
+  const text = CONTEXT_ACTIONS[action]
+  sendError.value = sendNotice.value = ''
+  if (!window.confirm(foreign.value ? `${text.ask}\n\n${takeoverText.value}` : text.ask)) return
+  shaping.value = action
+  const run = (takeover: boolean) => (action === 'compact' ? props.chat.compact(props.bridge.id, props.sessionId, '', takeover) : props.chat.continueWithSummary(props.bridge.id, props.sessionId, takeover))
+  try {
+    let out: Awaited<ReturnType<typeof run>>
+    try { out = await run(foreign.value) }
+    catch (e) {
+      if (!needsTakeover(e) || !window.confirm(takeoverText.value)) throw e
+      out = await run(true)
+    }
+    // 平台压缩时写过摘要（打开了压缩钩子，4.3）：直接用它，不再先问一次
+    sendNotice.value = out && 'summary_from' in out && out.summary_from === 'compaction' ? '已排上“带着摘要另开会话”：直接用平台压缩时写的摘要，清空上下文后发出（不再先问一次）。' : text.done
+    stick = true
+    await reload()
+    void poll()
+    emit('changed')
+  } catch (e) {
+    sendError.value = needsTakeover(e) ? `${text.fail}：接着别人建的会话操作前需要确认。` : `${text.fail}：${chatError(e)}`
+  } finally { shaping.value = '' }
+}
+
 // ---- 提问前用上知识库（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 6 节）：相近内容的提示、挑选笔记带上 ----
 const picked = ref<ChatNoteHit[]>([])
 const kbPanel = ref<InstanceType<typeof ChatKnowledge> | null>(null)
@@ -360,9 +392,13 @@ function archive() {
         <p v-if="blocked" class="lc-note" role="note">{{ blocked }}</p>
         <template v-else>
           <p v-if="foreign" class="lc-note" role="note">{{ session.owner_kind === 'external' ? '这是官方程序里已有的会话' : `这是${session.owner_kind === 'agent' ? '智能体' : ''}「${ownerText(session)}」建的会话` }}：可以看；接着发消息前会让你确认一次。</p>
-          <p v-if="session.context?.near_limit && session.status === 'active'" class="lc-note lc-context-warn" role="note">
-            这个会话的上下文已用 {{ session.context.percent }}%，快到平台自动压缩的位置了：压缩后前面的细节会变成摘要。要接着做长任务，可以换一个新会话。
-          </p>
+          <div v-if="session.context?.near_limit && session.status === 'active'" class="lc-note lc-context-warn" role="note">
+            <span>这个会话的上下文已用 {{ session.context.percent }}%，快到平台自动压缩的位置了：压缩后前面的细节会变成摘要。要接着做长任务，带着摘要另开会话更省。</span>
+            <span v-if="canClear" class="lc-context-actions">
+              <button type="button" class="asv-link" :disabled="!!shaping" @click="shapeContext('compact')">{{ shaping === 'compact' ? '正在排…' : '压缩一下' }}</button>
+              <button type="button" class="asv-link" :disabled="!!shaping" @click="shapeContext('continue')">{{ shaping === 'continue' ? '正在排…' : '带着摘要另开会话' }}</button>
+            </span>
+          </div>
           <p v-if="dragging > 0" class="lc-note" role="status">松开鼠标，把{{ imagesOnly ? '图片' : '图片或文件' }}加到这条消息里。</p>
           <ul v-if="attached.length || uploading" class="lc-attached" aria-label="要带上的附件">
             <li v-for="a in attached" :key="a.id"><span class="lc-file-name">{{ a.name }}</span><span class="lc-file-size">{{ fileSize(a.size) }}</span><button type="button" class="lc-icon" :aria-label="`去掉附件：${a.name}`" @click="detach(a)"><X aria-hidden="true" /></button></li>
@@ -389,7 +425,7 @@ function archive() {
         <p v-if="sendError" class="lc-note is-red" role="alert">{{ sendError }}</p>
       </form>
     </div>
-    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" :quota="quotas?.[session.platform] ?? null" :models="models" :changing="working" :digest="conversation.data.value?.digest ?? null" :can-write="bridge.enabled" @model="setModel" @digest="digestAction" @close="infoOpen = false" />
+    <ChatInfoPanel v-if="infoOpen && session" :session="session" :messages="messages" :manager-name="bridge.name" :quota="quotas?.[session.platform] ?? null" :models="models" :changing="working" :digest="conversation.data.value?.digest ?? null" :can-write="bridge.enabled" @model="setModel" @digest="digestAction" @shape="shapeContext" @close="infoOpen = false" />
     <ChatSaveNote v-if="saving && session" :chat="chat" :question="saving.question" :answer="saving.answer" :session-title="session.title" :link="saving.link" @close="saving = null" />
   </div>
 </template>

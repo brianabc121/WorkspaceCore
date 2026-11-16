@@ -4,8 +4,9 @@ import { RouterLink } from 'vue-router'
 import { ArrowLeft } from '@lucide/vue'
 import { ApiError } from '../../../services/api'
 import { MODES, SANDBOX, platformName, type Bridge, type Platform } from '../api'
-import { chatError, newRequestId, type ChatCreateBody, type LlmChatApi, type PlatformChoice } from './chatApi'
+import { chatError, newRequestId, type ChatCreateBody, type ChatNoteHit, type LlmChatApi, type PlatformChoice } from './chatApi'
 import ChatLocalFiles from './ChatLocalFiles.vue'
+import ChatPinnedNotes from './ChatPinnedNotes.vue'
 import { uploadAll, useLocalFiles } from './useLocalFiles'
 
 // 新建会话：管理器 → 平台（只列这个管理器控制的；没登录的不能选）→ 用法 → 模型、推理强度 → 开发环境 → 第一条消息。
@@ -18,6 +19,7 @@ const emit = defineEmits<{ 'update:managerId': [id: string]; created: [sessionId
 const MODE_HELP: Record<string, string> = { chat: '普通问答：模型不能执行命令，也不能读写文件。', dev: '在选定的开发环境里读写代码、执行命令。' }
 const platform = ref<Platform | null>(null), mode = ref<'chat' | 'dev'>('chat')
 const model = ref(''), effort = ref(''), environment = ref(''), title = ref(''), text = ref('')
+const pinned = ref<ChatNoteHit[]>([])
 const usable = computed(() => props.choices.filter(c => c.loggedIn))
 const choice = computed(() => props.choices.find(c => c.id === platform.value) ?? null)
 const modes = computed(() => choice.value?.modes ?? [])
@@ -57,6 +59,7 @@ async function submit() {
     platform: platform.value!, mode: mode.value, title: title.value.trim(),
     ...(model.value ? { model: model.value } : {}), ...(effort.value ? { effort: effort.value } : {}),
     ...(mode.value === 'dev' ? { environment: environment.value } : {}),
+    ...(pinned.value.length ? { pinned_notes: pinned.value.map(n => n.id) } : {}),
   }
   if (first && !files.length) {
     const key = JSON.stringify([props.manager.id, body, first])
@@ -159,6 +162,7 @@ async function submit() {
             <ChatLocalFiles :draft="attach" :disabled="busy" />
             <p class="form-help">可以先不写：只建好会话，之后再发。</p>
           </div>
+          <ChatPinnedNotes v-model:selected="pinned" :chat="chat" :bridge-id="manager.id" :disabled="busy" />
         </template>
       </template>
       <p v-if="options.error.value && choice" class="lc-note is-red" role="alert">读不到可选项：{{ chatError(options.error.value) }}</p>

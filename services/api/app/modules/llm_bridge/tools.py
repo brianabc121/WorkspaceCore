@@ -1,6 +1,6 @@
 """大模型会话桥给智能体的工具（docs/v2/LLM_BRIDGE_PLAN.md 第 9 节，docs/AGENTS.md 例外九）。
 
-读工具走 MCP 读工具的通用流程；写工具（新建会话、发送、取消、归档）风险等级是 direct：
+读工具走 MCP 读工具的通用流程；写工具（新建会话、发送、取消、归档、压缩）风险等级是 direct：
 管理员给实例打开“大模型会话权限”后直接执行、不审批，由 tool_handlers.run 处理。
 这里只放工具描述，供 app/schemas/ai_tools.py 汇总（不能导入它）。
 """
@@ -15,6 +15,7 @@ from app.modules.llm_bridge.tool_schemas import (
     QueueInput,
     SendInput,
     SessionArchiveInput,
+    SessionCompactInput,
     SessionCreateInput,
     SessionGetInput,
     SessionListInput,
@@ -37,6 +38,8 @@ _TOOLS: tuple[tuple[str, RiskLevel, type[BaseModel]], ...] = (
     ("llm_bridge_send", "direct", SendInput),
     ("llm_bridge_turn_cancel", "direct", TurnCancelInput),
     ("llm_bridge_session_archive", "direct", SessionArchiveInput),
+    # 手动压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2；人类 2026-11-16 同意补进例外九的名单）
+    ("llm_bridge_session_compact", "direct", SessionCompactInput),
 )
 
 SPECS: tuple[ToolSpec, ...] = tuple(

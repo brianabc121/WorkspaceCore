@@ -35,6 +35,15 @@ class LlmChatContextOut(BaseModel):
     warn_percent: int | None = Field(default=None, description="提醒的位置（已用百分比）")
 
 
+class LlmChatPinnedOut(BaseModel):
+    """新建会话时固定带着的一篇笔记（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.3）。
+
+    只给标题，正文只发给模型。"""
+
+    note_id: str
+    title: str
+
+
 class LlmChatSessionOut(BaseModel):
     session_id: str
     platform: str
@@ -63,6 +72,9 @@ class LlmChatSessionOut(BaseModel):
     )
     context: LlmChatContextOut | None = Field(
         default=None, description="上下文用了多少、压缩过几次；旧版本的管理器没有"
+    )
+    pinned: list[LlmChatPinnedOut] = Field(
+        default=[], description="固定带着的参考资料（只有标题）；只在会话内容里给出"
     )
 
 
@@ -182,6 +194,12 @@ class LlmChatMessageOut(BaseModel):
         description="提问是怎么送出去的：turn 普通的一个回合；inserted 插进正在处理的回合；"
         "merged 中断上一个回合后合并重发；imported 导入的",
     )
+    kind: str | None = Field(
+        default=None,
+        description="user 消息所在回合的种类（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）："
+        "summary 带着摘要另开会话时要摘要的那一问；handoff 清空后作为新上下文第一条发出的摘要；"
+        "compact 手动压缩；普通的提问为空",
+    )
 
 
 class LlmChatDigestOut(BaseModel):
@@ -280,6 +298,14 @@ class LlmChatCreateIn(_In):
         pattern=_REQUEST_ID,
         description="有 text 时必填",
     )
+    pinned_notes: list[UUID] = Field(
+        default=[],
+        max_length=5,
+        description="固定带着的知识库笔记（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.3，"
+        "最多 5 篇、合计 4000 字）：整个会话一直带着——开发会话写进工作目录的记忆文件，"
+        "对话会话随系统提示带上。"
+        "所在知识库不允许发给外部平台时 403",
+    )
 
     @model_validator(mode="after")
     def _text_needs_request_id(self) -> LlmChatCreateIn:
@@ -342,6 +368,36 @@ class LlmChatClearedOut(BaseModel):
         description="这次清空了没有：上次清空之后还没发过消息时什么也不做，为 false"
     )
     cleared_at: float | None = Field(default=None, description="清空的时间")
+
+
+# ---- 带着摘要另开会话、手动压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）----
+class LlmChatCompactIn(_In):
+    instructions: str = Field(
+        default="", max_length=500, description="压缩时要保留什么（Claude 会用；Codex 带不了）"
+    )
+    request_id: str = Field(min_length=1, max_length=100, pattern=_REQUEST_ID)
+    takeover: bool = Field(default=False, description="不是自己建的会话时必须为 true")
+
+
+class LlmChatContinueIn(_In):
+    request_id: str = Field(min_length=1, max_length=100, pattern=_REQUEST_ID)
+    takeover: bool = Field(default=False, description="不是自己建的会话时必须为 true")
+
+
+class LlmChatContinuedOut(BaseModel):
+    session: LlmChatSessionOut
+    summary_turn_id: str | None = Field(
+        default=None,
+        description="在老的上下文里要摘要的那一回合；直接用了平台压缩时写的摘要时为空",
+    )
+    handoff_turn_id: str | None = Field(
+        default=None, description="清空上下文、把摘要作为新上下文第一条发出的那一回合"
+    )
+    summary_from: Literal["asked", "compaction"] = Field(
+        default="asked",
+        description="摘要从哪来：asked 是先在老的上下文里问一次；compaction 是直接用平台压缩时写的"
+        "（打开了压缩钩子才会有，docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.3）",
+    )
 
 
 # ---- 会话的消息队列（docs/v2/LLM_BRIDGE_QUEUE_PLAN.md 第 4 节）----

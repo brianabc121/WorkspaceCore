@@ -268,6 +268,26 @@ class Store:
         columns = {row["name"] for row in self._db.execute("PRAGMA table_info(sessions)")}
         if "context" not in columns:
             self._db.execute("ALTER TABLE sessions ADD COLUMN context TEXT NOT NULL DEFAULT '{}'")
+        # 回合的种类（第 2 期）：空是普通的提问；summary 要交接摘要；handoff 带着摘要换新的上下文；
+        # compact 手动压缩
+        turn_columns = {row["name"] for row in self._db.execute("PRAGMA table_info(turns)")}
+        if "kind" not in turn_columns:
+            self._db.execute("ALTER TABLE turns ADD COLUMN kind TEXT")
+        # 平台压缩时写的摘要（第 4 期，压缩后钩子留下的；4.3）
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS compaction_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+                native_id TEXT,
+                trigger TEXT,
+                text TEXT NOT NULL,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS compaction_summaries_session
+                ON compaction_summaries (session_id, id);
+            """
+        )
 
     def _migrate_messages(self) -> None:
         """会话内容落库（T-0236 第二步）：messages / attachments；已有的回合和事件回填进去。"""
@@ -621,15 +641,40 @@ class Store:
         )
 
     def add_context_reset(
-        self, session_id: str, slot: str, native_id: str | None, turns: int, by: str | None
+        self,
+        session_id: str,
+        slot: str,
+        native_id: str | None,
+        turns: int,
+        by: str | None,
+        at: float | None = None,
     ) -> Row:
-        at = time.time()
+        at = time.time() if at is None else at
         cursor = self._exec(
             "INSERT INTO context_resets (session_id, slot, native_id, turns, by, at) "
             "VALUES (?,?,?,?,?,?)",
             (session_id, slot, native_id, turns, by, at),
         )
         return {"id": cursor.lastrowid, "turns": turns, "by": by, "at": at}
+
+    def add_compaction_summary(
+        self, session_id: str, native_id: str, at: float, trigger: str | None, summary: str
+    ) -> None:
+        self._exec(
+            "INSERT INTO compaction_summaries (session_id, native_id, trigger, text, at) "
+            "VALUES (?,?,?,?,?)",
+            (session_id, native_id, trigger, summary, at),
+        )
+
+    def compaction_summaries(self, session_id: str, limit: int = 10) -> list[Row]:
+        """平台压缩时写的摘要，最新的在前。"""
+        return self._all(
+            "SELECT * FROM compaction_summaries WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+        )
+
+    def compaction_summary(self, summary_id: int) -> Row | None:
+        return self._one("SELECT * FROM compaction_summaries WHERE id = ?", (summary_id,))
 
     def context_resets(self, session_id: str) -> list[Row]:
         """这个会话清空过几次上下文：每次谁清的、什么时候、清空前那段有几个回合（按先后）。"""
@@ -700,8 +745,11 @@ class Store:
         delivery: str = "turn",
         source: Row | None = None,
         data: Row | None = None,
+        kind: str | None = None,
     ) -> Row:
-        """新回合；同时把这一问写进 messages（by：谁发的；data：随这一问的数据，例如参考资料）。"""
+        """新回合；同时把这一问写进 messages（by：谁发的；data：随这一问的数据，例如参考资料）。
+
+        kind：回合的种类（summary / handoff / compact），普通的提问为空。"""
         turn_id = new_id("bt")
         self._exec(
             "INSERT INTO turns (id, session_id, caller_id, request_id, status, text, queued_at) "
@@ -711,6 +759,8 @@ class Store:
         self._exec("UPDATE turns SET position = queued_at WHERE id = ?", (turn_id,))
         if source:
             self._update("turns", "id", turn_id, {"source": source})
+        if kind:
+            self._update("turns", "id", turn_id, {"kind": kind})
         self.touch_session(session_id)
         self.add_message(
             session_id, turn_id, "user", "text", text, by=by, delivery=delivery, data=data
@@ -1041,7 +1091,7 @@ class Store:
 
     def purge_session(self, session_id: str) -> None:
         """清掉一个会话的对话内容：提问、回答、过程、事件、附件。会话、回合的状态和用量留着。"""
-        for table in ("messages", "events", "attachments"):
+        for table in ("messages", "events", "attachments", "compaction_summaries"):
             self._exec(f"DELETE FROM {table} WHERE session_id = ?", (session_id,))  # noqa: S608
         self._exec(
             "UPDATE turns SET text = '', result_text = NULL, error_message = NULL "

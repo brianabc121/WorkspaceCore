@@ -48,7 +48,8 @@ def tool_definition(tool: ToolDef) -> types.Tool:
         annotations=types.ToolAnnotations(
             read_only_hint=tool.read_only,
             destructive_hint=tool.name == "llm_session_archive",
-            idempotent_hint=tool.read_only or tool.name == "llm_send",
+            idempotent_hint=tool.read_only
+            or tool.name in ("llm_send", "llm_session_compact", "llm_session_continue"),
             open_world_hint=not tool.read_only,
         ),
     )
@@ -118,6 +119,16 @@ async def run_tool(
         )
     if name == "llm_queue":
         return engine.caller_queue(caller, args["session_id"])
+    if name == "llm_session_compact":
+        return await engine.compact(
+            caller,
+            args["session_id"],
+            args["instructions"],
+            args["request_id"],
+            args["wait_seconds"],
+        )
+    if name == "llm_session_continue":
+        return await engine.continue_with_summary(caller, args["session_id"], args["request_id"])
     return await engine.archive_session(caller, args["session_id"])
 
 

@@ -3242,6 +3242,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：手动压缩会话的上下文（admin）
+         * @description 排一个回合（kind=compact），轮到时让平台把之前的内容压成摘要（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）。instructions 是要保留什么（Claude 会用）。回合结果的 summary.compacted 说明平台有没有真的压缩。不是自己建的会话要带 takeover=true。
+         */
+        post: operations["llm_chat_compact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 聊天：带着摘要另开会话（admin）
+         * @description 复用清空上下文：先在老的上下文里要一份交接摘要（kind=summary），再清空上下文、把摘要作为新上下文的第一条发出（kind=handoff）。两个回合排在会话队列里；老的上下文没写出摘要时用管理器的记录排一份。同时整理一次会话纪要。上次清空之后还没发过消息 409；不是自己建的会话要带 takeover=true。
+         */
+        post: operations["llm_chat_continue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -12753,6 +12793,21 @@ export interface components {
              */
             auto_resume_max: number;
             /**
+             * Autocompact Claude Percent
+             * @description Claude 的上下文用到百分之多少时自动压缩（LLM_BRIDGE_MEMORY_PLAN.md 4.2）；0 是用平台自己的（默认）。旧版本的管理器没有这一项（为空）
+             */
+            autocompact_claude_percent?: number | null;
+            /**
+             * Autocompact Codex Tokens
+             * @description Codex 的上下文到多少 token 时自动压缩；0 是用平台自己的
+             */
+            autocompact_codex_tokens?: number | null;
+            /**
+             * Autocompact Workbuddy Percent
+             * @description CodeBuddy 的上下文用到百分之多少时自动压缩；0 是用平台自己的
+             */
+            autocompact_workbuddy_percent?: number | null;
+            /**
              * Claude Subscription Ack
              * @description 已确认了解 Claude 订阅登录的合规风险
              */
@@ -12774,6 +12829,11 @@ export interface components {
              * @default true
              */
             digest_follow_retention: boolean;
+            /**
+             * Hooks Enabled
+             * @description 压缩钩子（4.3）：压缩前告诉平台要保留什么、压缩后把平台写的摘要留下来（并进会话纪要、另开会话时直接用）。只对 Claude、CodeBuddy；没在真实账号上验证过，默认关。旧版本的管理器没有这一项（为空）
+             */
+            hooks_enabled?: boolean | null;
             /** Max Text Chars */
             max_text_chars: number;
             /**
@@ -12819,6 +12879,12 @@ export interface components {
             auto_resume?: boolean | null;
             /** Auto Resume Max */
             auto_resume_max?: number | null;
+            /** Autocompact Claude Percent */
+            autocompact_claude_percent?: number | null;
+            /** Autocompact Codex Tokens */
+            autocompact_codex_tokens?: number | null;
+            /** Autocompact Workbuddy Percent */
+            autocompact_workbuddy_percent?: number | null;
             /** Claude Subscription Ack */
             claude_subscription_ack?: boolean | null;
             /** Concurrency */
@@ -12827,6 +12893,8 @@ export interface components {
             digest_enabled?: boolean | null;
             /** Digest Follow Retention */
             digest_follow_retention?: boolean | null;
+            /** Hooks Enabled */
+            hooks_enabled?: boolean | null;
             /** Max Text Chars */
             max_text_chars?: number | null;
             /** Min Start Interval Seconds */
@@ -13056,6 +13124,23 @@ export interface components {
             cleared_at?: number | null;
             session: components["schemas"]["LlmChatSessionOut"];
         };
+        /** LlmChatCompactIn */
+        LlmChatCompactIn: {
+            /**
+             * Instructions
+             * @description 压缩时要保留什么（Claude 会用；Codex 带不了）
+             * @default
+             */
+            instructions: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Takeover
+             * @description 不是自己建的会话时必须为 true
+             * @default false
+             */
+            takeover: boolean;
+        };
         /**
          * LlmChatContextOut
          * @description 会话的上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.1）：官方程序报的数，没报的为空。
@@ -13104,6 +13189,38 @@ export interface components {
              */
             window?: number | null;
         };
+        /** LlmChatContinueIn */
+        LlmChatContinueIn: {
+            /** Request Id */
+            request_id: string;
+            /**
+             * Takeover
+             * @description 不是自己建的会话时必须为 true
+             * @default false
+             */
+            takeover: boolean;
+        };
+        /** LlmChatContinuedOut */
+        LlmChatContinuedOut: {
+            /**
+             * Handoff Turn Id
+             * @description 清空上下文、把摘要作为新上下文第一条发出的那一回合
+             */
+            handoff_turn_id?: string | null;
+            session: components["schemas"]["LlmChatSessionOut"];
+            /**
+             * Summary From
+             * @description 摘要从哪来：asked 是先在老的上下文里问一次；compaction 是直接用平台压缩时写的（打开了压缩钩子才会有，docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.3）
+             * @default asked
+             * @enum {string}
+             */
+            summary_from: "asked" | "compaction";
+            /**
+             * Summary Turn Id
+             * @description 在老的上下文里要摘要的那一回合；直接用了平台压缩时写的摘要时为空
+             */
+            summary_turn_id?: string | null;
+        };
         /** LlmChatConversationOut */
         LlmChatConversationOut: {
             /** @description 这个会话的纪要；没写过、也没关掉时为空 */
@@ -13134,6 +13251,12 @@ export interface components {
             mode: "chat" | "dev";
             /** Model */
             model?: string | null;
+            /**
+             * Pinned Notes
+             * @description 固定带着的知识库笔记（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.3，最多 5 篇、合计 4000 字）：整个会话一直带着——开发会话写进工作目录的记忆文件，对话会话随系统提示带上。所在知识库不允许发给外部平台时 403
+             * @default []
+             */
+            pinned_notes: string[];
             /**
              * Platform
              * @enum {string}
@@ -13422,6 +13545,11 @@ export interface components {
              */
             imported: boolean;
             /**
+             * Kind
+             * @description user 消息所在回合的种类（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2）：summary 带着摘要另开会话时要摘要的那一问；handoff 清空后作为新上下文第一条发出的摘要；compact 手动压缩；普通的提问为空
+             */
+            kind?: string | null;
+            /**
              * Mine
              * @description 是不是当前用户发的（只有 user 消息有）
              */
@@ -13590,6 +13718,18 @@ export interface components {
              * @default
              */
             models_error: string;
+        };
+        /**
+         * LlmChatPinnedOut
+         * @description 新建会话时固定带着的一篇笔记（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 6.3）。
+         *
+         *     只给标题，正文只发给模型。
+         */
+        LlmChatPinnedOut: {
+            /** Note Id */
+            note_id: string;
+            /** Title */
+            title: string;
         };
         /** LlmChatQueueEditIn */
         LlmChatQueueEditIn: {
@@ -13766,6 +13906,12 @@ export interface components {
              * @enum {string}
              */
             owner_kind: "me" | "user" | "agent" | "external";
+            /**
+             * Pinned
+             * @description 固定带着的参考资料（只有标题）；只在会话内容里给出
+             * @default []
+             */
+            pinned: components["schemas"]["LlmChatPinnedOut"][];
             /** Platform */
             platform: string;
             /**
@@ -35814,6 +35960,178 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmChatClearedOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_compact: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatCompactIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatTurnOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_chat_continue: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmChatContinueIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmChatContinuedOut"];
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

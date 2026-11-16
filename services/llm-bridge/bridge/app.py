@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
-from bridge import __version__
+from bridge import __version__, hooks
 from bridge import attachments as attachment_rules
 from bridge.channels import CHANNELS, FAKE_CHANNELS, SLOT_LABELS, find
 from bridge.config import Settings, get_settings
@@ -83,6 +83,11 @@ def build_drivers(settings: Settings) -> dict[str, Driver]:
     }
     if settings.enable_fake:
         drivers["fake"] = FakeDriver()
+    # 压缩钩子（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.3）：脚本复制到数据卷，命令行类平台按回合带上
+    script = hooks.install(settings.data_dir)
+    for driver in drivers.values():
+        if isinstance(driver, CliStreamDriver):
+            driver.hook_script, driver.hook_dir = script, script.parent
     return drivers
 
 

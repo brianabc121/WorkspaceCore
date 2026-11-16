@@ -535,6 +535,58 @@ describe('大模型客户端管理', () => {
     expect(body).not.toHaveProperty('digest_follow_retention')
   })
 
+  it('sets where each platform compacts automatically, sending only what changed', async () => {
+    const withAuto = { ...settings, autocompact_claude_percent: 0, autocompact_workbuddy_percent: 0, autocompact_codex_tokens: 0 }
+    const requests = setup('owner', async r => {
+      if (path(r) === `${base}/settings`) return Response.json({ ...withAuto, ...(await r.clone().json()) })
+      if (path(r) === `${base}/status`) return Response.json({ ...status(), settings: withAuto })
+      return undefined
+    })
+    await openApp('/llm_bridge?view=manage')
+    const set = await openTab('设置')
+    const group = await within(set).findByRole('group', { name: '自动压缩的位置' })
+    const claude = within(group).getByLabelText('Claude：上下文用到百分之多少时自动压缩')
+    expect(claude).toHaveValue(0)
+    await fireEvent.update(claude, '60')
+    await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(writes(requests)).toHaveLength(1))
+    const body = await writes(requests)[0]!.clone().json()
+    expect(body).toMatchObject({ autocompact_claude_percent: 60 })
+    expect(body).not.toHaveProperty('autocompact_codex_tokens')
+  })
+
+  it('turns the compaction hooks on (off by default) and hides the switch for an older manager', async () => {
+    const withHooks = { ...settings, hooks_enabled: false }
+    const requests = setup('owner', async r => {
+      if (path(r) === `${base}/settings`) return Response.json({ ...withHooks, ...(await r.clone().json()) })
+      if (path(r) === `${base}/status`) return Response.json({ ...status(), settings: withHooks })
+      return undefined
+    })
+    await openApp('/llm_bridge?view=manage')
+    const set = await openTab('设置')
+    const group = await within(set).findByRole('group', { name: '压缩时的钩子' })
+    const box = within(group).getByLabelText(/压缩上下文时，提醒它保留要紧的内容/)
+    expect(box).not.toBeChecked()
+    expect(within(group).getByText(/默认关/)).toBeVisible()
+    // 没改就不提交这一项
+    await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(writes(requests)).toHaveLength(1))
+    expect(await writes(requests)[0]!.clone().json()).not.toHaveProperty('hooks_enabled')
+    const save = await within(set).findByRole('button', { name: '保存设置' })
+    await fireEvent.click(within(set).getByLabelText(/压缩上下文时，提醒它保留要紧的内容/))
+    await fireEvent.click(save)
+    await waitFor(() => expect(writes(requests)).toHaveLength(2))
+    expect(await writes(requests)[1]!.clone().json()).toMatchObject({ hooks_enabled: true })
+  })
+
+  it('shows no hooks switch for a manager that does not know it', async () => {
+    setup('owner', async r => (path(r) === `${base}/status` ? Response.json({ ...status(), settings }) : undefined))
+    await openApp('/llm_bridge?view=manage')
+    const set = await openTab('设置')
+    await within(set).findByRole('button', { name: '保存设置' })
+    expect(within(set).queryByRole('group', { name: '压缩时的钩子' })).toBeNull()
+  })
+
   it('saves settings within the backend limits and environments in dev mode with an exec warning', async () => {
     const requests = setup('owner', async r => {
       if (path(r) === `${base}/settings`) return Response.json({ ...settings, ...(await r.clone().json()) })

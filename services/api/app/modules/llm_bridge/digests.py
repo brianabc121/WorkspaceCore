@@ -163,12 +163,13 @@ def render(
         f"> 一共 {total} 个回合；压缩过 {int(context.get('compactions') or 0)} 次；"
         f"这次整理：{REASONS.get(reason, reason)}（{_when(material.get('generated_at'))}）",
     ]
+    decided, open_items, source = platform_summary(material.get("summaries"))
+    no_summary = "（平台压缩会话时写出的摘要会并进这里；目前还没有。下面的回合清单是原始记录。）"
+    unresolved = "\n".join(part for part in (open_items, "\n".join(failed)) if part)
     sections = [
         "\n".join(header),
-        "## 结论和决定\n\n（平台压缩会话时写出的摘要会并进这里；目前还没有。"
-        "下面的回合清单是原始记录。）",
-        "## 没解决的问题\n\n"
-        + ("\n".join(failed) if failed else "（记录里没有失败或中断的回合。）"),
+        "## 结论和决定\n\n" + (f"{source}\n\n{decided}" if decided else no_summary),
+        "## 没解决的问题\n\n" + (unresolved or "（记录里没有失败或中断的回合。）"),
         "## 涉及的文件和命令\n\n"
         + (
             "\n".join(
@@ -194,6 +195,56 @@ def render(
         if len(body.encode()) <= DIGEST_MAX_BYTES or not blocks:
             return body, total
         blocks.pop(0)
+
+
+_HEADINGS = {
+    "decided": ("结论和决定", "结论与决定", "决定"),
+    "open": ("没解决的问题", "未解决的问题", "待解决"),
+    "other": ("涉及的文件和命令", "涉及的文件", "后续要做的", "后续"),
+}
+
+
+def _heading(line: str) -> tuple[str, str] | None:
+    """这一行是不是某一栏的标题：返回（栏，标题后面同一行的内容）。"""
+    for key, names in _HEADINGS.items():
+        for name in names:
+            if line.startswith(name):
+                return key, line[len(name) :].lstrip("：: ").strip()
+    return None
+
+
+def platform_summary(summaries: Any) -> tuple[str, str, str]:
+    """平台压缩时写的摘要（第 4 期，钩子留下的；管理器给最近 3 次）
+    →（结论和决定，没解决的问题，出处说明）。
+
+    压缩前的钩子请平台按四栏写；能按栏拆开就拆，拆不开就整段放进“结论和决定”。
+    摘要是模型写的：先过密钥扫描，命中就不用；照样标“未确认”。"""
+    items = [
+        s for s in summaries or [] if isinstance(s, dict) and isinstance(s.get("summary"), str)
+    ]
+    if not items:
+        return "", "", ""
+    latest = items[-1]
+    text = str(latest["summary"]).strip()
+    if secret_scan.scan(text):
+        return "", "", ""
+    sections: dict[str, list[str]] = {"decided": [], "open": [], "other": []}
+    current = "decided"
+    for raw in text.splitlines():
+        found = _heading(raw.strip().lstrip("#*-0123456789.、 ").strip())
+        if found is not None:
+            current, rest = found
+            if rest:
+                sections[current].append(rest)
+        elif raw.strip():
+            sections[current].append(raw.rstrip())
+    how = "手动" if latest.get("trigger") == "manual" else "自动"
+    when = _when(latest.get("at"))
+    source = f"*以下摘自平台压缩上下文时写的摘要（{how}压缩，{when}），未经确认。*"
+    decided = "\n".join(sections["decided"]).strip()
+    if not decided and not sections["open"]:
+        decided = text
+    return decided, "\n".join(sections["open"]).strip(), source
 
 
 @dataclass
@@ -492,6 +543,35 @@ async def purge_follow(db: AsyncSession, settings: Settings, bridge: LlmBridge) 
     if done:
         await db.commit()
     return done
+
+
+async def write_for(
+    db: AsyncSession,
+    settings: Settings,
+    runtime: ConnectorRuntime,
+    bridge_id: uuid.UUID,
+    session_id: str,
+    reason: str = "continued",
+) -> LlmBridgeDigest | None:
+    """人或智能体“带着摘要另开会话”时整理一次纪要（5.2 的时机之一）：同样要 3 个以上回合、
+    纪要开着；连不上、写不了就算了（不影响另开会话本身）。"""
+    from app.modules.llm_bridge import jobs  # jobs 导入了本模块
+
+    try:
+        await jobs.sync_bridge(db, settings, runtime, bridge_id)
+        bridge = await db.get(LlmBridge, bridge_id)
+        row = await db.scalar(
+            select(LlmBridgeSession).where(
+                LlmBridgeSession.bridge_id == bridge_id, LlmBridgeSession.session_id == session_id
+            )
+        )
+        if bridge is None or row is None or not enabled(bridge) or row.turns_total < MIN_TURNS:
+            return None
+        return await write(db, settings, runtime, bridge, row, reason)
+    except (BridgeCallError, ConnectorError, ApiError) as error:
+        await db.rollback()
+        logger.info("digest on continue for %s skipped: %s", session_id, type(error).__name__)
+        return None
 
 
 async def tick(

@@ -56,3 +56,21 @@
 - 钩子（第 4 期）：只给 Claude Code 和 CodeBuddy Code 装，经 `--settings` 按回合带上；Codex 的钩子位置没核实，不装。
   CodeBuddy 的 PreCompact 输出是否生效没核实：仍然装上（无害），以有没有效果为准。整个钩子功能带开关，默认关，
   在真实账号上验证后再打开（方案第 8 节）。
+
+## 5. 第 4 期的实现（T-0260）
+
+- 钩子只装两个：`PreCompact`（输出固定的“要保留什么、摘要按四栏写”）和 `PostCompact`（把输入里的 `compact_summary` 写进
+  管理器数据卷 `hooks/summaries/<官方会话编号>.jsonl`，回合结束后管理器取走、存进自己的 `compaction_summaries` 表）。
+  脚本是镜像里固定的 `bridge/hooks.py`，启动时原样复制到数据卷，官方程序用 `<python> -I hook.py <事件>` 调用；
+  不读模型给的内容当命令、本身不联网、出任何错都退出码 0（不会阻止压缩）。
+- **没有装 `SessionStart`（`source=compact`）钩子。** 方案 4.3 第三行“压缩后重新放回参考资料”改用不依赖钩子的办法：
+  固定带着的笔记（方案 6.3）在对话会话里随 `--append-system-prompt`（Claude / CodeBuddy，每个回合都带）或
+  `developerInstructions`（Codex 线程）给出，系统提示不参与压缩；开发会话写进工作目录的 `CLAUDE.md` / `CODEBUDDY.md` / `AGENTS.md`
+  里有标记的一段，官方程序每次都会读这些记忆文件。这样三家都不用等钩子验证，也不受“钩子开关”影响。
+- Codex 不装钩子（配置位置没核实）。Codex 会话的纪要和“带着摘要另开会话”照旧：用管理器的记录，或先问一次摘要。
+- 钩子开关 `hooks_enabled` 默认关。打开后只影响之后开始的回合（`--settings` 按回合带上）。
+- 平台写的摘要用在两处：会话纪要的“结论和决定”“没解决的问题”两栏（工作台按四栏标题拆开，拆不开整段放进“结论和决定”；
+  像有密钥的整段不用）；“带着摘要另开会话”时，上次清空之后平台压缩过、留下了摘要，就直接用它，不再花钱问（结果里 `summary_from=compaction`）。
+- 仍未核实、要在真实账号上看的：Claude Code 的 `PostCompact` 实际是否每次都给 `compact_summary`；CodeBuddy 的 `PreCompact`
+  输出是否并进压缩说明、`PostCompact` 的输入里有没有 `session_id`；两家在 `--settings` 里同时带钩子时会不会与用户自己的设置冲突。
+  核对通过后再在管理器设置里打开。

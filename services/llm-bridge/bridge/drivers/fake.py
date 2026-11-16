@@ -51,6 +51,15 @@ class FakeDriver(Driver):
         self.quota_reports_reset = True
         self.current_quota: list[dict[str, Any]] = []
         self.can_query_quota = False
+        # 手动压缩：compactable=False 时模拟平台没有压缩；收到的“要保留什么”记在这里
+        self.compactable = True
+        self.compact_instructions: list[str] = []
+        # 每一回合收到的 spec（看自动压缩的触发点有没有带上）
+        self.specs: list[SessionSpec] = []
+        # 以这段文字开头的提问都失败（测试“没写出摘要”这类情况）
+        self.fail_prefix: str | None = None
+        # 压缩后钩子留下的摘要（打开了钩子才有）：原生会话号 → 摘要
+        self.summaries: dict[str, list[dict[str, Any]]] = {}
 
     def supports(self, mode: Mode) -> bool:
         return mode in ("chat", "dev")
@@ -70,6 +79,9 @@ class FakeDriver(Driver):
 
     async def run_turn(self, spec: SessionSpec, text: str, sink: EventSink) -> TurnOutcome:
         assert spec.native_id is not None  # noqa: S101
+        self.specs.append(spec)
+        if self.fail_prefix and text.startswith(self.fail_prefix):
+            raise DriverError("platform_error", "模拟的失败")
         cancel = self._cancel.setdefault(spec.native_id, asyncio.Event())
         cancel.clear()
         self.running += 1
@@ -153,6 +165,7 @@ class FakeDriver(Driver):
                     "compacted", {"trigger": trigger, "pre_tokens": 8000, "post_tokens": 500}
                 )
                 self.history[spec.native_id] = []
+                self._summarize(spec, trigger)
             history = self.history.setdefault(spec.native_id, [])
             history += [
                 Message("user", text, time.time()),
@@ -179,6 +192,30 @@ class FakeDriver(Driver):
             )
         finally:
             self.running -= 1
+
+    async def compact(self, spec: SessionSpec, instructions: str, sink: EventSink) -> TurnOutcome:
+        """模拟手动压缩：compactable 为 False 时平台“没有压缩”（像没核实的 CodeBuddy）。"""
+        self.compact_instructions.append(instructions)
+        if not self.compactable:
+            return TurnOutcome(text="")
+        await sink("compacted", {"trigger": "manual", "pre_tokens": 8000, "post_tokens": 400})
+        self.history[spec.native_id or ""] = []
+        self._summarize(spec, "manual")
+        return TurnOutcome(text="", compactions=1, context=ContextUsage(400, 10000))
+
+    def _summarize(self, spec: SessionSpec, trigger: str) -> None:
+        """模拟压缩后钩子：打开了钩子时留下平台写的摘要（按四栏写）。"""
+        if spec.hooks:
+            self.summaries.setdefault(spec.native_id or "", []).append(
+                {
+                    "at": time.time(),
+                    "trigger": trigger,
+                    "summary": "结论和决定：先备份再升级\n没解决的问题：回滚脚本还没写",
+                }
+            )
+
+    def take_summaries(self, native_id: str) -> list[dict[str, Any]]:
+        return self.summaries.pop(native_id, [])
 
     async def quota(self) -> list[dict[str, Any]] | None:
         if not self.can_query_quota:
