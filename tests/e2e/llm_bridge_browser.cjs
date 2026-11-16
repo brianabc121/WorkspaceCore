@@ -102,6 +102,15 @@ const card = (page, name) => page.getByRole('article', { name: `MCP 管理器：
 const panel = (page) => page.getByRole('tabpanel', { name: '平台与账号' })
 const control = (page) => panel(page).getByRole('group', { name: '控制的平台' })
 // 卡片上“控制的平台”那几行的文字，例如 ['Claude未登录', 'CodeBuddy…']
+// 选中这个管理器，打开右边详情里的“管理操作”（修改、停用、删除等都在里面），返回右边的详情
+async function manage(page, name) {
+  await card(page, name).getByRole('button', { name: `查看 MCP 管理器：${name}` }).click()
+  const detail = page.getByRole('region', { name: `MCP 管理器：${name}`, exact: true })
+  await detail.waitFor()
+  const menu = detail.getByRole('button', { name: '管理操作' })
+  if ((await menu.count()) && (await menu.getAttribute('aria-expanded')) !== 'true') await menu.click()
+  return detail
+}
 async function platformsOn(page, name) {
   const list = card(page, name).getByRole('list', { name: `${name}控制的平台` })
   await list.waitFor({ timeout: 60000 })
@@ -165,7 +174,7 @@ async function main() {
 
     // ---------------------------------------------------------------- 添加 1 号：只控制 Claude / CodeBuddy
     await page.goto(`${base}/llm_bridge?view=manage`)
-    await page.getByRole('heading', { name: '大模型客户端管理', level: 1 }).waitFor()
+    await page.getByRole('heading', { name: '管理器与账号', level: 2 }).waitFor()
     await sidebar(page).getByRole('link', { name: '大模型客户端', exact: true }).waitFor()
     await page.getByText('还没有 MCP 管理器。').waitFor()
     let form = await addManager(page, { name: ONE, url: bridgeUrl, token: 'too-short', uncheck: ['ChatGPT', 'Codex'] })
@@ -203,7 +212,7 @@ async function main() {
     await cloud.getByText('不可用').waitFor()
     await cloud.getByText('接口桩').waitFor()
     check(await channels.getByRole('row').filter({ hasText: 'Codex' }).count() === 0, '通道表不应列出 1 号不控制的平台')
-    await page.getByRole('group', { name: '回合' }).getByText('排队中 0').waitFor()
+    await page.getByRole('group', { name: '运行概览' }).getByText('排队中 0').waitFor()
     const refusedLogin = await api(page, workspace, 'POST', `/api/v1/llm_bridge/bridges/${oneId}/accounts/openai/login`, { method: 'api_key', api_key: FAKE_KEY })
     check(refusedLogin.status === 409, `1 号不控制 ChatGPT / Codex，后端也要拒绝在它上面登录：${JSON.stringify(refusedLogin)}`)
     step(`1 号的“平台与账号”：只有 Claude（${claudeState.trim()}）和 CodeBuddy 的账号与通道；不控制的平台后端也拒绝登录`)
@@ -305,7 +314,7 @@ async function main() {
     step('Claude：订阅登录要先勾选风险确认（没确认时页面不能提交、后端 403）；确认后可以继续')
 
     // ---------------------------------------------------------------- 设置
-    await tab(page, '设置').click()
+    await tab(page, '运行设置').click()
     form = page.getByRole('form', { name: 'MCP 管理器设置' })
     await form.getByText('已确认').waitFor()
     await form.getByLabel('每个平台同时进行的会话数').fill('99')
@@ -315,7 +324,7 @@ async function main() {
     await form.getByRole('button', { name: '保存设置' }).click()
     await page.getByText('设置已保存。').waitFor()
     await page.reload()
-    await tab(page, '设置').click()
+    await tab(page, '运行设置').click()
     await page.waitForFunction(() => document.querySelector('#lb-set-concurrency')?.value === '4')
     check((await statusOf(oneId)).platforms.join() === 'claude,workbuddy', '改别的设置不应动控制的平台')
     step('设置：超出范围被拦下；每个平台的会话数改成 4，刷新后还在，控制的平台不受影响')
@@ -399,7 +408,7 @@ async function main() {
     step(`实例权限：默认未启用；启用并勾选“新建会话和发送”、只允许 Codex；允许的 MCP 管理器默认全部，取消后${two ? '只留 2 号' : '一个都不留时有提示'}；关掉后权限收回、选择保留`)
 
     // ---------------------------------------------------------------- 令牌改错：原地提示，不当成页面出错
-    await card(page, ONE).getByRole('button', { name: `修改${ONE}` }).click()
+    await (await manage(page, ONE)).getByRole('button', { name: `修改${ONE}` }).click()
     form = page.getByRole('form', { name: '修改 MCP 管理器' })
     check(await form.getByRole('group', { name: '控制的平台' }).count() === 0, '修改时不在这里改控制的平台')
     await form.getByLabel('管理令牌').fill('x'.repeat(40))
@@ -409,7 +418,7 @@ async function main() {
     await tab(page, '平台与账号').click()
     await panel(page).getByRole('alert').filter({ hasText: '连不上这个 MCP 管理器' }).filter({ hasText: '令牌' }).waitFor()
     await card(page, ONE).getByRole('alert').filter({ hasText: '令牌' }).waitFor()
-    await card(page, ONE).getByRole('button', { name: `修改${ONE}` }).click()
+    await (await manage(page, ONE)).getByRole('button', { name: `修改${ONE}` }).click()
     form = page.getByRole('form', { name: '修改 MCP 管理器' })
     await form.getByLabel('管理令牌').fill(bridgeToken)
     await form.getByRole('button', { name: '保存' }).click()
@@ -447,7 +456,7 @@ async function main() {
     await account(phone.page, WORKBUDDY).getByText('未登录').waitFor({ timeout: 60000 })
     await platformsOn(phone.page, ONE)
     check(await noHorizontalScroll(phone.page), '手机宽度下页面不应横向滚动')
-    for (const name of ['设置', '开发环境', '会话']) {
+    for (const name of ['运行设置', '开发环境', '会话']) {
       await tab(phone.page, name).click()
       await phone.page.getByRole('tabpanel', { name }).waitFor()
       check(await noHorizontalScroll(phone.page), `手机宽度下“${name}”不应横向滚动`)
@@ -456,7 +465,7 @@ async function main() {
 
     // ---------------------------------------------------------------- 停用与删除
     acceptNext(page)
-    await card(page, ONE).getByRole('button', { name: `停用${ONE}` }).click()
+    await (await manage(page, ONE)).getByRole('button', { name: `停用${ONE}` }).click()
     await page.getByText(`已停用「${ONE}」。`).waitFor()
     await page.getByRole('note').filter({ hasText: '这个 MCP 管理器已停用' }).waitFor()
     if (two) {
@@ -464,7 +473,7 @@ async function main() {
       const restoreTwo = await api(page, workspace, 'PUT', `/api/v1/llm_bridge/bridges/${twoId}/settings`, { platforms: ALL_PLATFORMS })
       check(restoreTwo.status === 200, `没能把 2 号改回控制全部平台：${JSON.stringify(restoreTwo)}`)
       acceptNext(page)
-      await card(page, TWO).getByRole('button', { name: `删除${TWO}` }).click()
+      await (await manage(page, TWO)).getByRole('button', { name: `删除${TWO}` }).click()
       await page.getByText(`已删除「${TWO}」。`).waitFor()
       await waitGrant((g) => Array.isArray(g.bridge_ids) && g.bridge_ids.length === 0, '删除 2 号后，只允许用它的实例应一个都不能用')
     }
@@ -472,7 +481,7 @@ async function main() {
     const restore = await api(page, workspace, 'PUT', `/api/v1/llm_bridge/bridges/${oneId}/settings`, { platforms: ALL_PLATFORMS, concurrency: 2, claude_subscription_ack: false })
     check(restore.status === 200, `没能把 1 号改回控制全部平台：${JSON.stringify(restore)}`)
     acceptNext(page)
-    await card(page, ONE).getByRole('button', { name: `删除${ONE}` }).click()
+    await (await manage(page, ONE)).getByRole('button', { name: `删除${ONE}` }).click()
     await page.getByText(`已删除「${ONE}」。`).waitFor()
     await page.getByText('还没有 MCP 管理器。').waitFor()
     step(`停用后有提示；${two ? '删除 2 号后只允许用它的实例一个都不能用；' : ''}删除后回到空状态`)
@@ -504,7 +513,7 @@ async function main() {
     check(retoken.status === 409 && retoken.body.error.code === 'BRIDGE_MANAGED', `本机管理器的令牌不能在页面上改：${JSON.stringify(retoken)}`)
     await api(page, workspace, 'PUT', `/api/v1/llm_bridge/bridges/${localId}/settings`, { platforms: ALL_PLATFORMS })
     acceptNext(page)
-    await card(page, '本机').getByRole('button', { name: '删除本机' }).click()
+    await (await manage(page, '本机')).getByRole('button', { name: '删除本机' }).click()
     await page.getByText('已删除「本机」。').waitFor()
     step('本机部署：默认选中“本机”，不选服务器、不填地址令牌密码，点一下就添加好并连得上；页面和接口给出各平台的连通性与延迟；只能添加一次，令牌不能在页面上改')
 

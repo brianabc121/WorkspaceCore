@@ -44,6 +44,12 @@ const statusProblem = computed(() => {
   const data = status.data.value
   return data && !data.reachable ? `这个 MCP 管理器连不上${data.error ? `：${data.error}` : '。'}` : ''
 })
+// 左栏管理器旁边的连接状态
+const connection = computed(() => {
+  if (manager.value && !manager.value.enabled) return 'off' as const
+  if (statusProblem.value) return 'down' as const
+  return status.data.value?.reachable ? 'ok' as const : 'checking' as const
+})
 const filter = ref<SessionFilter>({ q: '', platform: null, status: 'active' })
 // 列表先读 100 个；“加载更多”读到 200 个（接口一次最多这么多），再多就到“会话记录”里找
 const pageSize = ref(100)
@@ -111,7 +117,7 @@ async function sync() {
         :loading="sessions.isPending.value" :error="sessions.data.value ? null : sessions.error.value" :filter="filter" :selected="sessionId"
         :can-create="!!manager?.enabled" :syncing="syncing" :sync-notice="syncNotice" :sync-error="syncError"
         :groups="groups.data.value ?? []" :selected-group="groupId" :can-compare="list.some(b => b.enabled)"
-        :more="sessions.data.value?.next_offset == null ? null : pageSize < 200 ? 'load' : 'records'" @more="pageSize = 200"
+        :more="sessions.data.value?.next_offset == null ? null : pageSize < 200 ? 'load' : 'records'" :connection="connection" @more="pageSize = 200"
         @update:manager-id="pickManager($event)" @update:filter="filter = $event" @select="open" @create="router.push(here({ new: '1' }))" @sync="sync" @retry="sessions.refetch()"
         @compare="router.push(here({ compare: '1' }))" @open-group="openGroup($event)"
       />

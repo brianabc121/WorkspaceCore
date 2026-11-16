@@ -1,4 +1,4 @@
-import { computed, type Ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../../services/api'
@@ -245,9 +245,9 @@ export function useLlmChat(scope: string) {
         params: { ...at(bridge), query: { q: q.slice(0, 2000), ...(session ? { session_id: session } : {}), ...(limit ? { limit } : {}) } }, signal,
       }))
     },
-    useDigests: (state: Ref<string | null>, wanted: Ref<boolean>) => useQuery({
-      queryKey: computed(() => key('digests', state.value)), enabled: computed(() => active() && wanted.value),
-      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/digests', { params: { header, query: { limit: 200, ...(state.value ? { state: state.value } : {}) } }, signal })),
+    useDigests: (state: Ref<string | null>, wanted: Ref<boolean>, bridge: Ref<string | null> = ref(null)) => useQuery({
+      queryKey: computed(() => key('digests', state.value, bridge.value)), enabled: computed(() => active() && wanted.value),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/digests', { params: { header, query: { limit: 200, ...(state.value ? { state: state.value } : {}), ...(bridge.value ? { bridge_id: bridge.value } : {}) } }, signal })),
     }),
     /** 会话纪要的操作：关掉 / 打开、现在整理、转成正式笔记、删除（进回收站） */
     async digest(bridge: string, session: string, action: 'on' | 'off' | 'write' | 'promote' | 'delete') {
@@ -374,6 +374,26 @@ export function splitText(text: string): { code: boolean; text: string; lang?: s
 }
 
 /** 会话按最后活动的日子分组：今天 / 昨天 / 更早 */
+/** 会话列表里的时间：今天只写几点几分，昨天写“昨天 16:28”，更早的写月日（完整时间放在提示里） */
+export function listTime(at: number, now = new Date()): string {
+  const when = new Date(at * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const clock = `${pad(when.getHours())}:${pad(when.getMinutes())}`
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000
+  if (at >= start) return clock
+  if (at >= start - 86400) return `昨天 ${clock}`
+  return when.getFullYear() === now.getFullYear() ? `${when.getMonth() + 1}月${when.getDate()}日` : `${when.getFullYear()}/${when.getMonth() + 1}/${when.getDate()}`
+}
+
+/** 执行记录里的时间：今天写到秒，别的日子写月日和几点几分 */
+export function turnTime(at: number, now = new Date()): string {
+  const when = new Date(at * 1000)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000
+  const clock = `${pad(when.getHours())}:${pad(when.getMinutes())}`
+  return at >= start ? `${clock}:${pad(when.getSeconds())}` : `${when.getMonth() + 1}月${when.getDate()}日 ${clock}`
+}
+
 export function groupByDay(sessions: ChatSession[], now = new Date()): { name: string; items: ChatSession[] }[] {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000
   const groups = [{ name: '今天', items: [] as ChatSession[] }, { name: '昨天', items: [] as ChatSession[] }, { name: '更早', items: [] as ChatSession[] }]

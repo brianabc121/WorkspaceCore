@@ -104,7 +104,7 @@ const spent = computed(() => {
 </script>
 
 <template>
-  <ManagementPage title="会话记录" description="所有 MCP 管理器上的会话：智能体开的、人在聊天页开的、官方程序里已有的。这里只有“有哪些会话”，对话内容仍然只在各个管理器里；点一行进聊天页看全部内容。">
+  <ManagementPage embedded class="lb-page" title="会话记录" description="所有 MCP 管理器上的会话：智能体开的、人在聊天页开的、官方程序里已有的。这里只有“有哪些会话”，对话内容仍然只在各个管理器里；点一行进聊天页看全部内容。">
     <ManagementSection title="查找会话" description="列表每分钟自动同步一次。">
       <template #actions>
         <button type="button" class="secondary-button" :disabled="syncing" @click="sync"><RefreshCw aria-hidden="true" />{{ syncing ? '正在同步…' : '现在同步' }}</button>

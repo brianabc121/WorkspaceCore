@@ -127,11 +127,22 @@ async function main() {
     await page.goto(`${base}/llm_bridge?view=manage`)
     const card = page.getByRole('article', { name: `MCP 管理器：${name}` })
     await card.waitFor({ timeout: 30000 })
-    check(await until(async () => new RegExp(`部署在${kindName}「`).test(await card.textContent()), 30000), `卡片应写明部署在哪台${kindName}：${await card.textContent()}`)
-    check(await card.getByRole('button', { name: `重新部署${name}` }).count() === 1 && await card.getByRole('button', { name: `重启${name}` }).count() === 1
-      && await card.getByRole('button', { name: `卸载${name}` }).count() === 1 && await card.getByRole('button', { name: `删除${name}` }).count() === 0,
+    // 选中它，打开右边详情里的“管理操作”：重新部署、重启、卸载都在那里
+    const detail = page.getByRole('region', { name: `MCP 管理器：${name}`, exact: true })
+    const manage = async () => {
+      await card.getByRole('button', { name: `查看 MCP 管理器：${name}` }).click()
+      await detail.waitFor({ timeout: 30000 })
+      const menu = detail.getByRole('button', { name: '管理操作' })
+      if ((await menu.getAttribute('aria-expanded')) !== 'true') await menu.click()
+      return detail
+    }
+    check(await until(async () => new RegExp(`${kindName}「`).test(await card.textContent()), 30000), `卡片应写明部署在哪台${kindName}：${await card.textContent()}`)
+    await manage()
+    check(await until(async () => new RegExp(`部署在${kindName}「`).test(await detail.textContent()), 30000), `详情应写明部署在哪台${kindName}、网络方式：${await detail.textContent()}`)
+    check(await detail.getByRole('button', { name: `重新部署${name}` }).count() === 1 && await detail.getByRole('button', { name: `重启${name}` }).count() === 1
+      && await detail.getByRole('button', { name: `卸载${name}` }).count() === 1 && await detail.getByRole('button', { name: `删除${name}` }).count() === 0,
     '工作台部署的管理器应有 重新部署 / 重启 / 卸载，没有普通的“删除”')
-    step('管理器卡片写明部署位置和网络方式，有重新部署、重启、卸载')
+    step('管理器卡片写明部署在哪台服务器，详情写明网络方式；管理操作里有重新部署、重启、卸载')
 
     // ---------------------------------------------------------------- 服务器页面上看得到它
     await page.goto(serverPage)
@@ -149,7 +160,7 @@ async function main() {
 
     // ---------------------------------------------------------------- 重启、卸载
     const operate = async (action, title, expected, prepare) => {
-      await card.getByRole('button', { name: `${action}${name}` }).click()
+      await (await manage()).getByRole('button', { name: `${action}${name}` }).click()
       const dialog = page.getByRole('form', { name: `${title}${name}` })
       await dialog.waitFor({ timeout: 30000 })
       if (prepare) await prepare(dialog)
@@ -169,7 +180,7 @@ async function main() {
 
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(`${base}/llm_bridge?view=manage`)
-    await page.getByRole('heading', { name: '大模型客户端管理' }).waitFor({ timeout: 30000 })
+    await page.getByRole('heading', { name: '管理器与账号' }).waitFor({ timeout: 30000 })
     check(await noHorizontalScroll(page), '390px 宽度下管理页不应出现横向滚动')
     step('管理页在 390px 宽度下无横向滚动')
 

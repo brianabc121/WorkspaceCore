@@ -67,6 +67,14 @@ function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, wo
 }
 const writes = (requests: Request[]) => requests.filter(r => r.method !== 'GET' && path(r).startsWith(api))
 const card = (name: string) => screen.findByRole('article', { name: `MCP 管理器：${name}` })
+/** 选中这个管理器，打开右边详情里的“管理操作”（只读时没有），返回右边的详情：部署在哪儿、提示和操作都在那里 */
+async function manage(name: string) {
+  await fireEvent.click(within(await card(name)).getByRole('button', { name: `查看 MCP 管理器：${name}` }))
+  const detail = await screen.findByRole('region', { name: `MCP 管理器：${name}` })
+  const menu = within(detail).queryByRole('button', { name: '管理操作' })
+  if (menu && menu.getAttribute('aria-expanded') !== 'true') await fireEvent.click(menu)
+  return detail
+}
 async function openDeployForm() {
   await fireEvent.click(await screen.findByRole('button', { name: '添加 MCP 管理器' }))
   return screen.findByRole('form', { name: '一键部署 MCP 管理器' })
@@ -177,8 +185,11 @@ describe('一键部署 MCP 管理器', () => {
     expect(await screen.findByText(/已部署并添加「2 号」。/, {}, { timeout: 5000 })).toBeVisible()
     const added = await card('2 号')
     expect(added).toHaveAttribute('aria-current', 'true')
-    expect(within(added).getByText('部署在智能体服务器「机房一号」 · 经 SSH 通道（服务器本机端口 18787）')).toBeVisible()
-    expect(within(added).queryByText('http://127.0.0.1:18787')).not.toBeInTheDocument()
+    // 卡片写部署在哪台服务器；右边详情写全（服务器和网络方式），都不写内部地址
+    expect(within(added).getByText('智能体服务器「机房一号」')).toBeVisible()
+    const detail = screen.getByRole('region', { name: 'MCP 管理器：2 号' })
+    expect(within(detail).getByText('部署在智能体服务器「机房一号」 · 经 SSH 通道（服务器本机端口 18787）')).toBeVisible()
+    for (const where of [added, detail]) expect(within(where).queryByText('http://127.0.0.1:18787')).not.toBeInTheDocument()
     const finished = screen.getByRole('region', { name: '部署「2 号」的进度' })
     expect(within(finished).getByText(/部署完成，已经登记到工作台。/)).toBeVisible()
     expect(finished).toHaveTextContent('经 SSH 通道')
@@ -317,7 +328,7 @@ describe('一键部署 MCP 管理器', () => {
 
     setup('admin', { bridges: [bridge(), managed()] })
     await openApp(`/llm_bridge?view=manage&deploy=agent_server:${SERVER}`)
-    const deployed = await card('2 号')
+    const deployed = await manage('2 号')
     expect(within(deployed).getByText('部署在智能体服务器「机房一号」 · 经 SSH 通道（服务器本机端口 18787）')).toBeVisible()
     for (const name of ['重新部署2 号', '重启2 号', '卸载2 号', '改名2 号']) expect(within(deployed).queryByRole('button', { name })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '添加 MCP 管理器' })).not.toBeInTheDocument()
@@ -350,14 +361,15 @@ describe('工作台部署的 MCP 管理器', () => {
       return job({ id: ids[kind]!, kind, status: 'succeeded', bridge_id: kind === 'uninstall' ? null : NEW, mode: 'tunnel', finished_at: at, steps: steps[kind]! })
     }))
     await openApp('/llm_bridge?view=manage')
-    const deployed = await card('2 号')
+    // 手动添加的：卡片上写地址；管理操作里是修改、删除，没有重新部署这些
+    expect(within(await card('1 号')).getByText('http://llm-bridge:8787')).toBeVisible()
+    const manual = await manage('1 号')
+    for (const name of ['删除1 号', '修改1 号']) expect(within(manual).getByRole('button', { name })).toBeVisible()
+    for (const name of ['重新部署1 号', '重启1 号', '卸载1 号', '改名1 号']) expect(within(manual).queryByRole('button', { name })).not.toBeInTheDocument()
+    const deployed = await manage('2 号')
     // 工作台部署的：重新部署、重启、卸载、改名；没有“删除”和“修改”（地址和令牌由部署管理）
     expect(within(deployed).getByRole('note')).toHaveTextContent('工作台带的版本比它新：可以“重新部署”来升级')
     for (const name of ['删除2 号', '修改2 号']) expect(within(deployed).queryByRole('button', { name })).not.toBeInTheDocument()
-    const manual = screen.getByRole('article', { name: 'MCP 管理器：1 号' })
-    for (const name of ['删除1 号', '修改1 号']) expect(within(manual).getByRole('button', { name })).toBeVisible()
-    for (const name of ['重新部署1 号', '重启1 号', '卸载1 号', '改名1 号']) expect(within(manual).queryByRole('button', { name })).not.toBeInTheDocument()
-    expect(within(manual).getByText('http://llm-bridge:8787')).toBeVisible()
 
     // 重新部署：先说明会发生什么，确认后才发请求；这台服务器不要 sudo 密码，不问
     await fireEvent.click(within(deployed).getByRole('button', { name: '重新部署2 号' }))
@@ -370,7 +382,7 @@ describe('工作台部署的 MCP 管理器', () => {
     expect(screen.queryByRole('form', { name: '重新部署2 号' })).not.toBeInTheDocument()
 
     // 重启
-    await fireEvent.click(within(await card('2 号')).getByRole('button', { name: '重启2 号' }))
+    await fireEvent.click(within(await manage('2 号')).getByRole('button', { name: '重启2 号' }))
     const restart = await screen.findByRole('form', { name: '重启2 号' })
     expect(within(restart).getByText(/正在进行的回合会中断/)).toBeVisible()
     await fireEvent.click(within(restart).getByRole('button', { name: '重启' }))
@@ -379,7 +391,7 @@ describe('工作台部署的 MCP 管理器', () => {
     expect(within(progress).getByText('重启容器').closest('li')).toHaveAttribute('data-status', 'done')
 
     // 卸载：先说明会发生什么，可以选连数据卷一起删
-    await fireEvent.click(within(await card('2 号')).getByRole('button', { name: '卸载2 号' }))
+    await fireEvent.click(within(await manage('2 号')).getByRole('button', { name: '卸载2 号' }))
     const uninstall = await screen.findByRole('form', { name: '卸载2 号' })
     expect(within(uninstall).getByText(/停掉并删除这个容器、删除部署目录和转发密钥，再从工作台去掉它/)).toBeVisible()
     expect(within(uninstall).getByLabelText('只删除登记（服务器连不上时用）')).not.toBeChecked()
@@ -407,7 +419,7 @@ describe('工作台部署的 MCP 管理器', () => {
       return job({ id: kind === 'restart' ? JOB2 : JOB3, kind, name, status: 'succeeded', bridge_id: id, mode: 'tunnel', finished_at: at, steps: [step('connect', 'done')] })
     }))
     await openApp('/llm_bridge?view=manage')
-    const sudo = await card('2 号')
+    const sudo = await manage('2 号')
     expect(within(sudo).getByText('部署在容器服务器「容器一号」 · 经 SSH 通道（服务器本机端口 18787）')).toBeVisible()
 
     // 部署时记下了这台服务器用 Docker 要 sudo 密码：操作前先问一次，不填不发
@@ -429,7 +441,7 @@ describe('工作台部署的 MCP 管理器', () => {
     expect(await screen.findByText('重启完成：工作台已经重新连上它。')).toBeVisible()
 
     // 没记下、服务器却回答要密码（409）：弹出密码框，填了再发（换一个幂等号）
-    await fireEvent.click(within(await card('3 号')).getByRole('button', { name: '重新部署3 号' }))
+    await fireEvent.click(within(await manage('3 号')).getByRole('button', { name: '重新部署3 号' }))
     const redeploy = await screen.findByRole('form', { name: '重新部署3 号' })
     expect(within(redeploy).queryByLabelText('登录密码')).not.toBeInTheDocument()
     await fireEvent.click(within(redeploy).getByRole('button', { name: '重新部署' }))
@@ -462,7 +474,7 @@ describe('工作台部署的 MCP 管理器', () => {
     await openApp('/llm_bridge?view=manage')
 
     // 服务器已经从工作台移除：卡片写明，只提供“卸载（只删除登记）”
-    const lost = await card('3 号')
+    const lost = await manage('3 号')
     expect(within(lost).getByRole('note')).toHaveTextContent('服务器已从工作台移除')
     for (const name of ['重新部署3 号', '重启3 号', '卸载3 号', '删除3 号']) expect(within(lost).queryByRole('button', { name })).not.toBeInTheDocument()
     await fireEvent.click(within(lost).getByRole('button', { name: '卸载3 号（只删除登记）' }))
@@ -479,7 +491,7 @@ describe('工作台部署的 MCP 管理器', () => {
     await waitFor(() => expect(screen.queryByRole('article', { name: 'MCP 管理器：3 号' })).not.toBeInTheDocument())
 
     // 服务器连不上时：卸载里勾“只删除登记”——不连服务器，所以不问密码、也不能选删除数据卷
-    await fireEvent.click(within(await card('2 号')).getByRole('button', { name: '卸载2 号' }))
+    await fireEvent.click(within(await manage('2 号')).getByRole('button', { name: '卸载2 号' }))
     const second = await screen.findByRole('form', { name: '卸载2 号' })
     expect(within(second).getByLabelText('登录密码')).toBeVisible()
     await fireEvent.click(within(second).getByLabelText(/^同时删除数据卷/))
@@ -510,7 +522,7 @@ describe('工作台部署的 MCP 管理器', () => {
     await waitFor(() => expect(deployed).toHaveAttribute('aria-current', 'true'))
     expect(screen.getByRole('article', { name: 'MCP 管理器：1 号' })).not.toHaveAttribute('aria-current')
 
-    await fireEvent.click(within(deployed).getByRole('button', { name: '改名2 号' }))
+    await fireEvent.click(within(await manage('2 号')).getByRole('button', { name: '改名2 号' }))
     const form = await screen.findByRole('form', { name: '给 MCP 管理器改名' })
     expect(within(form).queryByLabelText('地址')).not.toBeInTheDocument()
     expect(within(form).queryByLabelText('管理令牌')).not.toBeInTheDocument()
