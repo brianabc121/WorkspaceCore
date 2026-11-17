@@ -595,6 +595,20 @@ class Engine:
             raise BridgeError("VALIDATION_FAILED", f"没有这个模型，可选：{', '.join(ids)}")
         return model
 
+    async def _check_effort(self, channel: Channel, model: str | None, effort: str) -> None:
+        """推理强度要是这个模型支持的；列表里没有的完整模型名（命令行类平台接受），按这个平台所有模型支持的算。
+        不支持推理强度的模型不接受强度。"""
+        models = await self.models(channel.platform, channel.mode)
+        listed = next((m for m in models if m["id"] == model), None)
+        allowed = (
+            list(listed["efforts"])
+            if listed is not None
+            else sorted({e for m in models for e in m["efforts"]})
+        )
+        if effort not in allowed:
+            hint = f"，可选：{', '.join(allowed)}" if allowed else "：这个模型不支持推理强度"
+            raise BridgeError("VALIDATION_FAILED", f"推理强度不对{hint}")
+
     async def _clone(self, config: Row, workdir: Path) -> None:
         url = str(config.get("repo_url") or "")
         if not url:
@@ -711,6 +725,8 @@ class Engine:
         if held is not None:
             options["pinned"], options["pinned_titles"] = held
         picked = await self._pick_model(channel, model)
+        if effort:
+            await self._check_effort(channel, picked, effort)
         from bridge.store import new_id
 
         session_id = new_id("bs")

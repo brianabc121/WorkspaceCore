@@ -413,6 +413,21 @@ async def test_create_with_request_id_is_idempotent(bridge: Bridge) -> None:
     assert bad["error"]["code"] == "VALIDATION_FAILED"
 
 
+async def test_create_checks_the_effort_against_the_model(bridge: Bridge) -> None:
+    """推理强度要是所选模型支持的；不支持推理强度的模型不接受强度。"""
+
+    async def create(model: str, effort: str) -> dict[str, Any]:
+        args = {**CHAT, "model": model, "effort": effort}
+        return await bridge.tool("c1", "llm_session_create", args)
+
+    made = await create("fake-2", "high")
+    assert "error" not in made, made
+    wrong = (await create("fake-2", "max"))["error"]
+    assert wrong["code"] == "VALIDATION_FAILED" and "low, high" in wrong["message"]
+    none = (await create("fake-1", "low"))["error"]
+    assert none["code"] == "VALIDATION_FAILED" and "不支持推理强度" in none["message"]
+
+
 async def test_send_says_when_it_is_a_takeover_and_progress_is_the_latest(bridge: Bridge) -> None:
     a = await _session(bridge, "owner")
     mine = await _send(bridge, "owner", a, "内容", "r1")

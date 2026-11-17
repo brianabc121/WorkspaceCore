@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { CheckCircle2, ChevronDown, CircleAlert, CircleDashed, CodeXml, FilePlus2, Info, LoaderCircle, MessageSquare, Minimize2, X } from '@lucide/vue'
 import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, credits, originName, platformName, quotaKind, recentUse, seconds, sourceTasks, type Quota, type QuotaWindow } from '../api'
-import { DIGEST_REASON, DIGEST_STATE, TURN_KIND, TURN_STATUS, contextText, ownerText, turnTime, type ChatDigest, type ChatMessage, type ChatSession } from './chatApi'
+import { DIGEST_REASON, DIGEST_STATE, TURN_KIND, TURN_STATUS, contextText, ownerText, sessionState, turnTime, type ChatDigest, type ChatMessage, type ChatSession } from './chatApi'
 import ChatPlatformIcon from './ChatPlatformIcon.vue'
 
 // 会话详情（效果图第二张）：“概览”里是会话（平台与用法）、开发环境、上下文用量、这个平台的账号额度、会话纪要（开关）、基本信息，
@@ -24,7 +24,8 @@ const turnIcon = (status?: string | null) => (status === 'completed' ? CheckCirc
 // 出处：智能体建这个会话时正在执行的任务（工作台记的，不保证就是引起这个会话的那一个）
 const tasks = computed(() => sourceTasks(props.session.source))
 const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
-const state = computed(() => (props.session.status === 'archived' ? { key: 'archived', text: '已归档' } : props.session.busy ? { key: 'busy', text: '正在回答' } : { key: 'active', text: '进行中' }))
+// 状态和会话列表里的一样：回合在回答或排队时“进行中”，做完了“已完成”（T-____：原来没在回答也写“进行中”）
+const state = computed(() => sessionState(props.session))
 const external = computed(() => props.session.origin === 'external')
 const mode = computed(() => `${MODES[props.session.mode] ?? props.session.mode}模式`)
 const env = computed(() => props.session.environment)

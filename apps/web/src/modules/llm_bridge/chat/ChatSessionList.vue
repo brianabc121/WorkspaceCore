@@ -4,11 +4,12 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { Archive, Columns3, MoreHorizontal, Plus, RefreshCw, Search, Undo2 } from '@lucide/vue'
 import DataState from '../../../components/DataState.vue'
 import { MODES, platformName, seconds, type Bridge, type Platform } from '../api'
-import { groupByDay, listTime, ownerText, type ChatGroup, type ChatSession, type PlatformChoice, type SessionFilter } from './chatApi'
+import { groupByDay, listTime, ownerText, sessionState, type ChatGroup, type ChatSession, type PlatformChoice, type SessionFilter } from './chatApi'
 import ChatPlatformIcon from './ChatPlatformIcon.vue'
 
 // 会话一栏（效果图第二栏）：标题和数量、“新建”，其余操作（多模型同问、同步官方会话、已归档）在“更多”菜单里；
-// 按标题搜索、按平台筛选，会话按“今天 / 昨天 / 更早”分组，每个会话一行标题、一行最近一次提问（旧版本的管理器没有，就写平台与用法）。
+// 按标题搜索、按平台筛选，会话按“今天 / 昨天 / 更早”分组，每个会话一行标题、一行最近一次提问（旧版本的管理器没有，就写平台与用法），
+// 第二行右边是状态：进行中 / 已完成（T-____）。
 // 最上面是“同问”：多模型同问的分组，可以跨管理器，所以不随选中的管理器和平台筛选变（按标题搜索、看已归档的照常）。
 // 窄屏没有管理器那一栏（pickManager）：在这里选管理器。只显示和发出事件，不发请求；数据由 LlmChatWorkspace 给。
 const props = defineProps<{
@@ -82,7 +83,7 @@ function second(s: ChatSession) {
         <div v-if="menuOpen" class="lc-menu" role="group" aria-label="会话列表的操作">
           <button type="button" :disabled="!canCompare" @click="pick(() => emit('compare'))"><Columns3 aria-hidden="true" />多模型同问</button>
           <button type="button" title="把官方程序里已有的会话同步到列表" :disabled="syncing || !managerId" @click="pick(() => emit('sync'))"><RefreshCw aria-hidden="true" />{{ syncing ? '正在同步…' : '同步官方会话' }}</button>
-          <button type="button" :aria-pressed="archived" @click="pick(() => set({ status: archived ? 'active' : 'archived' }))"><component :is="archived ? Undo2 : Archive" aria-hidden="true" />{{ archived ? '回到进行中的会话' : '看已归档的会话' }}</button>
+          <button type="button" :aria-pressed="archived" @click="pick(() => set({ status: archived ? 'active' : 'archived' }))"><component :is="archived ? Undo2 : Archive" aria-hidden="true" />{{ archived ? '回到未归档的会话' : '看已归档的会话' }}</button>
         </div>
       </div>
     </div>
@@ -96,7 +97,7 @@ function second(s: ChatSession) {
         <option v-for="c in choices" :key="c.id" :value="c.id">{{ platformName(c.id) }}{{ c.loggedIn ? '' : '（未登录）' }}</option>
       </select>
     </div>
-    <p v-if="archived" class="lc-archived-bar" role="status">正在看已归档的会话 <button type="button" class="asv-link" @click="set({ status: 'active' })">回到进行中</button></p>
+    <p v-if="archived" class="lc-archived-bar" role="status">正在看已归档的会话 <button type="button" class="asv-link" @click="set({ status: 'active' })">回到未归档</button></p>
     <p v-if="syncError" class="lc-note is-red lc-side-note" role="alert">{{ syncError }}</p>
     <p v-else-if="syncNotice" class="lc-note lc-side-note" role="status">{{ syncNotice }}</p>
 
@@ -125,7 +126,7 @@ function second(s: ChatSession) {
               <ChatPlatformIcon :platform="s.platform" :mode="s.mode" />
               <span class="lc-item-main">
                 <span class="lc-item-top"><strong>{{ s.title || '（没有标题）' }}</strong><time :datetime="new Date(s.updated_at * 1000).toISOString()" :title="seconds(s.updated_at)">{{ listTime(s.updated_at) }}</time></span>
-                <span class="lc-item-meta"><span class="lc-item-preview">{{ second(s) }}</span><span v-if="s.busy" class="lc-busy">回答中</span></span>
+                <span class="lc-item-meta"><span class="lc-item-preview">{{ second(s) }}</span><span class="lc-status" :data-state="sessionState(s).key">{{ sessionState(s).text }}</span></span>
               </span>
             </button>
           </li>

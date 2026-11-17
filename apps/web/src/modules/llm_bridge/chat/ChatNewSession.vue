@@ -4,7 +4,7 @@ import { RouterLink } from 'vue-router'
 import { ArrowLeft } from '@lucide/vue'
 import { ApiError } from '../../../services/api'
 import { MODES, SANDBOX, platformName, type Bridge, type Platform } from '../api'
-import { chatError, newRequestId, type ChatCreateBody, type ChatNoteHit, type LlmChatApi, type PlatformChoice } from './chatApi'
+import { chatError, effortName, newRequestId, type ChatCreateBody, type ChatNoteHit, type LlmChatApi, type PlatformChoice } from './chatApi'
 import ChatLocalFiles from './ChatLocalFiles.vue'
 import ChatPinnedNotes from './ChatPinnedNotes.vue'
 import { uploadAll, useLocalFiles } from './useLocalFiles'
@@ -32,7 +32,9 @@ const managerId = computed(() => props.manager.id)
 const options = props.chat.useOptions(managerId, platform, mode)
 const models = computed(() => options.data.value?.models ?? [])
 const environments = computed(() => (options.data.value?.environments ?? []).filter(e => e.enabled))
-const efforts = computed(() => (models.value.find(m => m.id === model.value) ?? models.value.find(m => m.default))?.efforts ?? [])
+// 选中的模型（没选就是平台默认的那个）：推理强度按它支持的列；它的说明写在下拉框下面
+const picked = computed(() => models.value.find(m => m.id === model.value) ?? models.value.find(m => m.default))
+const efforts = computed(() => picked.value?.efforts ?? [])
 watch([platform, mode], () => { model.value = ''; effort.value = ''; environment.value = '' })
 watch(environments, list => { if (!list.some(e => e.id === environment.value)) environment.value = list.length === 1 ? list[0]!.id : '' })
 watch(efforts, list => { if (!list.includes(effort.value)) effort.value = '' })
@@ -134,14 +136,16 @@ async function submit() {
               <label for="lc-new-model">模型</label>
               <select id="lc-new-model" v-model="model">
                 <option value="">平台默认</option>
-                <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name || m.id }}{{ m.default ? '（默认）' : '' }}</option>
+                <option v-for="m in models" :key="m.id" :value="m.id" :title="m.description || undefined">{{ m.name || m.id }}{{ m.default ? '（默认）' : '' }}</option>
               </select>
+              <p v-if="model && picked?.description" class="form-help">{{ picked.description }}</p>
               <p v-if="options.isFetching.value" class="form-help" role="status">正在读取可选的模型…</p>
               <p v-else-if="options.data.value?.models_error" class="form-help">读不到模型列表（{{ options.data.value.models_error }}）：可以先用平台默认的模型。</p>
             </div>
             <div v-if="efforts.length" class="form-field">
               <label for="lc-new-effort">推理强度</label>
-              <select id="lc-new-effort" v-model="effort"><option value="">默认</option><option v-for="e in efforts" :key="e" :value="e">{{ e }}</option></select>
+              <select id="lc-new-effort" v-model="effort"><option value="">默认</option><option v-for="e in efforts" :key="e" :value="e">{{ effortName(e) }}</option></select>
+              <p class="form-help">越高想得越周到，但更慢、更费额度；“默认”由官方程序按模型决定。</p>
             </div>
           </div>
           <div v-if="mode === 'dev'" class="form-field">

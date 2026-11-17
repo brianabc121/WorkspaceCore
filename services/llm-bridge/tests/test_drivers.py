@@ -447,6 +447,8 @@ async def test_codebuddy_profile(tmp_path: Path) -> None:
     with pytest.raises(DriverError, match="不支持登录方式"):
         await driver.login("existing", {})
     assert [m.id for m in await driver.models("chat")] == ["auto", "fast-model", "deep-model"]
+    # CodeBuddy 没有核对过推理强度的参数：带了也不传
+    assert driver.profile.effort_flag == ""
     assert not (await driver.status()).logged_in
     await driver.login("api_key", {"api_key": "cb-key"})
     status = await driver.status()
@@ -454,7 +456,36 @@ async def test_codebuddy_profile(tmp_path: Path) -> None:
     spec = SessionSpec(
         mode="chat", model="auto", workdir=tmp_path / "w", native_id=await driver.create(None)
     )  # type: ignore[arg-type]
-    assert (await driver.run_turn(spec, "你好", Sink())).text.endswith(":: 你好")
+    said = await driver.run_turn(replace(spec, effort="high"), "你好", Sink())
+    assert said.text.endswith(":: 你好") and "effort=None" in said.text
+
+
+async def test_claude_models_and_effort(tmp_path: Path) -> None:
+    """Claude 的模型取自锁定版本 2.1.323 的模型菜单：别名在前、具体版本在后，各带推理强度；
+    选了推理强度就按 --effort 交给官方程序。"""
+    driver = _cli(tmp_path)
+    models = await driver.models("chat")
+    ids = [m.id for m in models]
+    assert ids[:4] == ["sonnet", "opus", "fable", "haiku"]
+    latest = {"claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-haiku-5-5"}
+    assert latest <= set(ids)
+    by_id = {m.id: m for m in models}
+    assert [m.id for m in models if m.default] == ["sonnet"]
+    assert by_id["claude-opus-5-5"].efforts == ("low", "medium", "high", "xhigh", "max")
+    assert by_id["claude-sonnet-4-6"].efforts == ("low", "medium", "high", "max")
+    assert by_id["claude-haiku-4-5-20251001"].efforts == ()
+    await driver.login("oauth_token", {"oauth_token": "tok"})
+    spec = SessionSpec(
+        mode="chat",
+        model="claude-opus-5-5",
+        workdir=tmp_path / "w",
+        effort="xhigh",
+        native_id=await driver.create(None),  # type: ignore[arg-type]
+    )
+    said = await driver.run_turn(spec, "你好", Sink())
+    assert "model=claude-opus-5-5 effort=xhigh" in said.text
+    plain = await driver.run_turn(replace(spec, effort=None), "再来", Sink())
+    assert "effort=None" in plain.text
 
 
 def _exists(path: Path) -> bool:

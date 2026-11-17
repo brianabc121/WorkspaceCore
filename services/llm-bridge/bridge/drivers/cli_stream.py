@@ -98,12 +98,39 @@ class CliProfile:
     allow_existing: bool = True
     # 自动压缩触发点（上下文的百分比）的环境变量（核验记录第 1、2 节）
     autocompact_env: str = ""
+    # 推理强度的参数（只有核对过的官方程序有）：Claude Code 2.1.323 是 --effort <level>
+    effort_flag: str = ""
 
 
+# Claude 的模型（T-____）：取自锁定版本 Claude Code 2.1.323 内置的模型菜单
+# （二进制里 model_selector_config 中 id 为 "cc" 的那份：常用四个，其余在“更多模型”里），
+# 推理强度是各模型的 effort_levels；Haiku 4.5、Opus 4.1 不支持推理强度。
+# 前面四个是别名（--model 收别名或完整模型名，核验记录同上），总是指向这一族最新的模型；
+# 旧会话的别名照常能用。--effort 只收 low / medium / high / xhigh / max；
+# 模型不支持所选的强度时，官方程序会静默降到它支持的。
+_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+_EFFORTS_NO_XHIGH = ("low", "medium", "high", "max")
 CLAUDE_MODELS = (
-    ModelInfo("sonnet", "Claude Sonnet（最新）", "别名：指向最新的 Sonnet", default=True),
-    ModelInfo("opus", "Claude Opus（最新）", "别名：指向最新的 Opus"),
-    ModelInfo("haiku", "Claude Haiku（最新）", "别名：指向最新的 Haiku"),
+    ModelInfo(
+        "sonnet", "Sonnet（最新）", "别名：总是用最新的 Sonnet", default=True, efforts=_EFFORTS
+    ),
+    ModelInfo("opus", "Opus（最新）", "别名：总是用最新的 Opus", efforts=_EFFORTS),
+    ModelInfo("fable", "Fable（最新）", "别名：总是用最新的 Fable", efforts=_EFFORTS),
+    ModelInfo("haiku", "Haiku（最新）", "别名：总是用最新的 Haiku", efforts=_EFFORTS),
+    ModelInfo("claude-opus-5-5", "Opus 5.5", "复杂的工作和日常任务", efforts=_EFFORTS),
+    ModelInfo("claude-sonnet-5-5", "Sonnet 5.5", "简单的任务，最省额度", efforts=_EFFORTS),
+    ModelInfo("claude-fable-5-2", "Fable 5.2", "最难的任务", efforts=_EFFORTS),
+    ModelInfo("claude-haiku-5-5", "Haiku 5.5", "最快，适合简短的问题", efforts=_EFFORTS),
+    ModelInfo("claude-fable-5-1", "Fable 5.1", "更早的版本", efforts=_EFFORTS),
+    ModelInfo("claude-opus-5", "Opus 5", "更早的版本", efforts=_EFFORTS),
+    ModelInfo("claude-sonnet-5", "Sonnet 5", "更早的版本", efforts=_EFFORTS),
+    ModelInfo("claude-fable-5", "Fable 5", "更早的版本", efforts=_EFFORTS),
+    ModelInfo("claude-opus-4-8", "Opus 4.8", "更早的版本", efforts=_EFFORTS),
+    ModelInfo("claude-opus-4-7", "Opus 4.7", "更早的版本", efforts=_EFFORTS),
+    ModelInfo("claude-opus-4-6", "Opus 4.6", "更早的版本", efforts=_EFFORTS_NO_XHIGH),
+    ModelInfo("claude-sonnet-4-6", "Sonnet 4.6", "更早的版本", efforts=_EFFORTS_NO_XHIGH),
+    ModelInfo("claude-haiku-4-5-20251001", "Haiku 4.5", "更早的版本，不支持推理强度"),
+    ModelInfo("claude-opus-4-1-20250805", "Opus 4.1", "更早的版本，不支持推理强度"),
 )
 
 
@@ -117,6 +144,7 @@ def claude_profile(binary: str) -> CliProfile:
         models=CLAUDE_MODELS,
         auth_cli=True,
         autocompact_env="CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
+        effort_flag="--effort",
     )
 
 
@@ -482,6 +510,8 @@ class CliStreamDriver(Driver):
         args += ["--resume" if resume else "--session-id", spec.native_id]
         if spec.model:
             args += ["--model", spec.model]
+        if spec.effort and self.profile.effort_flag:
+            args += [self.profile.effort_flag, spec.effort]
         if spec.mode == "chat":
             prompt = CHAT_NOTICE + (f"\n\n{spec.pinned}" if spec.pinned else "")
             args += ["--tools", "", "--append-system-prompt", prompt]

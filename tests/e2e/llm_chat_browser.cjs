@@ -112,7 +112,7 @@ async function sessionAction(page, name) {
   if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click()
   await page.getByRole('group', { name: '会话操作' }).getByRole('button', { name, exact: true }).click()
 }
-// 会话列表的“更多”菜单（T-0281）：多模型同问、同步官方会话、看已归档的会话 / 回到进行中的会话
+// 会话列表的“更多”菜单（T-0281）：多模型同问、同步官方会话、看已归档的会话 / 回到未归档的会话
 async function listAction(page, name) {
   const more = side(page).getByRole('button', { name: '会话列表的更多操作' })
   if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click()
@@ -483,7 +483,7 @@ async function main() {
     await side(page).getByRole('button', { name: new RegExp(TITLE) }).waitFor({ state: 'detached' })
     await listAction(page, '看已归档的会话')
     await side(page).getByRole('button', { name: new RegExp(TITLE) }).waitFor()
-    await listAction(page, '回到进行中的会话')
+    await listAction(page, '回到未归档的会话')
     const archivedSend = await api(page, workspace, 'POST', `${chat}/sessions/${firstId}/messages`, { text: 'x', request_id: requestId() })
     check(archivedSend.status === 409, `归档后接口也应拒绝发送：${JSON.stringify(archivedSend)}`)
     step('归档后不能再发（页面和接口都拒绝），在“已归档”里能找到')

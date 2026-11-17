@@ -14,6 +14,8 @@
 .lb-form h3 { font-size: 1rem; margin: 0 0 4px; }
 .lb-form :is(input:not([type="checkbox"], [type="radio"]), select, textarea) { width: 100%; min-width: 0; }
 .lb-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 0 14px; }
+/* 并排的两个字段高矮不一（一边下面有说明）时，各自从顶上排，标签和输入框对齐 */
+.lb-grid > .form-field { align-content: start; }
 .lb-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .lb-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .lb-tabs { display: flex; flex-wrap: wrap; gap: 0 4px; min-width: 0; border-bottom: 1px solid var(--line); }

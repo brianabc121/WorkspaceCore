@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,24 @@ async def test_live_codebuddy(tmp_path: Path) -> None:
     assert caught.value.kind == "not_logged_in"
     # 未登录的回合也留下了会话记录，列表读得到
     assert [n.native_id for n in await driver.list_native(10)] == ["live-test-1"]
+
+
+async def test_live_claude_model_and_effort_flags(tmp_path: Path) -> None:
+    """不用登录：锁定版本的帮助文本里有驱动用到的 --model 和 --effort，
+    强度的可选值和 CLAUDE_MODELS 一致（T-____）。"""
+    process = await asyncio.create_subprocess_exec(
+        f"{CLI_DIR}/claude",
+        "--help",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env={"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path), "DISABLE_AUTOUPDATER": "1"},
+    )
+    out, _ = await asyncio.wait_for(process.communicate(), 60)
+    text = out.decode("utf-8", "replace")
+    assert "--model <model>" in text and "--effort <level>" in text, text[:2000]
+    assert "low, medium, high, xhigh, max" in text
+    levels = {e for m in claude_profile("claude").models for e in m.efforts}
+    assert levels == {"low", "medium", "high", "xhigh", "max"}
 
 
 @pytest.mark.skipif(not CLAUDE_KEY, reason="没有设置 BRIDGE_LIVE_CLAUDE_API_KEY")

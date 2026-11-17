@@ -170,7 +170,7 @@ if text == "hang":
 
     time.sleep(60)
 transcript.parent.mkdir(parents=True, exist_ok=True)
-reply = f"model={value('--model')} tools={value('--tools')!r} perm={value('--permission-mode')} leak={os.environ.get('BRIDGE_ADMIN_TOKEN')} extra={os.environ.get('EXTRA_VAR')} ac={os.environ.get('CLAUDE_AUTOCOMPACT_PCT_OVERRIDE') or os.environ.get('CODEBUDDY_AUTOCOMPACT_PCT_OVERRIDE')} :: {text}"
+reply = f"model={value('--model')} effort={value('--effort')} tools={value('--tools')!r} perm={value('--permission-mode')} leak={os.environ.get('BRIDGE_ADMIN_TOKEN')} extra={os.environ.get('EXTRA_VAR')} ac={os.environ.get('CLAUDE_AUTOCOMPACT_PCT_OVERRIDE') or os.environ.get('CODEBUDDY_AUTOCOMPACT_PCT_OVERRIDE')} :: {text}"
 if images:
     reply += f" images={images}"
 if text == "history":
