@@ -2,7 +2,7 @@
 id: T-0278
 title: 大模型客户端：平台连通性的延迟改成建立连接的用时，分步显示解析 / 连接 / 握手 / 平台应答，超时写明卡在哪一步
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/gracious-euler-ldkldx
 paths: services/llm-bridge/bridge/connectivity.py,services/llm-bridge/tests,services/api/app/modules/llm_bridge/schemas.py,services/api/openapi.json,services/api/tests/test_module_llm_bridge_chat.py,apps/web/src/modules/llm_bridge,apps/web/src/services/schema.d.ts,apps/web/tests/llm_bridge.test.ts,docs/api-contract.md
@@ -60,3 +60,4 @@ updated: 2026-11-17
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-17 06:20 UTC · claude · 创建任务（编号在 #235 预留，owner claude；人类在对话中直接派活：“给我进行修复”）
 - 2026-11-17 06:38 UTC · claude · 管理器、接口、页面与测试完成，准备开 PR
+- 2026-11-17 06:38 UTC · claude · status in_progress → done：实现与测试完成，随 PR 合并；已部署的管理器要重新部署（升级）后才有分步数字
