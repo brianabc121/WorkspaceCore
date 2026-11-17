@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import Depends, Path, Query, Response, status
 
 from app.api.deps import csrf_protected
+from app.modules.llm_bridge.client import LOGIN_READ_TIMEOUT
 from app.modules.llm_bridge.deps import Admin, Owner, Service, router
 from app.modules.llm_bridge.schemas import (
     LlmBridgeAccountStateOut,
@@ -43,6 +44,7 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeUsageOut,
     Platform,
 )
+from app.modules.llm_bridge.service import login_out
 from app.schemas.common import error_responses
 
 SlotPath = Annotated[Literal["openai", "claude", "workbuddy"], Path(description="账号槽位")]
@@ -217,8 +219,9 @@ async def llm_bridge_login(
         f"/accounts/{slot}/login",
         body.model_dump(exclude_none=True),
         {"slot": slot, "method": body.method},
+        read_timeout=LOGIN_READ_TIMEOUT,
     )
-    return LlmBridgeLoginOut(**data)
+    return login_out(data)
 
 
 @router.get(
@@ -231,7 +234,7 @@ async def llm_bridge_login_state(
 ) -> LlmBridgeLoginOut:
     row = await service.bridge(access.workspace.id, bridge_id)
     data = (await service.admin(row, "GET", f"/accounts/{slot}/login")).get("login")
-    return LlmBridgeLoginOut(**data) if data else LlmBridgeLoginOut(state="none")
+    return login_out(data)
 
 
 @router.post(

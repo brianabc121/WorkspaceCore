@@ -14114,10 +14114,48 @@
             "title": "Detail",
             "type": "string"
           },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "log": {
+            "description": "运行信息：会话桥做了什么、官方程序本机服务的输出（会话桥已脱敏，这里只限长）",
+            "items": {
+              "type": "string"
+            },
+            "title": "Log",
+            "type": "array"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
           "state": {
             "description": "pending / done / failed / none",
             "title": "State",
             "type": "string"
+          },
+          "steps": {
+            "description": "逐步进度（会话桥支持时才有，T-0276）：启动登录服务、申请登录网址、等人登录、确认结果",
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeLoginStepOut"
+            },
+            "title": "Steps",
+            "type": "array"
           },
           "user_code": {
             "anyOf": [
@@ -14146,6 +14184,53 @@
           "state"
         ],
         "title": "LlmBridgeLoginOut",
+        "type": "object"
+      },
+      "LlmBridgeLoginStepOut": {
+        "description": "登录过程的一步（T-0276）：key 是 start / request_url / wait_user / finish（网页登录）。",
+        "properties": {
+          "detail": {
+            "default": "",
+            "title": "Detail",
+            "type": "string"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "description": "pending / running / done / failed / skipped",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "status"
+        ],
+        "title": "LlmBridgeLoginStepOut",
         "type": "object"
       },
       "LlmBridgeOut": {

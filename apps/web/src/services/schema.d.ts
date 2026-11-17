@@ -12490,15 +12490,51 @@ export interface components {
              * @default
              */
             detail: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Log
+             * @description 运行信息：会话桥做了什么、官方程序本机服务的输出（会话桥已脱敏，这里只限长）
+             */
+            log?: string[];
+            /** Started At */
+            started_at?: string | null;
             /**
              * State
              * @description pending / done / failed / none
              */
             state: string;
+            /**
+             * Steps
+             * @description 逐步进度（会话桥支持时才有，T-0276）：启动登录服务、申请登录网址、等人登录、确认结果
+             */
+            steps?: components["schemas"]["LlmBridgeLoginStepOut"][];
             /** User Code */
             user_code?: string | null;
             /** Verification Url */
             verification_url?: string | null;
+        };
+        /**
+         * LlmBridgeLoginStepOut
+         * @description 登录过程的一步（T-0276）：key 是 start / request_url / wait_user / finish（网页登录）。
+         */
+        LlmBridgeLoginStepOut: {
+            /**
+             * Detail
+             * @default
+             */
+            detail: string;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Key */
+            key: string;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * Status
+             * @description pending / running / done / failed / skipped
+             */
+            status: string;
         };
         /** LlmBridgeOut */
         LlmBridgeOut: {

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 from urllib.parse import quote
 
@@ -26,6 +26,11 @@ from app.integrations.http import CircuitBreaker, ConnectorHttp, OutboundPolicy,
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
 # llm_send / llm_turn_get 最多在会话桥上等 50 秒
 READ_TIMEOUT = 65.0
+# 开始登录（POST /admin/accounts/<平台>/login）等得更久：CodeBuddy 网页登录要先在管理器里
+# 启动官方程序的本机登录服务（最多 40 秒），再向平台申请登录网址（最多 60 秒）。
+# 站点前面常有 CDN（Cloudflare 单个请求最多 100 秒）：页面等 95 秒、这里等 90 秒，
+# 都在它之内；更慢时页面改为查登录进度
+LOGIN_READ_TIMEOUT = 90.0
 _ACCEPT = "application/json, text/event-stream"
 PROTOCOL_VERSION = "2025-06-18"
 
@@ -157,8 +162,12 @@ class BridgeClient:
             raise _error_of(payload) or _invalid()
         return payload
 
-    async def admin(self, method: str, path: str, body: Any = None) -> Any:
-        response = await self.http.request(
+    async def admin(
+        self, method: str, path: str, body: Any = None, *, read_timeout: float | None = None
+    ) -> Any:
+        """read_timeout：这一次调用等多久（不给就用默认的 READ_TIMEOUT），熔断计数照常共用。"""
+        http = self.http if read_timeout is None else replace(self.http, read_timeout=read_timeout)
+        response = await http.request(
             method, f"{await self._base()}/admin{path}", headers=self._headers(), json=body
         )
         return self._payload(response)

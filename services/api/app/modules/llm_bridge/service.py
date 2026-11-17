@@ -47,6 +47,8 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeLoadOut,
     LlmBridgeLocalIn,
     LlmBridgeLocalOut,
+    LlmBridgeLoginOut,
+    LlmBridgeLoginStepOut,
     LlmBridgeOut,
     LlmBridgePatch,
     LlmBridgeQuotaList,
@@ -94,6 +96,43 @@ def clean_url(value: str) -> str:
     if parts.username or parts.password or parts.query or parts.fragment:
         raise _invalid("base_url", "地址里不能带账号、查询参数或 #")
     return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}"
+
+
+# 登录进度转发时的上限（T-0276）：会话桥自己也限长，这里再兜底
+LOGIN_STEPS_MAX = 12
+LOGIN_LOG_LINES = 200
+LOGIN_LINE_CHARS = 500
+
+
+def _short(value: Any, limit: int = LOGIN_LINE_CHARS) -> str | None:
+    return None if value is None else str(value)[:limit]
+
+
+def login_out(data: Any) -> LlmBridgeLoginOut:
+    """会话桥的登录进度 → 接口的返回：步骤与运行信息限长，不认识的字段丢掉；没有进度时是 none。"""
+    if not isinstance(data, dict):
+        return LlmBridgeLoginOut(state="none")
+    steps = [
+        LlmBridgeLoginStepOut(
+            key=str(step["key"])[:40],
+            status=str(step.get("status") or "pending")[:20],
+            detail=str(step.get("detail") or "")[:LOGIN_LINE_CHARS],
+            started_at=_short(step.get("started_at"), 40),
+            finished_at=_short(step.get("finished_at"), 40),
+        )
+        for step in (data.get("steps") or [])[:LOGIN_STEPS_MAX]
+        if isinstance(step, dict) and step.get("key")
+    ]
+    return LlmBridgeLoginOut(
+        state=str(data.get("state") or "none")[:20],
+        verification_url=_short(data.get("verification_url"), 2048),
+        user_code=_short(data.get("user_code"), 100),
+        detail=str(data.get("detail") or "")[:LOGIN_LINE_CHARS],
+        steps=steps,
+        log=[str(line)[:LOGIN_LINE_CHARS] for line in (data.get("log") or [])][-LOGIN_LOG_LINES:],
+        started_at=_short(data.get("started_at"), 40),
+        finished_at=_short(data.get("finished_at"), 40),
+    )
 
 
 def unavailable(error: ConnectorError) -> ApiError:
@@ -408,9 +447,19 @@ class LlmBridgeService:
         )
 
     # ---- 转给会话桥的管理操作 ----
-    async def admin(self, row: LlmBridge, method: str, path: str, body: Any = None) -> Any:
+    async def admin(
+        self,
+        row: LlmBridge,
+        method: str,
+        path: str,
+        body: Any = None,
+        *,
+        read_timeout: float | None = None,
+    ) -> Any:
         try:
-            return await (await self.client(row)).admin(method, path, body)
+            return await (await self.client(row)).admin(
+                method, path, body, read_timeout=read_timeout
+            )
         except BridgeCallError as error:
             raise from_bridge(error) from error
         except ConnectorError as error:
@@ -425,9 +474,11 @@ class LlmBridgeService:
         path: str,
         body: Any = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        read_timeout: float | None = None,
     ) -> Any:
         """改动类的管理操作：成功后记审计（不记密钥）。"""
-        result = await self.admin(row, method, path, body)
+        result = await self.admin(row, method, path, body, read_timeout=read_timeout)
         await self._audit(access, action, row.id, {"bridge": row.name, **(metadata or {})})
         await self.db.commit()
         return result

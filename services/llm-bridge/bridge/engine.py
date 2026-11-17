@@ -30,7 +30,14 @@ from bridge import connectivity as net
 from bridge import quota
 from bridge.channels import SLOT_LABELS, Channel, find
 from bridge.config import Settings
-from bridge.drivers.base import ContextUsage, Driver, DriverError, Mode, SessionSpec
+from bridge.drivers.base import (
+    ContextUsage,
+    Driver,
+    DriverError,
+    LoginChallenge,
+    Mode,
+    SessionSpec,
+)
 from bridge.redact import mask_identity, redact
 from bridge.store import Row, Store, message_of, new_id, usage_credits, usage_tokens
 
@@ -168,6 +175,20 @@ class BridgeError(Exception):
         self.code = code
         self.message = message
         self.details = details or {}
+
+
+def _challenge_row(challenge: LoginChallenge) -> Row:
+    """登录进度：状态、网址 / 验证码、逐步进度和运行信息（复制一份，免得序列化时被驱动改动）。"""
+    return {
+        "state": challenge.state,
+        "verification_url": challenge.verification_url,
+        "user_code": challenge.user_code,
+        "detail": challenge.detail,
+        "steps": [dict(step) for step in challenge.steps],
+        "log": list(challenge.log),
+        "started_at": challenge.started_at,
+        "finished_at": challenge.finished_at,
+    }
 
 
 def from_driver(error: DriverError) -> BridgeError:
@@ -445,12 +466,7 @@ class Engine:
         except DriverError as error:
             raise from_driver(error) from error
         self._accounts.pop(slot, None)
-        return {
-            "state": challenge.state,
-            "verification_url": challenge.verification_url,
-            "user_code": challenge.user_code,
-            "detail": challenge.detail,
-        }
+        return _challenge_row(challenge)
 
     async def login_state(self, slot: str) -> Row | None:
         challenge = await self._driver(slot).login_state()
@@ -458,12 +474,7 @@ class Engine:
             return None
         if challenge.state != "pending":
             self._accounts.pop(slot, None)
-        return {
-            "state": challenge.state,
-            "verification_url": challenge.verification_url,
-            "user_code": challenge.user_code,
-            "detail": challenge.detail,
-        }
+        return _challenge_row(challenge)
 
     async def logout(self, slot: str) -> None:
         try:

@@ -22,6 +22,9 @@ export const useAuthStore = defineStore('auth', () => {
   const api = createApi({ workspaceId: () => workspaceId.value, sessionVersion: () => sessionVersion, onUnauthorized: clearSession, onModuleDisabled })
   // For the few requests that wait on another server (SSH probe and key revocation: up to ~25 s when it does not answer).
   const slowApi = createApi({ workspaceId: () => workspaceId.value, sessionVersion: () => sessionVersion, onUnauthorized: clearSession, onModuleDisabled, timeoutMs: 60000 })
+  // For starting something that is slow on another server (CodeBuddy web login starts its login service first, up to ~100 s).
+  // 95 s keeps the request below the 100 s limit of a CDN in front of the site (Cloudflare); slower ones fall back to polling.
+  const longApi = createApi({ workspaceId: () => workspaceId.value, sessionVersion: () => sessionVersion, onUnauthorized: clearSession, onModuleDisabled, timeoutMs: 95000 })
   function acceptSession(me: Schema['MeResponse']) {
     sessionVersion++
     user.value = me.user
@@ -58,5 +61,5 @@ export const useAuthStore = defineStore('auth', () => {
     await api.POST('/api/v1/auth/password', { body })
     sessionVersion++
   }
-  return { user, workspaces, workspaceId, currentWorkspace, canManage, isOwner, setupRequired, initialized, loading, initializationError, moduleDisabledSignal, api, slowApi, initialize, acceptSession, clearSession, selectWorkspace, login, setup, logout, changePassword }
+  return { user, workspaces, workspaceId, currentWorkspace, canManage, isOwner, setupRequired, initialized, loading, initializationError, moduleDisabledSignal, api, slowApi, longApi, initialize, acceptSession, clearSession, selectWorkspace, login, setup, logout, changePassword }
 })

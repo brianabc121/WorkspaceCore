@@ -411,16 +411,48 @@ async def test_codebuddy_web_login(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         assert "申请登录网址没有成功：account.login.failed" in caught.value.message
         assert "平台连通性" in caught.value.message
         assert not (await driver.status()).logged_in and driver._web._server is None
+        # 逐步进度（T-0276）：失败在“申请登录网址”那一步，原因挂在那一步；后面的步骤没轮到
+        failed = await driver.login_state()
+        assert failed is not None and failed.state == "failed" and failed.finished_at
+        assert [(s["key"], s["status"]) for s in failed.steps] == [
+            ("start", "done"),
+            ("request_url", "failed"),
+            ("wait_user", "pending"),
+            ("finish", "pending"),
+        ]
+        assert "account.login.failed" in failed.steps[1]["detail"]
+        assert failed.steps[0]["detail"].startswith("用时 ")
         _mark(tmp_path, "web-login-fails", on=False)
 
         challenge = await driver.login("web_intl", {})
         assert challenge.state == "pending" and challenge.user_code is None
         assert challenge.verification_url == "https://example.test/login?site=external"
+        assert [s["status"] for s in challenge.steps] == ["done", "done", "running", "pending"]
+        assert challenge.started_at and not challenge.finished_at
+        # 运行信息：这边做了什么、官方程序本机服务的输出；访问口令替换成 ***
+        password = driver._web._server.password
+        log = "\n".join((await driver.login_state()).log)
+        assert "--serve（只监听 127.0.0.1:" in log and "登录服务已就绪" in log
+        assert "向 CodeBuddy 申请登录网址（登录方式 external）" in log
+        assert "Gateway listening on" in log and "password=***" in log
+        assert password not in log and "access token ***" in log
         # 人还没登录完：不算已登录
         assert (await driver.login_state()).state == "pending"
         assert not (await driver.status()).logged_in
+
+        # 重新开始一次：上一次的等待任务被取消时不改进度（原来会写成“等了 10 分钟没有完成”），
+        # 新的登录服务照常在跑
+        again = await driver.login("web_intl", {})
+        server = driver._web._server
+        await asyncio.sleep(0.3)
+        assert driver._web._server is server and server.proc.returncode is None
+        assert again.state == "pending" and [s["status"] for s in again.steps][2] == "running"
+
         _mark(tmp_path, "web-login-done")  # 人在网页上登录完了
-        assert (await _login_done(driver)).state == "done"
+        done = await _login_done(driver)
+        assert done.state == "done" and done.finished_at
+        assert [s["status"] for s in done.steps] == ["done", "done", "done", "done"]
+        assert done.steps[3]["detail"] == "账号：测试账号"
         status = await driver.status()
         assert (status.logged_in, status.identity, status.method) == (True, "测试账号", "web_intl")
         # 登录完成后本机服务已经关掉；之后的回合照常能跑
