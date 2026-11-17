@@ -2,7 +2,7 @@
 id: T-0286
 title: 大模型客户端“管理器与账号”页按效果图改版：管理器卡片带启用开关和“…”，选中打勾
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/amazing-faraday-6ey29e
 paths: apps/web/src/modules/llm_bridge/LlmBridgeWorkspace.vue,apps/web/src/modules/llm_bridge/ManagerCard.vue,apps/web/src/modules/llm_bridge/llm_bridge.css,apps/web/tests/llm_bridge.test.ts,apps/web/tests/llm_bridge_deploy.test.ts,tests/e2e/llm_bridge_browser.cjs,tests/e2e/mcp_manager_browser.cjs,docs/v2/LLM_BRIDGE_PLAN.md,docs/guides/mcp-manager-deploy.md
@@ -25,12 +25,12 @@ updated: 2026-11-17
 3. 最下面是说明：“每个管理器，每个平台可登录一个账号 / 需要同平台的其他账号时，再添加管理器。”
 
 ## 验收标准
-- [ ] 列表头写“MCP 管理器 · N”，“添加”（读屏名字“添加 MCP 管理器”，只给 owner）在标题旁；还没有管理器时“添加”在页头
-- [ ] 卡片第一行有启用开关（停用前确认；admin 看到灰的开关，只表示状态）和“…”（owner）：手动添加的是修改、删除；工作台部署的是改名、重新部署、重启、卸载；服务器已移除时是改名、卸载（只删除登记）
-- [ ] 选中的卡片打勾、浅色底、左边色条；第二行“连接状态 | 在哪儿”，第三行“已配置平台：”和平台标签，放不下时在标签那一栏里换行
-- [ ] 右边详情只留“刷新状态”，原来的“管理操作”菜单去掉（操作都在卡片上）
-- [ ] 底部说明按效果图两行
-- [ ] 前端 lint / typecheck / vitest / build / check:api 通过；`llm_bridge_browser.cjs`、`mcp_manager_browser.cjs` 跟着改选择器；1440 / 1180 / 390 宽度和暗色没有横向滚动
+- [x] 列表头写“MCP 管理器 · N”，“添加”（读屏名字“添加 MCP 管理器”，只给 owner）在标题旁；还没有管理器时“添加”在页头
+- [x] 卡片第一行有启用开关（停用前确认；admin 看到灰的开关，只表示状态）和“…”（owner）：手动添加的是修改、删除；工作台部署的是改名、重新部署、重启、卸载；服务器已移除时是改名、卸载（只删除登记）
+- [x] 选中的卡片打勾、浅色底、左边色条；第二行“连接状态 | 在哪儿”，第三行“已配置平台：”和平台标签，放不下时在标签那一栏里换行
+- [x] 右边详情只留“刷新状态”，原来的“管理操作”菜单去掉（操作都在卡片上）
+- [x] 底部说明按效果图两行
+- [x] 前端 lint / typecheck / vitest / build / check:api 通过；`llm_bridge_browser.cjs`、`mcp_manager_browser.cjs` 跟着改选择器；1440 / 1180 / 390 宽度和暗色没有横向滚动
 
 ## 背景 / 约束 / 参考
 - 编号由登记的集成会话在 #235 预留：https://github.com/brianabc121/WorkspaceCore/issues/235#issuecomment-6953832768
@@ -44,3 +44,5 @@ updated: 2026-11-17
 - 2026-11-17 16:26 UTC · claude · 创建任务（owner: unassigned；编号 T-0286 由集成会话在 #235 预留）
 - 2026-11-17 16:26 UTC · human · owner unassigned → claude：人类在对话中指派：按效果图优化大模型客户端“管理器与账号”子页面的管理器列表
 - 2026-11-17 16:26 UTC · claude · 开始任务
+- 2026-11-17 16:32 UTC · claude · 做完：管理器卡片按效果图（启用开关、“…”、选中打勾与左边色条、连接状态 | 在哪儿、已配置平台），列表头“添加”、搜索框、底部说明；右边详情只留“刷新状态”。admin 的开关是灰的、没有“…”。在 main 27877aa 上：前端 lint、typecheck、vitest 84 个文件 923 个测试、build、check:api 通过；llm_bridge_browser.cjs、mcp_manager_browser.cjs 改成从卡片的“…”和开关操作（node --check 通过，真实验收以 CI 为准）。Vite + Playwright（模拟接口）截图核对 1920（模拟内容区不限宽）/ 1440 / 1180 / 390、暗色、admin、打开菜单，没有横向滚动。和 PR #250 的 head be860af 试合并没有冲突。
+- 2026-11-17 16:32 UTC · claude · status in_progress → done：管理器与账号页按效果图改版，验收标准全部勾选（浏览器验收合并前以 CI 确认）
