@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ChevronDown, Link2, Monitor, Plus, RefreshCw, Search, Server, ShieldCheck } from '@lucide/vue'
+import { Info, Link2, Monitor, Plus, RefreshCw, Search, Server, ShieldCheck } from '@lucide/vue'
 import { useAuthStore } from '../../stores/auth'
 import ManagementPage from '../../components/management/ManagementPage.vue'
 import DataState from '../../components/DataState.vue'
@@ -19,8 +19,8 @@ import BridgeSessions from './BridgeSessions.vue'
 import BridgeGrants from './BridgeGrants.vue'
 import './llm_bridge.css'
 
-// 页面主体（管理器与账号）：左边是 MCP 管理器的列表（可以按名字找），选中一个后右边看它的详情：
-// 平台与账号、运行设置、开发环境、会话；修改、停用、删除、重新部署、重启、卸载收在详情右上角的“管理操作”里（owner）。
+// 页面主体（管理器与账号）：左边是 MCP 管理器的列表（可以按名字找、“添加”在列表标题旁），选中一个后右边看它的详情：
+// 平台与账号、运行设置、开发环境、会话。每张卡片上有启用开关和“…”（修改、删除、重新部署、重启、卸载），只给 owner（T-0286）。
 // 最下面是按实例的权限（右上角“实例权限”跳过去）。一个 MCP 管理器就是一座登记的会话桥：单独部署的容器，单独维护一套账号。
 // 添加有两种方式：一键部署到服务器（工作台经 SSH 部署到智能体服务器或容器服务器并登记，docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md），
 // 或者手动添加已经部署好的。工作台部署的管理器可以重新部署、重启、卸载（后台任务，进度显示在列表下面）。
@@ -73,15 +73,6 @@ const connection = computed(() => {
 const install = computed(() => selected.value?.deployment ?? null)
 const removed = computed(() => !!install.value && !install.value.target_id)
 
-// 管理操作：点开是一组按钮；点外面、按 Esc、做了一个操作后收起
-const menuOpen = ref(false), menuBox = ref<HTMLElement | null>(null)
-watch(selectedId, () => { menuOpen.value = false })
-function outside(event: MouseEvent) { if (menuOpen.value && menuBox.value && !menuBox.value.contains(event.target as Node)) menuOpen.value = false }
-function escape(event: KeyboardEvent) { if (event.key === 'Escape') menuOpen.value = false }
-document.addEventListener('click', outside, true)
-document.addEventListener('keydown', escape)
-onBeforeUnmount(() => { document.removeEventListener('click', outside, true); document.removeEventListener('keydown', escape) })
-function menu(action: () => unknown) { menuOpen.value = false; return action() }
 function toGrants() { document.getElementById('lb-grants')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }) }
 
 const ALL = PLATFORMS.map(p => p.id)
@@ -209,7 +200,7 @@ function remove(bridge: Bridge) {
     <template #actions>
       <span class="lb-role">角色<span class="lb-role-badge">{{ role }}</span></span>
       <button type="button" class="secondary-button lb-head-btn" @click="toGrants"><ShieldCheck aria-hidden="true" />实例权限</button>
-      <button v-if="canWrite && !form.open && bridges.data.value" type="button" class="primary-button lb-head-btn" @click="openForm()"><Plus aria-hidden="true" />添加 MCP 管理器</button>
+      <button v-if="canWrite && !form.open && bridges.data.value && !list.length" type="button" class="primary-button lb-head-btn" @click="openForm()"><Plus aria-hidden="true" />添加 MCP 管理器</button>
     </template>
     <p v-if="isModuleDisabled(bridges.error.value)" role="status">功能已停用：大模型客户端在当前工作空间没有启用。</p>
     <DataState v-else-if="bridges.isPending.value || bridges.error.value" :loading="bridges.isPending.value" :error="bridges.error.value" :empty="false" empty-text="" @retry="bridges.refetch()" />
@@ -268,18 +259,24 @@ function remove(bridge: Bridge) {
       </div>
       <div v-else class="lb-layout">
         <section class="lb-list-card" aria-label="MCP 管理器">
-          <h3 class="lb-list-title">MCP 管理器<span class="lb-count"> · {{ list.length }}</span></h3>
+          <div class="lb-list-head">
+            <h3 class="lb-list-title">MCP 管理器<span class="lb-count"> · {{ list.length }}</span></h3>
+            <button v-if="canWrite && !form.open" type="button" class="primary-button lb-head-btn lb-list-add" aria-label="添加 MCP 管理器" @click="openForm()"><Plus aria-hidden="true" />添加</button>
+          </div>
           <div class="lb-find">
             <Search aria-hidden="true" />
-            <input v-model="query" type="search" maxlength="40" aria-label="查找管理器" placeholder="查找管理器" />
+            <input v-model="query" type="search" maxlength="40" aria-label="搜索管理器" placeholder="搜索管理器…" />
           </div>
           <div class="lb-managers" role="list" aria-label="MCP 管理器列表">
             <div v-for="b in shown" :key="b.id" role="listitem">
-              <ManagerCard :api="api" :bridge="b" :selected="b.id === selectedId" :location="location(b)" :local="isLocal(b)" @select="selectedId = b.id" />
+              <ManagerCard
+                :api="api" :bridge="b" :selected="b.id === selectedId" :location="location(b)" :local="isLocal(b)" :can-write="canWrite" :busy="busy"
+                @select="selectedId = b.id" @toggle="toggle(b)" @edit="selectedId = b.id; openForm(b)" @remove="remove(b)" @operate="selectedId = b.id; operate(b, $event)"
+              />
             </div>
             <p v-if="!shown.length" class="lb-list-none">没有名字里带“{{ query.trim() }}”的管理器。</p>
           </div>
-          <p class="lb-list-foot">一个 MCP 管理器在每个平台上只登录一个账号；同一个平台要用第二个账号，就再添加一个管理器。</p>
+          <p class="lb-list-foot"><Info aria-hidden="true" /><span><strong>每个管理器，每个平台可登录一个账号</strong>需要同平台的其他账号时，再添加管理器。</span></p>
         </section>
 
         <section v-if="selected" class="lb-bridge" :aria-label="`MCP 管理器：${selected.name}`">
@@ -295,20 +292,6 @@ function remove(bridge: Bridge) {
             </div>
             <div class="lb-detail-actions">
               <button type="button" class="secondary-button lb-head-btn" :disabled="status.isFetching.value" @click="status.refetch()"><RefreshCw aria-hidden="true" />刷新状态</button>
-              <div v-if="canWrite" ref="menuBox" class="lb-menu-wrap">
-                <button type="button" class="secondary-button lb-head-btn" aria-haspopup="true" :aria-expanded="menuOpen" @click="menuOpen = !menuOpen">管理操作<ChevronDown aria-hidden="true" /></button>
-                <div v-if="menuOpen" class="lb-menu" role="group" :aria-label="`管理操作：${selected.name}`">
-                  <button type="button" :disabled="busy" :aria-label="`${install ? '改名' : '修改'}${selected.name}`" @click="menu(() => openForm(selected!))">{{ install ? '改名' : '修改' }}</button>
-                  <button type="button" :disabled="busy" :aria-label="`${selected.enabled ? '停用' : '启用'}${selected.name}`" @click="menu(() => toggle(selected!))">{{ selected.enabled ? '停用' : '启用' }}</button>
-                  <button v-if="!install" type="button" class="is-danger" :disabled="busy" :aria-label="`删除${selected.name}`" @click="menu(() => remove(selected!))">删除</button>
-                  <button v-else-if="removed" type="button" class="is-danger" :disabled="busy" :aria-label="`卸载${selected.name}（只删除登记）`" @click="menu(() => operate(selected!, 'uninstall'))">卸载（只删除登记）</button>
-                  <template v-else>
-                    <button type="button" :disabled="busy" :aria-label="`重新部署${selected.name}`" @click="menu(() => operate(selected!, 'redeploy'))">重新部署</button>
-                    <button type="button" :disabled="busy" :aria-label="`重启${selected.name}`" @click="menu(() => operate(selected!, 'restart'))">重启</button>
-                    <button type="button" class="is-danger" :disabled="busy" :aria-label="`卸载${selected.name}`" @click="menu(() => operate(selected!, 'uninstall'))">卸载</button>
-                  </template>
-                </div>
-              </div>
             </div>
           </header>
           <p v-if="removed" role="note" class="lb-warn">服务器已从工作台移除：工作台登录不上去了，只能删除登记；容器要到那台服务器上手动处理。</p>

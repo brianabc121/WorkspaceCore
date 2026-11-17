@@ -131,7 +131,9 @@ describe('大模型客户端管理', () => {
     await openApp('/llm_bridge?view=manage')
     expect(await screen.findByText('只有 owner 能修改大模型客户端；你看到的是只读视图。')).toBeVisible()
     await screen.findByRole('article', { name: '账号：Claude' })
-    for (const name of [/^添加 MCP 管理器$/, /^修改/, /^删除/, /^停用/, /^登录/, /^退出登录/, /^更换账号/]) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
+    for (const name of [/^添加 MCP 管理器$/, /^修改/, /^删除/, /^停用/, /^登录/, /^退出登录/, /^更换账号/, /管理操作$/]) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
+    // 卡片上的启用开关只表示状态
+    expect(screen.getByRole('switch', { name: '启用主账号' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: '编辑控制的平台' })).not.toBeInTheDocument()
     // 重新检查只是读状态，admin 可以点
     expect(screen.getByRole('button', { name: '重新检查Claude' })).toBeEnabled()
@@ -711,28 +713,53 @@ describe('大模型客户端管理', () => {
     expect(screen.getByRole('button', { name: '登录Codex' })).toBeVisible()
   })
 
-  it('finds managers by name, opens the tab named in the address and keeps the actions in the 管理操作 menu', async () => {
+  it('finds managers by name, opens the tab named in the address and keeps the switch and the actions on each card', async () => {
     const one = { ...bridge, name: '1 号' }, two = { ...bridge, id: OTHER, name: '2 号', base_url: 'http://llm-bridge-2:8787' }
-    setup('owner', r => (path(r) === `/api/v1/llm_bridge/bridges/${OTHER}/status` ? Response.json(status()) : undefined), [one, two])
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const requests = setup('owner', r => {
+      if (path(r) === `/api/v1/llm_bridge/bridges/${OTHER}/status`) return Response.json(status())
+      if (path(r) === base && r.method === 'PATCH') return Response.json({ ...one, enabled: false })
+      return undefined
+    }, [one, two])
     // 从“会话纪要”的“纪要设置”过来：?tab=settings 直接打开运行设置
     await openApp('/llm_bridge?view=manage&tab=settings')
     expect(await screen.findByRole('tab', { name: '运行设置' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('Owner')).toBeVisible()
+    // 左边（效果图 T-0286）：标题旁是“添加”，下面按名字找，最底下是说明
     const list = screen.getByRole('region', { name: 'MCP 管理器' })
     expect(within(list).getByRole('heading', { name: 'MCP 管理器 · 2' })).toBeVisible()
-    await fireEvent.update(within(list).getByRole('searchbox', { name: '查找管理器' }), '2')
+    expect(within(list).getByRole('button', { name: '添加 MCP 管理器' })).toBeVisible()
+    expect(within(list).getByText('每个管理器，每个平台可登录一个账号')).toBeVisible()
+    await fireEvent.update(within(list).getByRole('searchbox', { name: '搜索管理器' }), '2')
     await waitFor(() => expect(within(list).queryByRole('article', { name: 'MCP 管理器：1 号' })).not.toBeInTheDocument())
     expect(within(list).getByRole('article', { name: 'MCP 管理器：2 号' })).toBeVisible()
-    // 右边详情：连接状态、在哪儿；操作收在“管理操作”里，按 Esc 收起
+    await fireEvent.update(within(list).getByRole('searchbox', { name: '搜索管理器' }), '')
+
+    // 右边详情：连接状态、在哪儿；操作不在这里，在卡片上
     const detail = screen.getByRole('region', { name: 'MCP 管理器：1 号' })
     expect(await within(detail).findByText('已连接')).toBeVisible()
     expect(within(detail).getByText('http://10.0.0.5:8787')).toBeVisible()
-    expect(within(detail).queryByRole('button', { name: '停用1 号' })).not.toBeInTheDocument()
-    await fireEvent.click(within(detail).getByRole('button', { name: '管理操作' }))
-    expect(within(detail).getByRole('group', { name: '管理操作：1 号' })).toBeVisible()
-    for (const name of ['修改1 号', '停用1 号', '删除1 号']) expect(within(detail).getByRole('button', { name })).toBeVisible()
+    expect(within(detail).queryByRole('button', { name: /管理操作/ })).not.toBeInTheDocument()
+
+    // 卡片的“…”：手动添加的是修改、删除；按 Esc 收起
+    const first = await within(list).findByRole('article', { name: 'MCP 管理器：1 号' })
+    expect(first).toHaveAttribute('aria-current', 'true')
+    await fireEvent.click(within(first).getByRole('button', { name: '1 号的管理操作' }))
+    const menu = within(first).getByRole('group', { name: '管理操作：1 号' })
+    for (const name of ['修改1 号', '删除1 号']) expect(within(menu).getByRole('button', { name })).toBeVisible()
     await fireEvent.keyDown(document, { key: 'Escape' })
-    expect(within(detail).queryByRole('button', { name: '停用1 号' })).not.toBeInTheDocument()
+    expect(within(first).queryByRole('group', { name: '管理操作：1 号' })).not.toBeInTheDocument()
+
+    // 启用开关：停用前先确认，取消就不发请求
+    const toggle = within(first).getByRole('switch', { name: '启用1 号' })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    confirm.mockReturnValueOnce(false)
+    await fireEvent.click(toggle)
+    expect(writes(requests)).toEqual([])
+    await fireEvent.click(toggle)
+    await waitFor(() => expect(writes(requests).map(r => r.method)).toEqual(['PATCH']))
+    expect(await writes(requests)[0]!.clone().json()).toEqual({ enabled: false })
+    expect(await screen.findByText('已停用「1 号」。')).toBeVisible()
   })
 
   it('changes the controlled platforms after confirming, never to none, and only offers logout for an unchecked platform', async () => {

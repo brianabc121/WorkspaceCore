@@ -103,14 +103,14 @@ const card = (page, name) => page.getByRole('article', { name: `MCP 管理器：
 const panel = (page) => page.getByRole('tabpanel', { name: '平台与账号' })
 const control = (page) => panel(page).getByRole('group', { name: '控制的平台' })
 // 卡片上“控制的平台”那几行的文字，例如 ['Claude未登录', 'CodeBuddy…']
-// 选中这个管理器，打开右边详情里的“管理操作”（修改、停用、删除等都在里面），返回右边的详情
+// 选中这个管理器，打开它卡片上的“…”（修改、删除、重新部署等都在里面；停用是卡片上的开关），返回这张卡片（T-0286）
 async function manage(page, name) {
-  await card(page, name).getByRole('button', { name: `查看 MCP 管理器：${name}` }).click()
-  const detail = page.getByRole('region', { name: `MCP 管理器：${name}`, exact: true })
-  await detail.waitFor()
-  const menu = detail.getByRole('button', { name: '管理操作' })
+  const own = card(page, name)
+  await own.getByRole('button', { name: `查看 MCP 管理器：${name}` }).click()
+  await page.getByRole('region', { name: `MCP 管理器：${name}`, exact: true }).waitFor()
+  const menu = own.getByRole('button', { name: `${name}的管理操作` })
   if ((await menu.count()) && (await menu.getAttribute('aria-expanded')) !== 'true') await menu.click()
-  return detail
+  return own
 }
 async function platformsOn(page, name) {
   const list = card(page, name).getByRole('list', { name: `${name}控制的平台` })
@@ -475,7 +475,7 @@ async function main() {
 
     // ---------------------------------------------------------------- 停用与删除
     acceptNext(page)
-    await (await manage(page, ONE)).getByRole('button', { name: `停用${ONE}` }).click()
+    await card(page, ONE).getByRole('switch', { name: `启用${ONE}` }).click()
     await page.getByText(`已停用「${ONE}」。`).waitFor()
     await page.getByRole('note').filter({ hasText: '这个 MCP 管理器已停用' }).waitFor()
     if (two) {
