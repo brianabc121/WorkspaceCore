@@ -306,6 +306,16 @@ const INFO_KEY = 'llm_chat_info_open'
 function infoRemembered() { try { return window.localStorage.getItem(INFO_KEY) === '1' } catch { return false } }
 const infoOpen = ref(infoRemembered())
 watch(infoOpen, open => { try { window.localStorage.setItem(INFO_KEY, open ? '1' : '0') } catch { /* 存不了就算了 */ } })
+// 浮在对话上时从头部下面开始：头部的搜索、“更多操作”、会话详情开关一直点得到。头部高度随标题换行变，量出来交给样式
+const head = ref<HTMLElement | null>(null), headHeight = ref(0)
+let headWatch: ResizeObserver | null = null
+watch(head, el => {
+  headWatch?.disconnect(); headWatch = null
+  if (!el) return
+  headHeight.value = el.offsetHeight
+  if (typeof ResizeObserver === 'function') { headWatch = new ResizeObserver(() => { headHeight.value = el.offsetHeight }); headWatch.observe(el) }
+})
+onBeforeUnmount(() => headWatch?.disconnect())
 async function act(action: () => Promise<unknown>) {
   if (working.value) return
   working.value = true; headError.value = ''
@@ -417,9 +427,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="lc-chat" :class="{ 'has-info': infoOpen && !!session }">
+  <div class="lc-chat" :class="{ 'has-info': infoOpen && !!session }" :style="{ '--lc-head-h': `${headHeight}px` }">
     <div class="lc-thread">
-      <header class="lc-head">
+      <header ref="head" class="lc-head">
         <button v-if="narrow" type="button" class="lc-icon" aria-label="返回会话列表" @click="emit('back')"><ArrowLeft aria-hidden="true" /></button>
         <div class="lc-head-main">
           <form v-if="renaming" class="lc-rename" aria-label="改会话标题" @submit.prevent="saveTitle">

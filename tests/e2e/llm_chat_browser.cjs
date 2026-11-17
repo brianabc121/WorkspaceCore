@@ -387,7 +387,13 @@ async function main() {
     const turnsTab = info.getByRole('tab', { name: '执行记录' })
     await turnsTab.getByText('14').waitFor()
     await info.getByRole('region', { name: '基本信息' }).getByText(MANAGER).waitFor()
-    step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
+    // 不够宽时会话详情浮在对话上（从头部下面开始，头部的按钮照样点得到）：看完收起，免得挡住后面要看的消息
+    check(await page.getByRole('button', { name: '更多操作', exact: true }).isEnabled(), '会话详情打开时头部的“更多操作”也要点得到')
+    await page.getByRole('button', { name: '更多操作', exact: true }).click()
+    await page.getByRole('group', { name: '会话操作' }).waitFor()
+    await page.getByRole('button', { name: '更多操作', exact: true }).click()
+    await info.getByRole('button', { name: '收起会话信息' }).click()
+    step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合；会话详情打开时头部的操作照样点得到')
 
     // ---------------------------------------------------------------- 别的管理员建的会话：接着发要确认一次
     const admin = await login(browser, adminEmail, problems, 'admin')
