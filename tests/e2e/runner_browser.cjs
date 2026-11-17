@@ -1,9 +1,10 @@
-// 容器服务器页面（原“运行服务器”，地址仍是 /runner）的浏览器验收（T-0141；页面 T-0140，改版 T-0186 / T-0187、验收 T-0188，SSH 部署 T-0136）：
-// 真实后端 + 真实 sshd + 真实 Docker / gVisor——
-// 没有服务器时引导去“服务器设置” → 添加容器服务器（外网入口）→ “通过 SSH 部署”填写服务器 → 页面显示的指纹与 sshd 的主机公钥一致，
-// 勾选核对后才能确认 → 输入一次登录密码开始部署（输入框随即清空）→ 页面跟着任务显示每一步，直到“部署完成，容器服务器已连上工作台” →
-// 容器总览的主机条显示在线、gVisor 可用、四个统计卡 → 旧链接 ?tab=environments 换到容器总览、详情直链遇到不存在的容器如实提示 →
-// 智能体用量、环境模板、执行记录、服务器设置几个标签都能打开，地址里记着标签 → 390px 宽度下无横向滚动 →
+// 容器服务器页面（原“运行服务器”，地址仍是 /runner）的浏览器验收（T-0141；页面 T-0140，改版 T-0186 / T-0187、验收 T-0188，SSH 部署 T-0136；
+// T-0277 按智能体服务器页的样式重排）：真实后端 + 真实 sshd + 真实 Docker / gVisor——
+// 没有服务器时服务器表如实说明 → 页头“添加服务器”添加容器服务器（外网入口），添加后打开它的详情 → “连接与部署”填写服务器 →
+// 页面显示的指纹与 sshd 的主机公钥一致，勾选核对后才能确认 → 输入一次登录密码开始部署（输入框随即清空）→
+// 页面跟着任务显示每一步，直到“部署完成，容器服务器已连上工作台” → 服务器详情的页头卡片显示在线、gVisor 可用、最近联系，统计卡，这台服务器上的容器 →
+// 旧链接 ?tab=environments 换到全部容器、详情直链遇到不存在的容器如实提示 → 智能体用量、环境模板、执行记录几个标签都能打开，地址里记着标签 →
+// 旧链接 ?tab=settings 打开这台服务器，回收策略展开后保存 → 390px 宽度下无横向滚动 →
 // 卸载（同时删除接入包目录，sudo 再填一次密码）→ 吊销专用密钥 → 删除 SSH 地址 → 移除容器服务器 →
 // 密码只出现在开始部署与卸载的两个请求里：不在页面、接口响应、浏览器存储里；浏览器只访问工作台自己的地址。
 //
@@ -41,16 +42,24 @@ async function noHorizontalScroll(page, what) {
   await page.setViewportSize({ width: 1440, height: 1000 })
 }
 
+// 跟着一次 SSH 任务（部署 / 卸载）直到结束，返回每一步的“步骤名 说明=状态”。
+// 进度区块是共用的 JobProgress（T-0277 起和智能体服务器一样）：区块的 data-status 是任务状态；成功后步骤收起，但仍在页面里
 async function waitJob(region, kind, timeout) {
   const deadline = Date.now() + timeout
+  const finished = async () => /^(succeeded|failed|interrupted)$/.test(await region.getAttribute('data-status', { timeout: 1000 }).catch(() => '') ?? '')
+  check(await region.getByRole('heading', { name: kind }).count() === 1, `进度区块的标题应是“${kind}”`)
   let last = ''
   while (Date.now() < deadline) {
-    if (await region.getByText(new RegExp(`^${kind}：(成功|失败|已中断)$`)).count()) break
-    const current = await region.locator('li[data-status="running"]').first().textContent({ timeout: 1000 }).catch(() => '')
+    if (await finished()) break
+    const current = await region.locator('li[data-status="running"] .ssh-step-title').first().textContent({ timeout: 1000 }).catch(() => '')
     if (current && current !== last) { console.log(`  … ${current.trim()}`); last = current }
     await region.page().waitForTimeout(3000)
   }
-  return region.locator('li').evaluateAll((items) => items.map((li) => `${li.textContent.trim()}=${li.dataset.status}`))
+  check(await finished(), `${kind}没有在 ${timeout / 60000} 分钟内结束`)
+  return region.locator('li').evaluateAll((items) => items.map((li) => {
+    const text = (selector) => li.querySelector(selector)?.textContent.trim() ?? ''
+    return `${[text('.ssh-step-title'), text('.ssh-step-detail')].filter(Boolean).join(' ')}=${li.dataset.status}`
+  }))
 }
 
 async function main() {
@@ -80,21 +89,24 @@ async function main() {
   await page.getByRole('button', { name: '登录' }).click()
   await page.waitForURL(`${base}/`)
 
-  // ---------------------------------------------------------------- 没有容器服务器 → 服务器设置里添加（外网入口）
+  // ---------------------------------------------------------------- 没有容器服务器 → 页头“添加服务器”（外网入口），添加后打开它
+  const name = `runner-ui-${run}`
   await page.goto(`${base}/runner`)
   await appears(page.getByRole('heading', { level: 1, name: '容器服务器' }), '页面标题应是“容器服务器”（地址仍是 /runner）')
-  const empty = page.getByRole('region', { name: '还没有容器服务器' })
-  await empty.waitFor()
-  await empty.getByRole('button', { name: '去添加容器服务器' }).click()
-  await page.waitForURL(/\/runner\?tab=settings$/)
-  await appears(page.getByRole('tab', { name: '服务器设置', selected: true }), '“去添加容器服务器”应切到服务器设置标签')
+  const list = page.getByRole('region', { name: '服务器列表' })
+  await appears(list.getByText(/还没有容器服务器/), '没有服务器时服务器表应如实说明')
+  await page.getByRole('button', { name: '添加服务器' }).click()
   const add = page.getByRole('form', { name: '添加容器服务器' })
-  await add.getByLabel('名称').fill(`runner-ui-${run}`)
+  await add.getByLabel('名称').fill(name)
   await add.getByLabel('连工作台的入口').selectOption('public')
   await add.getByRole('button', { name: '添加' }).click()
-  const ssh = page.getByRole('region', { name: '通过 SSH 部署' })
+  await page.waitForURL(/\/runner\?host_id=[0-9a-f-]{36}$/)
+  const head = page.getByRole('region', { name: `容器服务器：${name}` })
+  await head.waitFor({ timeout: 30000 })
+  check(await list.getByRole('row', { name: new RegExp(name) }).getAttribute('aria-selected') === 'true', '服务器表里应选中刚添加的服务器')
+  const ssh = page.getByRole('region', { name: '连接与部署' })
   await ssh.waitFor()
-  step('容器服务器页没有服务器时引导到“服务器设置”（地址里记着 ?tab=settings），添加容器服务器（外网入口），出现“通过 SSH 部署”')
+  step('容器服务器页没有服务器时服务器表如实说明；页头“添加服务器”添加容器服务器（外网入口），添加后打开它的详情（地址里记着 ?host_id=），出现“连接与部署”')
 
   // ---------------------------------------------------------------- 填写服务器，核对指纹
   const form = ssh.getByRole('form', { name: '容器服务器的 SSH 地址' })
@@ -128,40 +140,41 @@ async function main() {
   const statuses = await waitJob(progress, '部署', INSTALL_TIMEOUT)
   if (!(await progress.getByText('部署完成，容器服务器已连上工作台。').count())) {
     console.error(statuses.join('\n'))
-    console.error(await progress.locator('details pre').textContent().catch(() => ''))
-    throw new Error(`部署没有成功：${await progress.getByRole('alert').textContent().catch(() => '')}`)
+    console.error(await progress.textContent().catch(() => ''))
+    throw new Error(`部署没有成功：${await progress.getByRole('alert').first().textContent().catch(() => '')}`)
   }
   check(statuses.every((s) => /=(done|skipped)$/.test(s)), `每一步都应完成或跳过：${statuses.join('; ')}`)
   step(`输入一次密码开始部署；页面跟着任务显示 ${statuses.length} 步（连接、核对、专用密钥、上传接入包、安装脚本、上线）直到“部署完成，容器服务器已连上工作台”`)
 
-  // ---------------------------------------------------------------- 容器总览与各标签（T-0186 / T-0187）
-  await page.getByRole('tab', { name: '容器总览' }).click()
+  // ---------------------------------------------------------------- 服务器详情、统计卡与各标签（T-0186 / T-0187；T-0277 按智能体服务器页重排）
+  const stats = head.getByRole('list', { name: '服务器概览' })
+  await stats.getByText('在线', { exact: true }).first().waitFor({ timeout: 60000 })
+  const facts = await stats.textContent()
+  check(/gVisor 可用/.test(facts), `服务器详情应显示 gVisor 可用：${facts.slice(0, 300)}`)
+  check(/最近联系/.test(facts), `服务器详情应显示最近联系时间：${facts.slice(0, 300)}`)
+  check(/核/.test(facts) && /GiB/.test(facts), `服务器详情应显示 CPU、内存与磁盘：${facts.slice(0, 300)}`)
+  const cards = await page.getByRole('region', { name: '容器统计' }).textContent()
+  check(/服务器/.test(cards) && /在线/.test(cards) && /容器环境/.test(cards) && /运行中/.test(cards), `应显示四个统计卡：${cards.slice(0, 200)}`)
+  check(/在线/.test(await list.getByRole('row', { name: new RegExp(name) }).textContent()), '服务器表里这台服务器应是在线')
+  await page.getByRole('region', { name: '这台服务器上的容器' }).getByText('这台服务器上还没有容器环境').waitFor({ timeout: 30000 })
+  await noHorizontalScroll(page, '服务器详情')
+  await head.getByRole('button', { name: '关闭服务器详情' }).click()
   await page.waitForURL(`${base}/runner`)
-  const strip = page.getByRole('region', { name: '容器服务器主机' })
-  await strip.getByText('在线', { exact: true }).waitFor({ timeout: 60000 })
-  const facts = await strip.textContent()
-  check(/gVisor 可用/.test(facts), `主机条应显示 gVisor 可用：${facts.slice(0, 300)}`)
-  check(/最近联系/.test(facts), `主机条应显示最近联系时间：${facts.slice(0, 300)}`)
-  const stats = page.getByRole('region', { name: '容器统计' })
-  await stats.getByText('容器环境总数').waitFor({ timeout: 30000 })
-  const cards = await stats.textContent()
-  check(/容器环境总数/.test(cards) && /需关注/.test(cards), `应显示四个统计卡：${cards.slice(0, 200)}`)
   await page.getByRole('region', { name: '容器列表' }).getByText('还没有容器环境').waitFor({ timeout: 30000 })
-  await noHorizontalScroll(page, '容器总览')
-  step('容器总览：主机条显示在线、gVisor 可用与最近联系；四个统计卡；还没有容器时如实说明；390px 宽度无横向滚动')
+  step('服务器详情：页头卡片显示在线、gVisor 可用、最近联系与 CPU / 内存 / 磁盘；四个统计卡；这台服务器上还没有容器时如实说明；关掉详情回到全部容器；390px 宽度无横向滚动')
 
-  // 旧链接 ?tab=environments（原来的“环境”标签、旧通知）换到容器总览，其余参数保留
+  // 旧链接 ?tab=environments（原来的“环境”标签、旧通知）换到全部容器，其余参数保留
   await page.goto(`${base}/runner?tab=environments&state=running`)
   await page.waitForURL(`${base}/runner?state=running`)
-  await appears(page.getByRole('tab', { name: '容器总览', selected: true }), '旧链接应打开容器总览')
+  await appears(page.getByRole('tab', { name: '全部容器', selected: true }), '旧链接应打开全部容器')
   // 详情直链：不存在（或已无权访问）的容器显示提示，不留旧内容
   await page.goto(`${base}/runner?environment_id=00000000-0000-4000-8000-000000000000`)
   await page.getByText('这个容器不存在，或你已无权访问。').waitFor({ timeout: 30000 })
-  step('旧链接 ?tab=environments 换到容器总览并保留筛选；详情直链遇到不存在的容器显示“不存在或已无权访问”')
+  step('旧链接 ?tab=environments 换到全部容器并保留筛选；详情直链遇到不存在的容器显示“不存在或已无权访问”')
 
   for (const [tab, key, probe] of [['智能体用量', 'instances', '智能体用量'], ['环境模板', 'templates', null], ['执行记录', 'runs', '筛选运行记录']]) {
     await page.getByRole('tab', { name: tab }).click()
-    // 前一步打开过容器详情：地址里可能还带着 environment_id（详情只在总览里显示），tab 不一定是第一个参数
+    // 前一步打开过容器详情：地址里可能还带着 environment_id，tab 不一定是第一个参数
     await page.waitForURL(new RegExp(`[?&]tab=${key}(?:&|$)`))
     if (probe) await page.getByRole('region', { name: probe }).waitFor()
     else await page.getByRole('tabpanel', { name: tab }).waitFor()
@@ -173,12 +186,17 @@ async function main() {
   await appears(page.getByRole('tab', { name: '执行记录', selected: true }), '刷新后仍停在地址里记着的标签')
   step('智能体用量、环境模板、执行记录标签都能打开（地址里记着 ?tab=，刷新后不变），没有加载失败；390px 宽度无横向滚动')
 
-  await page.getByRole('tab', { name: '服务器设置' }).click()
-  const policy = page.getByRole('form', { name: '回收策略' })
-  await policy.waitFor()
-  await policy.getByRole('button', { name: '保存回收策略' }).click()
+  // 旧链接 ?tab=settings（原来的“服务器设置”标签、MCP 管理器页的链接）打开这台服务器
+  await page.goto(`${base}/runner?tab=settings`)
+  await page.waitForURL(/\/runner\?host_id=[0-9a-f-]{36}$/)
+  await head.waitFor({ timeout: 30000 })
+  const policy = page.getByRole('region', { name: '回收策略' })
+  await policy.getByRole('button', { name: '查看与修改' }).click()
+  const policyForm = policy.getByRole('form', { name: '回收策略' })
+  await policyForm.waitFor()
+  await policyForm.getByRole('button', { name: '保存回收策略' }).click()
   await page.getByRole('status').filter({ hasText: /已保存/ }).first().waitFor({ timeout: 30000 })
-  step('服务器设置：回收策略显示生效值，保存成功')
+  step('旧链接 ?tab=settings 打开这台服务器；回收策略默认折叠，展开后显示生效值，保存成功')
 
   // ---------------------------------------------------------------- 卸载、吊销、删除 SSH 地址、移除容器服务器
   const manage = ssh.getByRole('group', { name: '卸载与吊销' })
@@ -203,9 +221,10 @@ async function main() {
   await ssh.getByRole('form', { name: '部署容器服务器' }).getByRole('button', { name: '删除' }).click()
   await ssh.getByRole('form', { name: '容器服务器的 SSH 地址' }).waitFor()
   page.once('dialog', (d) => d.accept())
-  await page.getByRole('button', { name: '移除容器服务器' }).click()
-  await page.getByRole('form', { name: '添加容器服务器' }).waitFor({ timeout: 30000 })
-  step('吊销专用密钥、删除 SSH 地址、移除容器服务器，回到“添加容器服务器”')
+  await ssh.getByRole('button', { name: '移除容器服务器' }).click()
+  await page.waitForURL(`${base}/runner`)
+  await list.getByText(/还没有容器服务器/).waitFor({ timeout: 30000 })
+  step('吊销专用密钥、删除 SSH 地址、移除容器服务器，回到空的服务器表')
 
   // ---------------------------------------------------------------- 密码与流量
   const storage = await page.evaluate(() => JSON.stringify({ ...localStorage }) + JSON.stringify({ ...sessionStorage }))

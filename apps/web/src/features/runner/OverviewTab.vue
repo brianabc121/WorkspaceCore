@@ -8,19 +8,26 @@ import { LIFETIME, runnerError, STATE, useRunnerEnvironments, type EnvFilter, ty
 import { SORT } from './containerMetrics'
 import ContainerTable from './ContainerTable.vue'
 
-// 容器总览（T-0186，原“环境”标签合进来）：搜索、按智能体 / 类别 / 状态筛选、排序，服务端分页（每页 50）。
+// 容器列表（T-0186，原“环境”标签合进来；T-0277 起也用在服务器详情里）：搜索、按智能体 / 类别 / 状态筛选、排序，服务端分页（每页 50）。
 // 统计卡读 overview 的全量；这里显示的是服务端算好的“匹配总数”，不拿当前页的条数冒充全量。
-// 筛选条件写在地址里（父组件管），页码只在本页：换筛选、换排序、手动刷新回到第一页；
-// 30 秒的自动刷新保留当前页，这一页没了（记录被删或挪到前面）就回到第一页。
+// “全部容器”标签的筛选条件写在地址里（父组件管）；服务器详情里传 hostId，只看这台服务器上的（筛选在详情自己手里）。
+// 页码只在本页：换筛选、换排序、手动刷新回到第一页；30 秒的自动刷新保留当前页，这一页没了（记录被删或挪到前面）就回到第一页。
 const PAGE = 50
-const props = defineProps<{ instances: Schema['RunnerInstanceUsage'][]; filters: Filters; workspaceTotal: number | null; selectedId: string | null; recent: Schema['RunnerOverview']['recent']; reload: number }>()
+const props = withDefaults(defineProps<{
+  instances: Schema['RunnerInstanceUsage'][]; filters: Filters; workspaceTotal: number | null; selectedId: string | null
+  recent?: Schema['RunnerOverview']['recent']; reload: number
+  /** 只看这台服务器上的容器（服务器详情） */
+  hostId?: string
+  /** 区块标题（服务器详情里显示“这台服务器上的容器”） */
+  title?: string
+}>(), { recent: () => [], hostId: undefined, title: undefined })
 const emit = defineEmits<{ filters: [next: Filters]; select: [id: string, row: HTMLElement | null] }>()
 const scope = useAuthStore().workspaceId!
 
 const cursors = ref<(string | undefined)[]>([undefined])
 const key = computed(() => JSON.stringify(props.filters))
 watch([key, () => props.reload], () => { cursors.value = [undefined] })
-const query = computed<EnvFilter>(() => ({ ...props.filters, cursor: cursors.value[cursors.value.length - 1], limit: PAGE }))
+const query = computed<EnvFilter>(() => ({ ...props.filters, host_id: props.hostId, cursor: cursors.value[cursors.value.length - 1], limit: PAGE }))
 const list = useRunnerEnvironments(scope, query)
 const data = computed(() => list.data.value)
 const items = computed(() => data.value?.items ?? [])
@@ -46,7 +53,8 @@ const latest = computed(() => props.recent[0] ?? null)
 </script>
 
 <template>
-  <section class="ws-panel asv-list cs-list" aria-label="容器列表">
+  <section class="ws-panel asv-list cs-list" :aria-label="title ?? '容器列表'">
+    <div v-if="title" class="asv-panel-head"><h3>{{ title }}<template v-if="total !== null && !filtered"> · {{ total }}</template></h3></div>
     <div class="ws-toolbar cs-toolbar">
       <label class="ws-search"><Search aria-hidden="true" /><span class="sr-only">搜索容器用途或环境 ID</span><input v-model="term" type="search" placeholder="搜索容器用途或环境 ID" maxlength="100" /></label>
       <select :value="filters.instance_id ?? ''" aria-label="按申请智能体筛选" @change="set('instance_id', ($event.target as HTMLSelectElement).value)">
@@ -66,7 +74,7 @@ const latest = computed(() => props.recent[0] ?? null)
       </select>
       <label class="check-field cs-deleted"><input type="checkbox" :checked="!!filters.include_deleted" @change="set('include_deleted', ($event.target as HTMLInputElement).checked)" /> 含已删除</label>
       <p class="cs-scope" role="status">
-        <template v-if="total !== null">{{ filtered ? '筛选结果' : '当前工作空间' }} {{ total }} 个<template v-if="filtered && workspaceTotal !== null"> / 工作空间 {{ workspaceTotal }} 个</template></template>
+        <template v-if="total !== null">{{ filtered ? '筛选结果' : hostId ? '这台服务器' : '当前工作空间' }} {{ total }} 个<template v-if="filtered && workspaceTotal !== null"> / {{ hostId ? '这台服务器' : '工作空间' }} {{ workspaceTotal }} 个</template></template>
         <template v-else-if="data">已加载 {{ items.length }} 个，总量未提供</template>
       </p>
     </div>
@@ -75,7 +83,7 @@ const latest = computed(() => props.recent[0] ?? null)
 
     <p v-if="list.isPending.value" role="status" class="ws-state-line">正在加载容器…</p>
     <div v-else-if="list.error.value && !data" class="ws-state-line"><p role="alert">{{ runnerError(list.error.value) }}</p><button type="button" class="secondary-button" @click="list.refetch()">重试</button></div>
-    <p v-else-if="!items.length" class="ws-state-line">{{ filtered ? '没有符合条件的容器。' : '还没有容器环境。打开 OpenClaw 智能体的“运行环境权限”后，智能体会按需申请。' }}</p>
+    <p v-else-if="!items.length" class="ws-state-line">{{ filtered ? '没有符合条件的容器。' : hostId ? '这台服务器上还没有容器环境。智能体申请环境时，工作台按资源自动分配到在线的服务器上。' : '还没有容器环境。打开 OpenClaw 智能体的“运行环境权限”后，智能体会按需申请。' }}</p>
     <ContainerTable v-else :items="items" :selected-id="selectedId" @select="(id, row) => emit('select', id, row)" />
 
     <div v-if="items.length" class="cs-foot">

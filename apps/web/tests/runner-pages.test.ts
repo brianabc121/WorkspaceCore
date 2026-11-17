@@ -1,5 +1,6 @@
-// 容器服务器页（原“运行服务器”，T-0140；改版 T-0186）：环境模板、执行记录、服务器设置；实例卡片上的运行环境权限。
-// 容器总览、智能体用量与详情在 container-server-pages.test.ts / container-server-detail.test.ts。
+// 容器服务器页（原“运行服务器”，T-0140；改版 T-0186；T-0277 按智能体服务器页重排）：环境模板、执行记录，
+// 服务器的添加、回收策略、移除与连接与部署（SSH）；实例卡片上的运行环境权限。
+// 统计卡、服务器表、服务器详情的读数、全部容器、智能体用量与容器详情在 container-server-pages.test.ts / container-server-detail.test.ts。
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, within } from '@testing-library/vue'
 import { mockApi, openApp, me, workspace, runnerOff } from './helpers'
@@ -65,18 +66,21 @@ describe('容器服务器页：模板、执行记录与设置', () => {
       if (path(r) === '/api/v1/runner/hosts/host-2/ssh') return Response.json({ target: null, job: null, warning: null })
       return undefined
     }, { data: { ...overview({ host: null }), hosts: [host(), second] } as Schema['RunnerOverview'] })
-    await openApp('/runner?tab=settings&host_id=host-2')
-    const hosts = await screen.findByRole('region', { name: '容器服务器池' })
-    expect(within(hosts).getByRole('button', { name: /运行服务器 A/ })).toBeVisible()
-    expect(within(hosts).getByRole('button', { name: /运行服务器 B/ })).toHaveAttribute('aria-pressed', 'true')
-    const form = await screen.findByRole('form', { name: '回收策略' })
+    await openApp('/runner?host_id=host-2')
+    const list = await screen.findByRole('region', { name: '服务器列表' })
+    expect(within(list).getByRole('row', { name: /运行服务器 A/ })).toHaveAttribute('aria-selected', 'false')
+    expect(within(list).getByRole('row', { name: /运行服务器 B/ })).toHaveAttribute('aria-selected', 'true')
+    expect(await screen.findByRole('region', { name: '容器服务器：运行服务器 B' })).toBeVisible()
+    const policy = screen.getByRole('region', { name: '回收策略' })
+    expect(within(policy).queryByRole('form', { name: '回收策略' })).not.toBeInTheDocument()  // 默认折叠
+    await fireEvent.click(within(policy).getByRole('button', { name: '查看与修改' }))
+    const form = within(policy).getByRole('form', { name: '回收策略' })
     await fireEvent.update(within(form).getByLabelText('磁盘高水位（0 ~ 1）'), '0.75')
     await fireEvent.click(within(form).getByRole('button', { name: '保存回收策略' }))
     await screen.findByText(/已保存回收策略/)
     const write = requests.find(r => r.method === 'PUT' && path(r) === '/api/v1/runner/hosts/host-2/policy')!
     expect(await write.clone().json()).toMatchObject({ version: 8 })
     expect(requests.some(r => /^\/api\/v1\/runner\/host(?:\/|$)/.test(path(r)))).toBe(false)
-    expect(screen.getByRole('form', { name: '添加容器服务器' })).toBeVisible()
   })
   it('redirects members to forbidden', async () => {
     setup(undefined, { role: 'member' })
@@ -125,40 +129,55 @@ describe('容器服务器页：模板、执行记录与设置', () => {
     expect(await within(item).findByLabelText('完整输出')).toHaveTextContent('full output line 2')
   })
 
-  it('adds a runner host when there is none', async () => {
-    const requests = setup(r => (path(r) === '/api/v1/runner/hosts' && r.method === 'POST' ? Response.json(host({ status: 'pending', last_seen_at: null }), { status: 201 }) : undefined),
-      { data: overview({ host: null, environments: {}, instances: [], recent: [] }) })
-    await openApp('/runner')
-    await fireEvent.click(await screen.findByRole('button', { name: '去添加容器服务器' }))
+  it('adds a runner host when there is none and opens it', async () => {
+    let added = false
+    const requests = setup(r => {
+      if (path(r) === '/api/v1/runner/hosts' && r.method === 'POST') { added = true; return Response.json(host({ status: 'pending', last_seen_at: null }), { status: 201 }) }
+      if (path(r) === '/api/v1/runner/overview' && added) return Response.json(overview({ host: host({ status: 'pending', last_seen_at: null }), environments: {}, instances: [], recent: [] }))
+      if (path(r) === '/api/v1/runner/hosts/host-1/ssh') return Response.json({ target: null, job: null, warning: null })
+      return undefined
+    }, { data: overview({ host: null, environments: {}, instances: [], recent: [] }) })
+    const { router } = await openApp('/runner')
+    await fireEvent.click(await screen.findByRole('button', { name: '添加服务器' }))
     const form = await screen.findByRole('form', { name: '添加容器服务器' })
     await fireEvent.update(within(form).getByLabelText('连工作台的入口'), 'public')
     await fireEvent.click(within(form).getByRole('button', { name: '添加' }))
-    await screen.findByText(/已添加/)
+    await vi.waitFor(() => expect(router.currentRoute.value.query).toEqual({ host_id: 'host-1' }))
+    expect(await screen.findByRole('region', { name: '容器服务器：运行服务器 A' })).toBeVisible()
+    expect(screen.queryByRole('form', { name: '添加容器服务器' })).not.toBeInTheDocument()
     const post = requests.find(r => r.method === 'POST' && path(r) === '/api/v1/runner/hosts')!
     expect(await post.clone().json()).toEqual({ name: '容器服务器', ingress: 'public', backend: 'docker' })
   })
 
   it('saves the reclaim policy with the version and removes the host after confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let removed = false
     const requests = setup(r => {
       if (path(r) === '/api/v1/runner/hosts/host-1/policy') return Response.json(host({ version: 5 }))
-      if (path(r) === '/api/v1/runner/hosts/host-1' && r.method === 'DELETE') return new Response(null, { status: 204 })
+      if (path(r) === '/api/v1/runner/hosts/host-1' && r.method === 'DELETE') { removed = true; return new Response(null, { status: 204 }) }
+      // 移除以后服务器不在列表里了：详情随之收起，页面也不能停在“找不到这台容器服务器”
+      if (path(r) === '/api/v1/runner/overview' && removed) return Response.json(overview({ host: null }))
       return undefined
     })
-    await openApp('/runner?tab=settings')
-    const form = await screen.findByRole('form', { name: '回收策略' })
+    const { router } = await openApp('/runner?host_id=host-1')
+    const policy = await screen.findByRole('region', { name: '回收策略' })
+    expect(policy).toHaveTextContent('会话空闲 15 分钟停止 · 内存高水位 85% · 磁盘高水位 80%')
+    await fireEvent.click(within(policy).getByRole('button', { name: '查看与修改' }))
+    const form = within(policy).getByRole('form', { name: '回收策略' })
     expect(within(form).getByLabelText('会话：空闲多少分钟停止')).toHaveValue(15)
     await fireEvent.update(within(form).getByLabelText('磁盘高水位（0 ~ 1）'), '1.5')
     await fireEvent.click(within(form).getByRole('button', { name: '保存回收策略' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('要在 0 到 1 之间')
+    expect(within(policy).getByRole('alert')).toHaveTextContent('要在 0 到 1 之间')
     await fireEvent.update(within(form).getByLabelText('磁盘高水位（0 ~ 1）'), '0.75')
     await fireEvent.click(within(form).getByRole('button', { name: '保存回收策略' }))
     await screen.findByText(/已保存回收策略/)
     const put = requests.find(r => path(r) === '/api/v1/runner/hosts/host-1/policy')!
     expect(await put.clone().json()).toEqual({ version: 4, policy: { session_idle_minutes: 15, mem_high: 0.85, disk_high: 0.75, disk_emergency: 0.95, snapshot_max_gb: 5 } })
-    await fireEvent.click(screen.getByRole('button', { name: '移除容器服务器' }))
+    await fireEvent.click(within(screen.getByRole('region', { name: '连接与部署' })).getByRole('button', { name: '移除容器服务器' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('凭证立即失效'))
-    await screen.findByText('已移除容器服务器')
+    await vi.waitFor(() => expect(router.currentRoute.value.query).toEqual({}))
+    expect(await within(screen.getByRole('region', { name: '服务器列表' })).findByText(/还没有容器服务器/)).toBeVisible()
+    expect(screen.queryByText(/找不到这台容器服务器/)).not.toBeInTheDocument()
     const del = requests.find(r => r.method === 'DELETE' && path(r) === '/api/v1/runner/hosts/host-1')!
     expect(new URL(del.url).searchParams.get('version')).toBe('4')
   })
@@ -255,8 +274,8 @@ describe('通过 SSH 部署容器服务器', () => {
       if (p === '/api/v1/runner/hosts/host-1/ssh/install') { state = { target: target({ host_key_confirmed: true, version: 2 }), job: job(), warning: null }; return Response.json(state, { status: 202 }) }
       return undefined
     }, { role: 'owner' })
-    await openApp('/runner?tab=settings')
-    const panel = await screen.findByRole('region', { name: '通过 SSH 部署' })
+    await openApp('/runner?host_id=host-1')
+    const panel = await screen.findByRole('region', { name: '连接与部署' })
     const form = await within(panel).findByRole('form', { name: '容器服务器的 SSH 地址' })
     await fireEvent.update(within(form).getByLabelText('服务器 IP 或域名 *'), '203.0.113.20')
     await fireEvent.update(within(form).getByLabelText('SSH 账号 *'), 'deploy')
@@ -293,9 +312,11 @@ describe('通过 SSH 部署容器服务器', () => {
 
   it('explains why the deploy stopped at gVisor and sends the permission to restart Docker only when ticked', async () => {
     const requests = deployed({ error_code: 'gvisor_needs_docker_restart', error_message: restartNeeded })
-    await openApp('/runner?tab=settings')
-    const panel = await screen.findByRole('region', { name: '通过 SSH 部署' })
-    expect(await within(panel).findByRole('alert')).toHaveTextContent(`${restartNeeded}（gvisor_needs_docker_restart）`)
+    await openApp('/runner?host_id=host-1')
+    const panel = await screen.findByRole('region', { name: '连接与部署' })
+    const alert = await within(panel).findByRole('alert')
+    expect(alert).toHaveTextContent(restartNeeded)
+    expect(alert).toHaveTextContent('gvisor_needs_docker_restart')
     const deploy = within(panel).getByRole('form', { name: '部署容器服务器' })
     const allow = within(deploy).getByLabelText('允许重启 Docker')
     expect(allow).not.toBeChecked()
@@ -312,8 +333,8 @@ describe('通过 SSH 部署容器服务器', () => {
 
   it('does not offer to restart Docker after any other failure', async () => {
     const requests = deployed({ error_code: 'install_failed', error_message: '安装脚本没有成功，详见日志' })
-    await openApp('/runner?tab=settings')
-    const panel = await screen.findByRole('region', { name: '通过 SSH 部署' })
+    await openApp('/runner?host_id=host-1')
+    const panel = await screen.findByRole('region', { name: '连接与部署' })
     const deploy = await within(panel).findByRole('form', { name: '部署容器服务器' })
     expect(within(panel).queryByLabelText('允许重启 Docker')).not.toBeInTheDocument()
     await fireEvent.click(within(deploy).getByRole('button', { name: '开始部署' }))
@@ -324,8 +345,12 @@ describe('通过 SSH 部署容器服务器', () => {
 
   it('is owner only', async () => {
     setup()
-    await openApp('/runner?tab=settings')
-    const panel = await screen.findByRole('region', { name: '通过 SSH 部署' })
-    expect(within(panel).getByText(/只有 owner 能通过 SSH 部署/)).toBeVisible()
+    await openApp('/runner?host_id=host-1')
+    const panel = await screen.findByRole('region', { name: '连接与部署' })
+    expect(within(panel).getByText('只有 owner 能部署')).toBeVisible()
+    expect(within(panel).queryByRole('form', { name: '容器服务器的 SSH 地址' })).not.toBeInTheDocument()
+    // admin 能看部署前提，也能移除（和原来的服务器设置一样）
+    expect(within(panel).getByRole('region', { name: '部署前提' })).toHaveTextContent('runner-agent已连上工作台')
+    expect(within(panel).getByRole('button', { name: '移除容器服务器' })).toBeEnabled()
   })
 })

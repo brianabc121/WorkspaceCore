@@ -3,8 +3,9 @@ import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, type Schema } from '../../services/api'
 
-// 容器服务器页（原“运行服务器”，T-0140；改版 T-0186 / T-0187，docs/v2/container-server-redesign，owner / admin）：
-// 容器总览、智能体用量、环境模板、执行记录、服务器设置。地址与接口仍是 /runner、/api/v1/runner（只改用户看到的名称）。
+// 容器服务器页（原“运行服务器”，T-0140；改版 T-0186 / T-0187；按智能体服务器页的样式重排 T-0277，owner / admin）：
+// 服务器表与选中服务器的详情（连接与部署、这台服务器上的容器、回收策略），下面是全部容器、智能体用量、环境模板、执行记录。
+// 地址与接口仍是 /runner、/api/v1/runner（只改用户看到的名称）。
 // 查询的 key 以 'runner' 开头；写操作之后刷新全部 'runner' 查询与实例卡片（'agents'）。
 // /api/v1/runner/* 不会自动带 X-Workspace-Id，每次请求都显式传。
 export type RunnerEnv = Schema['RunnerEnvAdminOut']
@@ -25,10 +26,10 @@ export function useRunnerOverview(scope: string) {
 }
 
 // 列表的筛选、排序与分页都在服务端做（T-0185）：q 搜用途或环境 ID，sort 按最近使用 / 实时 CPU / 实时内存，
-// cursor 是上一页给的游标，limit 新页面传 50（缺省 500 是给旧页面兼容的）
+// cursor 是上一页给的游标，limit 新页面传 50（缺省 500 是给旧页面兼容的）；host_id 只看一台服务器上的（服务器详情里用）
 export type EnvSort = 'last_used' | 'cpu' | 'memory'
 export type EnvFilter = {
-  state?: RunnerEnv['state']; lifetime?: RunnerEnv['lifetime']; instance_id?: string; include_deleted?: boolean
+  state?: RunnerEnv['state']; lifetime?: RunnerEnv['lifetime']; instance_id?: string; host_id?: string; include_deleted?: boolean
   q?: string; sort?: EnvSort; cursor?: string; limit?: number
 }
 /** 写在地址里的筛选（不含分页） */
@@ -99,7 +100,7 @@ export function runnerError(error: unknown): string {
     PLACEMENT_UNAVAILABLE: '没有满足条件的服务器，请查看节点排除原因。',
     PLACEMENT_TARGET_UNAVAILABLE: '指定服务器暂不可用；不会自动换机。',
     PLACEMENT_CAPACITY_INSUFFICIENT: '指定服务器资源不足；请选择其他节点或主动切换自动分配。',
-    RUNNER_HAS_ENVIRONMENTS: '还有没删除的环境：先在“容器总览”里删除，再移除容器服务器。',
+    RUNNER_HAS_ENVIRONMENTS: '还有没删除的环境：先在“这台服务器上的容器”里删除，再移除容器服务器。',
     AGENT_INGRESS_NOT_CONFIGURED: '这个入口还没有配置（AGENT_INTRANET_URL / AGENT_PUBLIC_URL），不能接入容器服务器。',
     ENV_UNAVAILABLE: error.message || '环境现在的状态做不了这个操作。',
     SNAPSHOT_NOT_FOUND: '这个环境没有可用的快照了，不能恢复。',

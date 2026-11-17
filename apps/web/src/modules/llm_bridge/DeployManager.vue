@@ -18,7 +18,7 @@ const KINDS = Object.keys(TARGET_KIND) as TargetKind[]
 // 一类服务器一台都没有时，写明去哪个页面添加
 const ADD: Record<TargetKind, string> = {
   agent_server: '先到“智能体服务器”页添加一台服务器（填地址、账号、密码），核对指纹并初始化，然后回到这里。工作台自己所在的服务器也可以添加。',
-  runner_host: '先到“容器服务器”页的“服务器设置”里添加一台，并用“通过 SSH 部署”部署一次，然后回到这里。',
+  runner_host: '先到“容器服务器”页点“添加服务器”添加一台，并在它的“连接与部署”里部署一次，然后回到这里。',
 }
 const SOURCE: Record<TargetKind, string> = {
   agent_server: '列的是“智能体服务器”页里用账号密码添加的服务器。',

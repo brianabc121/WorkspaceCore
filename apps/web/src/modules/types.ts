@@ -55,7 +55,7 @@ export interface ModuleManagement {
   helpPath?: string
 }
 
-/** 服务器页面上能放模块区块的两个位置：智能体服务器的详情、容器服务器“服务器设置”里的每台服务器 */
+/** 服务器页面上能放模块区块的两个位置：智能体服务器的详情、容器服务器的详情 */
 export type ServerPanelPlace = 'agentServer' | 'runnerHost'
 
 export interface ModuleDefinition<W extends ModuleWidget = ModuleWidget, E extends ModuleEvents = ModuleEvents> {
@@ -71,7 +71,7 @@ export interface ModuleDefinition<W extends ModuleWidget = ModuleWidget, E exten
   events?: E
   /**
    * 服务器页面上由模块提供的区块（宿主用 ModuleServerPanels 渲染，页面本身不导入模块的代码；模块停用时不渲染）：
-   * agentServer 显示在智能体服务器的详情里，runnerHost 显示在容器服务器“服务器设置”的每台服务器下面。
+   * agentServer 显示在智能体服务器的详情里，runnerHost 显示在容器服务器的详情里（T-0277 前在“服务器设置”标签里）。
    * 区块组件收到的 props：serverId: string（那台服务器的 id）、serverName: string（它的名字）。
    * 组件要按需加载：defineAsyncComponent(() => import('./XxxPanel.vue'))，模块不启用就不下载它的代码。
    */

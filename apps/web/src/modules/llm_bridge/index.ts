@@ -25,6 +25,6 @@ export default defineModule({
   routes: [
     { path: '/llm_bridge', component: () => import('./LlmBridgePage.vue'), meta: { wide: true } },
   ],
-  // 智能体服务器详情、容器服务器“服务器设置”里的“MCP 管理器”区块
+  // 智能体服务器详情、容器服务器详情里的“MCP 管理器”区块
   serverPanels: { agentServer: serverPanel('agent_server'), runnerHost: serverPanel('runner_host') },
 })
