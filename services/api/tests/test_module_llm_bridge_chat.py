@@ -756,6 +756,11 @@ async def test_connectivity_is_measured_by_the_manager(rig: Rig) -> None:  # noq
                 "timings": timings,
                 "address": "162.159.140.245",
                 "via_proxy": False,
+                # 试过的地址（T-0284）：IPv6 没回应，换 IPv4 连上
+                "attempts": [
+                    {"address": "2606:4700::1", "family": 6, "ms": 251, "error": "没有回应"},
+                    {"address": "162.159.140.245", "family": 4, "ms": 2, "error": None},
+                ],
             }
         return {"state": "ok", "latency_ms": 37, "http_status": 401, "error": None}
 
@@ -784,7 +789,9 @@ async def test_connectivity_is_measured_by_the_manager(rig: Rig) -> None:  # noq
         False,
         None,
     )
+    assert [(a["family"], a["error"]) for a in timed["attempts"]] == [(6, "没有回应"), (4, None)]
     assert blocked["timings"] is None  # 旧版本的管理器没有分步用时，照样能显示
+    assert blocked["attempts"] is None
     assert data["slots"]["openai"]["ok"] is True
     count = len(calls)
     await rig.api("GET", path)

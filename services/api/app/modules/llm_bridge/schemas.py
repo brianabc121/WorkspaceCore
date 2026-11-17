@@ -330,6 +330,17 @@ class LlmBridgeConnectivityTimingsOut(BaseModel):
     )
 
 
+class LlmBridgeConnectivityAttemptOut(BaseModel):
+    """试过的一个地址（T-0284）：哪个先连上用哪个，一个地址 0.25 秒没连上就同时试下一个。"""
+
+    address: str = Field(description="平台的哪个 IP")
+    family: int = Field(description="4：IPv4；6：IPv6")
+    ms: int | None = Field(default=None, description="连上或放弃用了多少毫秒")
+    error: str | None = Field(
+        default=None, description="没连上的原因（没有回应 / 拒绝连接 / 网络不通 ……）；连上的为空"
+    )
+
+
 class LlmBridgeConnectivityTargetOut(BaseModel):
     host: str = Field(description="平台的地址（域名）")
     label: str = Field(description="这个地址是做什么用的")
@@ -353,6 +364,10 @@ class LlmBridgeConnectivityTargetOut(BaseModel):
         "response 等平台应答",
     )
     address: str | None = Field(default=None, description="连上的是平台的哪个 IP；经代理时为空")
+    attempts: list[LlmBridgeConnectivityAttemptOut] | None = Field(
+        default=None,
+        description="试过的地址（T-0284）；经代理时为空列表，旧版本的管理器没有",
+    )
     via_proxy: bool | None = Field(default=None, description="是否经容器设置的 HTTPS 代理访问")
 
 

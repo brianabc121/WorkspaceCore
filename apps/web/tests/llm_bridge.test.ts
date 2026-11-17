@@ -1036,7 +1036,9 @@ describe('大模型客户端管理', () => {
         ok('claude.ai', 'Claude（订阅登录）', timings(null, 110, 28, 150), { address: null, via_proxy: true }),
       ] },
     } }
-    setup('owner', r => (path(r) === `${base}/connectivity` ? Response.json(data) : undefined))
+    // 账号还没登录：检测没连上就是用不了（登录了的情况见下一个用例）
+    const loggedOut = status({ accounts: [account({}), account({ slot: 'claude', label: 'Claude' })] })
+    setup('owner', r => (path(r) === `${base}/connectivity` ? Response.json(data) : path(r) === `${base}/status` ? Response.json(loggedOut) : undefined))
     await openApp('/llm_bridge?view=manage')
     const openai = await screen.findByRole('group', { name: '平台连通性：Codex' })
     const rows = await within(openai).findAllByRole('listitem')
@@ -1047,7 +1049,7 @@ describe('大模型客户端管理', () => {
     expect(steps).toHaveTextContent('连接 2 ms')
     expect(steps).toHaveTextContent('加密握手 9 ms')
     expect(steps).toHaveTextContent('平台应答 380 ms')
-    expect(steps).toHaveTextContent('IP 162.159.140.245')
+    expect(steps).toHaveTextContent('IPv4 162.159.140.245')
     expect(within(steps).getByText('解析 4012 ms')).toHaveClass('is-slow')
     expect(within(steps).getByText('连接 2 ms')).not.toHaveClass('is-slow')
     // 卡在哪一步写清楚
@@ -1069,6 +1071,44 @@ describe('大模型客户端管理', () => {
     expect(viaProxy).not.toHaveTextContent('解析 ')
     expect(within(claude).queryByText(/域名解析慢/)).not.toBeInTheDocument()
     expect(screen.getAllByText('可用 · 110 ms').length).toBeGreaterThan(0)
+  })
+
+  it('lists the addresses it tried, explains an IPv6 that does not answer and trusts a working login', async () => {
+    // T-0284：管理器像官方程序一样，一个地址 0.25 秒没连上就试下一个；这里列出每个地址，
+    // IPv6 不通、IPv4 通时说明官方程序照常能用；账号已经登录时不再断言“登录和对话都会失败”
+    type Target = Schema['LlmBridgeConnectivityTargetOut']
+    const timings = (dns_ms: number | null, connect_ms: number | null, tls_ms: number | null, response_ms: number | null) => ({ dns_ms, connect_ms, tls_ms, response_ms })
+    const failed = (host: string, label: string, dns: number, attempts: Target['attempts']): Target => ({ host, label, ok: false, state: 'unreachable', latency_ms: null, http_status: null, error: '建立连接超时：平台的服务器没有回应（共等了 12 秒）', timings: timings(dns, null, null, null), stage: 'connect', address: null, via_proxy: false, attempts })
+    const data: Schema['LlmBridgeConnectivityOut'] = { supported: true, slots: {
+      openai: { ok: false, need: 'all', checked_at: 1794528000, targets: [
+        { host: 'chatgpt.com', label: 'ChatGPT（订阅登录、对话）', ok: true, state: 'ok', latency_ms: 2, http_status: 403, error: null, timings: timings(4060, 255, 9, 300), stage: null, address: '104.18.32.47', via_proxy: false,
+          attempts: [{ address: '2606:4700::6812:202f', family: 6, ms: 253, error: '没有回应' }, { address: '104.18.32.47', family: 4, ms: 2, error: null }] },
+        failed('api.openai.com', 'OpenAI API（API 密钥）', 8068, [{ address: '2606:4700::6810:7b60', family: 6, ms: 3932, error: '没有回应' }]),
+      ] },
+      claude: { ok: false, need: 'all', checked_at: 1794528000, targets: [
+        failed('api.anthropic.com', 'Anthropic API', 8072, [{ address: '160.79.104.10', family: 4, ms: 3928, error: '没有回应' }]),
+      ] },
+    } }
+    setup('owner', r => (path(r) === `${base}/connectivity` ? Response.json(data) : undefined))
+    await openApp('/llm_bridge?view=manage')
+    const openai = await screen.findByRole('group', { name: '平台连通性：Codex' })
+    const tried = await within(openai).findByLabelText('试过的地址：chatgpt.com')
+    expect(within(tried).getByText('IPv6 2606:4700::6812:202f 0.3 秒没有回应')).toHaveClass('is-slow')
+    expect(within(tried).getByText('IPv4 104.18.32.47 连上 2 ms')).not.toHaveClass('is-slow')
+    // 延迟只算连上的那个地址；IP 已经在“试过的地址”里，不再单独写
+    expect(within(openai).getAllByRole('listitem')[0]).toHaveTextContent('2 ms')
+    expect(within(openai).getByLabelText('每一步的用时：chatgpt.com')).not.toHaveTextContent('104.18.32.47')
+    expect(within(openai).getByLabelText('试过的地址：api.openai.com')).toHaveTextContent('IPv6 2606:4700::6810:7b60 3.9 秒没有回应')
+    expect(within(openai).getByText(/这台服务器连平台的 IPv6 地址没有回应，IPv4 是通的/)).toBeVisible()
+    // Codex 已经登录：以对话为准，不说“登录和对话都会失败”
+    expect(within(openai).getByText(/检测没连上Codex，但这个账号已经登录。对话照常能用的话以对话为准/)).toBeVisible()
+    expect(within(openai).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(openai).getByText(/域名解析慢/)).toHaveTextContent('建立连接最多只用了 2 ms，网络本身不慢。')
+    // Claude 没登录、一个地址都没连上：照常说用不了；没有连上过的地址，不写“建立连接最多只用了 0 ms”
+    const claude = screen.getByRole('group', { name: '平台连通性：Claude' })
+    expect(within(claude).getByRole('alert')).toHaveTextContent('这个 MCP 管理器所在的服务器现在用不了Claude')
+    expect(within(claude).getByText(/域名解析慢/)).not.toHaveTextContent('建立连接最多只用了')
+    expect(within(claude).queryByText(/IPv6/)).not.toBeInTheDocument()
   })
 
   it('lists sessions, syncs on request and shows the turns of a session', async () => {

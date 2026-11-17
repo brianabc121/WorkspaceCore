@@ -311,7 +311,7 @@ function reset(account: Account) {
             </template>
             <dt><Play aria-hidden="true" />运行</dt><dd>{{ a.running }} 个回合</dd>
           </dl>
-          <BridgeConnectivity v-if="a.enabled" :data="net.data.value" :account="a.slot" :label="a.label" :loading="net.isPending.value || netBusy" :failed="netFailed" />
+          <BridgeConnectivity v-if="a.enabled" :data="net.data.value" :account="a.slot" :label="a.label" :loading="net.isPending.value || netBusy" :failed="netFailed" :logged-in="a.state === 'logged_in'" />
           <AccountQuota v-for="q in quotaOf(a.slot)" :key="q.platform" :platform="q.platform" :quota="q.quota" />
           <p v-if="a.detail" class="form-help">{{ a.detail }}</p>
           <p v-if="a.registered && a.state === 'logged_out'" class="form-help">这个管理器登记过这个平台的账号{{ a.identity ? `（${a.identity}）` : '' }}。重新登录同一个账号可以接着用原来的会话；要换成别的账号，先点“更换账号”。</p>

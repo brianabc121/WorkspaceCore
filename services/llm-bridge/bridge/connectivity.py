@@ -23,12 +23,20 @@ copilot.tencent.com（国内站）与 www.codebuddy.ai（国际站）。各平�
 显示 5 秒，看不出慢在哪；8 秒的超时也按整个过程算，慢一点就被误判成“连不上”。
 现在超时只算到收到应答头为止，并写明卡在哪一步；读正文（认拦截页用）和关连接另有上限，不计入延迟。
 经 HTTPS 代理时域名由代理解析，“建立连接”是连上代理、再由代理连上平台的时间。
+
+怎么连（T-0284）：一个域名常常解析出好几个地址（IPv6、IPv4 各几个）。官方程序哪个先连上用哪个：
+一个地址 0.25 秒（Node 写的 Claude Code / CodeBuddy）或 0.3 秒（Rust 写的 Codex）没连上，
+就同时去试下一个，IPv6 和 IPv4 交替着试（“Happy Eyeballs”，RFC 8305）。以前这里按顺序一个一个连、
+不换：第一个地址不应答（常见的是服务器的 IPv6 不通）就一直等到超时，报“连不上”，官方程序却照常能用。
+现在和官方程序一样，并把试过的每个地址、连上没有、用了多久都列出来。
+域名解析单独限时（DNS_SECONDS），慢一点也不挤占后面几步。
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import os
 import socket
 import ssl
@@ -37,7 +45,10 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
-TIMEOUT_SECONDS = 12.0  # 从开始到收到平台的应答头；超过就算连不上
+DNS_SECONDS = 15.0  # 域名解析最多等多久（单独计；慢的解析服务器要等它换下一个）
+TIMEOUT_SECONDS = 12.0  # 解析出地址之后，到收到平台的应答头；超过就算连不上
+ATTEMPT_DELAY = 0.25  # 一个地址这么久没连上，就同时去试下一个（和官方程序一样）
+MAX_ATTEMPTS = 8  # 最多试几个地址
 BODY_SECONDS = 3.0  # 收到应答头之后读页面正文（认拦截页用）最多等多久；不计入延迟
 CLOSE_SECONDS = 1.0  # 关连接最多等多久；不计入延迟
 CACHE_SECONDS = 60.0
@@ -134,6 +145,8 @@ class _Run:
     writer: asyncio.StreamWriter | None = None
     address: str | None = None
     via_proxy: bool = False
+    # 试过的地址：{address, family（4 / 6）, ms, error（连上的为空）}
+    attempts: list[dict[str, Any]] = field(default_factory=list)
 
     def lap(self, stage: str, following: str) -> None:
         now = time.monotonic()
@@ -141,11 +154,20 @@ class _Run:
         self.mark = now
         self.stage = following
 
+    def latency(self) -> int | None:
+        """延迟：连上的那个地址建立连接用的时间（一次网络往返）。先试的地址没回应、换了地址时，
+        “建立连接”这一步的用时还含等它的那一段，延迟不含。"""
+        for attempt in self.attempts:
+            if attempt["error"] is None and attempt["ms"] is not None:
+                return int(attempt["ms"])
+        return self.timings.get("connect")
+
     def detail(self) -> dict[str, Any]:
         return {
             "timings": {f"{stage}_ms": self.timings.get(stage) for stage in STAGES},
             "address": self.address,
             "via_proxy": self.via_proxy,
+            "attempts": self.attempts,
         }
 
 
@@ -162,7 +184,8 @@ _FAILURES = (
 def _reason(error: BaseException, stage: str) -> str:
     """连不上的原因和卡在哪一步，给人看：不带地址以外的细节。"""
     if isinstance(error, TimeoutError):
-        return f"{_TIMEOUT_TEXT.get(stage, '超时')}（共等了 {TIMEOUT_SECONDS:.0f} 秒）"
+        waited = DNS_SECONDS if stage == "dns" else TIMEOUT_SECONDS
+        return f"{_TIMEOUT_TEXT.get(stage, '超时')}（共等了 {waited:.0f} 秒）"
     if isinstance(error, _ProxyRefused):
         return "HTTPS 代理拒绝连到这个地址"
     if isinstance(error, ValueError | IndexError | asyncio.LimitOverrunError):
@@ -198,35 +221,116 @@ def classify(status: int, headers: dict[str, str], body: str) -> tuple[str, str 
     return "ok", None
 
 
-async def _connect(infos: list[Any]) -> tuple[socket.socket, str]:
-    """按解析结果的顺序逐个地址去连（和 asyncio 自己连时的顺序一样），连上第一个就用它。"""
+def _interleave(infos: list[Any]) -> list[Any]:
+    """去掉重复的地址，IPv6 / IPv4 交替排（RFC 8305）；解析结果里排第一的那一类在前。"""
+    groups: dict[int, list[Any]] = {}
+    seen: set[str] = set()
+    for info in infos:
+        address = str(info[4][0])
+        if address not in seen:
+            seen.add(address)
+            groups.setdefault(info[0], []).append(info)
+    queues = list(groups.values())
+    out: list[Any] = []
+    while any(queues):
+        for queue in queues:
+            if queue:
+                out.append(queue.pop(0))
+    return out[:MAX_ATTEMPTS]
+
+
+def _attempt_error(error: BaseException) -> str:
+    """一个地址连不上的原因（短）。"""
+    if isinstance(error, ConnectionRefusedError):
+        return "拒绝连接"
+    if isinstance(error, OSError) and error.errno == errno.EAFNOSUPPORT:
+        return "这台服务器没开 IPv6"
+    if isinstance(error, OSError) and error.errno == errno.ENETUNREACH:
+        return "网络不通"
+    if isinstance(error, OSError) and error.errno == errno.EHOSTUNREACH:
+        return "到不了这个地址"
+    return "连不上"
+
+
+async def _connect(infos: list[Any], run: _Run) -> socket.socket:
+    """哪个地址先连上用哪个（和官方程序一样）：一个地址 ATTEMPT_DELAY 秒没连上、或者已经失败，
+    就同时去试下一个；IPv6 / IPv4 交替。试过的每个地址记在 run.attempts 里。"""
     loop = asyncio.get_running_loop()
-    last: OSError = OSError("没有可用的地址")
-    for family, kind, proto, _, address in infos:
-        sock = socket.socket(family, kind, proto)
-        sock.setblocking(False)
-        try:
-            await loop.sock_connect(sock, address)
-        except OSError as error:
+    order = _interleave(infos)
+    pending: dict[asyncio.Future[None], tuple[socket.socket, dict[str, Any], float]] = {}
+    winner: socket.socket | None = None
+    last: BaseException = OSError("没有可用的地址")
+    index = 0
+    try:
+        while winner is None:
+            if index < len(order):
+                family, kind, proto, _, address = order[index]
+                index += 1
+                entry: dict[str, Any] = {
+                    "address": str(address[0]),
+                    "family": 6 if family == socket.AF_INET6 else 4,
+                    "ms": None,
+                    "error": None,
+                }
+                run.attempts.append(entry)
+                try:
+                    sock = socket.socket(family, kind, proto)
+                except OSError as unusable:  # 例如容器关掉了 IPv6：这个地址用不了，接着试下一个
+                    entry["ms"] = 0
+                    entry["error"] = _attempt_error(unusable)
+                    last = unusable
+                    continue
+                sock.setblocking(False)
+                attempt: asyncio.Future[None] = asyncio.ensure_future(
+                    loop.sock_connect(sock, address)
+                )
+                pending[attempt] = (sock, entry, time.monotonic())
+            if not pending:
+                raise last
+            done, _ = await asyncio.wait(
+                set(pending),
+                timeout=ATTEMPT_DELAY if index < len(order) else None,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for finished in done:
+                sock, entry, started = pending.pop(finished)
+                entry["ms"] = round((time.monotonic() - started) * 1000)
+                error = finished.exception()
+                if error is None and winner is None:
+                    winner = sock
+                    run.address = entry["address"]
+                    continue
+                sock.close()
+                if error is not None:
+                    entry["error"] = _attempt_error(error)
+                    last = error
+    finally:
+        # 别的地址还没连上：不等了（连上的那个已经在用，或者整体超时了）
+        for waiting, (sock, entry, started) in pending.items():
+            waiting.cancel()
             sock.close()
-            last = error
-            continue
-        except BaseException:
-            sock.close()
-            raise
-        return sock, str(address[0])
-    raise last
+            entry["ms"] = round((time.monotonic() - started) * 1000)
+            entry["error"] = "没有回应"
+    return winner
 
 
-async def _open(target: Target, run: _Run) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
-    """解析、建立连接、加密握手，每一步记下用时。"""
+async def _resolve(target: Target, run: _Run) -> list[Any] | None:
+    """解析域名；经 HTTPS 代理时由代理解析，返回 None。"""
+    if _proxy() is not None:
+        return None
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(target.host, target.port, type=socket.SOCK_STREAM)
+    run.lap("dns", "connect")
+    return infos
+
+
+async def _open(
+    target: Target, run: _Run, infos: list[Any] | None
+) -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """建立连接、加密握手，每一步记下用时（解析在 _resolve 里做完了）。"""
     context = _ssl_context()
-    proxy = _proxy()
-    if proxy is None:
-        loop = asyncio.get_running_loop()
-        infos = await loop.getaddrinfo(target.host, target.port, type=socket.SOCK_STREAM)
-        run.lap("dns", "connect")
-        sock, run.address = await _connect(infos)
+    if infos is not None:
+        sock = await _connect(infos, run)
         run.lap("connect", "tls")
         try:
             reader, run.writer = await asyncio.open_connection(
@@ -238,6 +342,9 @@ async def _open(target: Target, run: _Run) -> tuple[asyncio.StreamReader, asynci
         run.lap("tls", "response")
         return reader, run.writer
     # 经代理：域名由代理解析；“建立连接”是连上代理、再由代理连上平台
+    proxy = _proxy()
+    if proxy is None:  # 解析之后代理设置没了：按连不上算
+        raise OSError("没有 HTTPS 代理")
     run.via_proxy = True
     run.stage = "connect"
     reader, run.writer = await asyncio.open_connection(*proxy)
@@ -307,8 +414,10 @@ async def probe(target: Target) -> dict[str, Any]:
     run = _Run()
     try:
         try:
+            async with asyncio.timeout(DNS_SECONDS):
+                infos = await _resolve(target, run)
             async with asyncio.timeout(TIMEOUT_SECONDS):
-                reader, writer = await _open(target, run)
+                reader, writer = await _open(target, run, infos)
                 status, headers = await _ask(target, reader, writer, run)
         except _FAILURES as error:
             return {
@@ -325,7 +434,7 @@ async def probe(target: Target) -> dict[str, Any]:
     state, note = classify(status, headers, body)
     return {
         "state": state,
-        "latency_ms": run.timings["connect"],
+        "latency_ms": run.latency(),
         "http_status": status,
         "error": note,
         "stage": None,
