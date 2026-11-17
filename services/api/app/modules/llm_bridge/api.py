@@ -7,6 +7,7 @@
 
 from datetime import datetime
 from typing import Annotated, Any, Literal
+from urllib.parse import quote, urlencode
 from uuid import UUID
 
 from fastapi import Depends, Path, Query, Response, status
@@ -20,6 +21,9 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeEnvironmentIn,
     LlmBridgeEnvironmentList,
     LlmBridgeEnvironmentOut,
+    LlmBridgeEnvSessionList,
+    LlmBridgeFileList,
+    LlmBridgeFileOut,
     LlmBridgeGrantIn,
     LlmBridgeGrantList,
     LlmBridgeGrantOut,
@@ -361,6 +365,93 @@ async def llm_bridge_delete_environment(
         {"id": env_id},
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---- 开发会话工作目录里的文件（T-____，只读）----
+# 人类 2026-11-17 决定：owner / admin 能下载原文件；下载记审计
+FilePath = Annotated[str, Query(max_length=1000, description="相对会话工作目录的路径；根目录不填")]
+_FILE_DOWNLOAD = {
+    "content": {"application/octet-stream": {"schema": {"type": "string", "format": "binary"}}},
+    "description": "原文件，按附件下载",
+}
+
+
+def _file_query(path: str, **extra: str) -> str:
+    return urlencode({"path": path, **extra})
+
+
+@router.get(
+    "/llm_bridge/bridges/{bridge_id}/environments/{env_id}/sessions",
+    summary="用这个开发环境建的会话（admin；最近活动的在前）",
+    responses=_read_errors,
+)
+async def llm_bridge_environment_sessions(
+    access: Admin, service: Service, bridge_id: UUID, env_id: EnvId
+) -> LlmBridgeEnvSessionList:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    data = await service.admin(row, "GET", f"/environments/{env_id}/sessions?limit=50")
+    return LlmBridgeEnvSessionList(**data)
+
+
+@router.get(
+    "/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files",
+    summary="会话工作目录里一个文件夹的内容（admin）",
+    description="只浏览管理器建的会话目录；不能跳出工作目录。官方程序里同步来的会话 422。",
+    responses=error_responses(401, 403, 404, 422, 503),
+)
+async def llm_bridge_session_files(
+    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, path: FilePath = ""
+) -> LlmBridgeFileList:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    data = await service.admin(row, "GET", f"/sessions/{session_id}/files?{_file_query(path)}")
+    return LlmBridgeFileList(**data)
+
+
+@router.get(
+    "/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files/content",
+    summary="预览会话工作目录里的一个文件（admin；开头 512 KB，已脱敏）",
+    responses=error_responses(401, 403, 404, 422, 503),
+)
+async def llm_bridge_session_file(
+    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, path: FilePath
+) -> LlmBridgeFileOut:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    url = f"/sessions/{session_id}/files/content?{_file_query(path)}"
+    return LlmBridgeFileOut(**await service.admin(row, "GET", url))
+
+
+@router.get(
+    "/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files/download",
+    summary="下载会话工作目录里的一个文件（admin；原文件，最多 50 MB，记审计）",
+    response_class=Response,
+    responses={200: _FILE_DOWNLOAD, **error_responses(401, 403, 404, 422, 503)},
+)
+async def llm_bridge_session_file_download(
+    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, path: FilePath
+) -> Response:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    bridge_name = row.name
+    url = f"/sessions/{session_id}/files/content?{_file_query(path, download='true')}"
+    response = await service.download(row, url)
+    name = path.rstrip("/").rsplit("/", 1)[-1] or "file"
+    # 下载原文件记一条审计（谁、哪个会话、哪个文件）；文件内容不记
+    await service.audit(
+        access,
+        "work_file_downloaded",
+        bridge_id,
+        {"bridge": bridge_name, "session": session_id, "path": path[:300]},
+    )
+    await service.db.commit()
+    return Response(
+        content=response.content,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}",
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 # ---- 会话与回合（只读） ----

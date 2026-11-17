@@ -274,7 +274,7 @@ async function main() {
     const card = manage.getByRole('article', { name: '额度：Claude' })
     await card.getByText('已暂停').waitFor({ timeout: 30000 })
     await card.getByText('5 小时额度').waitFor()
-    await card.getByText('已用 100%，剩余 0%').waitFor()
+    await card.getByText('已用 100%', { exact: true }).waitFor()
     check(/额度用完，这个平台暂停到 .+有 1 个被打断的会话在等自动继续。/s.test(await card.getByRole('note').innerText()), '额度卡片应说明暂停到什么时候、有几个会话在等')
     await manage.close()
     // 不要自动继续 → 现在就试：系统替人发那句话，排在之前排队的那条前面

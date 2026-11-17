@@ -721,6 +721,7 @@ class Store:
         include_archived: bool = False,
         status: str | None = None,
         query: str | None = None,
+        environment_id: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[Row]:
@@ -739,6 +740,9 @@ class Store:
         if slot:
             sql += " AND slot = ?"
             params.append(slot)
+        if environment_id:
+            sql += " AND environment_id = ?"
+            params.append(environment_id)
         if status in ("active", "archived"):
             sql += " AND status = ?"
             params.append(status)

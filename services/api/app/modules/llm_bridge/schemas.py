@@ -487,6 +487,45 @@ class LlmBridgeSessionList(BaseModel):
     sync_failed: str = ""
 
 
+# ---- 开发会话工作目录里的文件（T-____）：页面上“开发环境”里浏览，只读 ----
+class LlmBridgeEnvSessionOut(LlmBridgeSessionOut):
+    busy: bool = Field(default=False, description="有回合正在回答或排队")
+    browsable: bool = Field(
+        default=False, description="工作目录还在、是管理器建的：能浏览里面的文件"
+    )
+
+
+class LlmBridgeEnvSessionList(BaseModel):
+    sessions: list[LlmBridgeEnvSessionOut]
+
+
+class LlmBridgeFileEntryOut(BaseModel):
+    name: str
+    kind: Literal["dir", "file", "link"] = Field(
+        description="dir 文件夹；file 文件；link 指向工作目录以外的符号链接（打不开）"
+    )
+    size: int | None = Field(default=None, description="文件的字节数；文件夹为空")
+    modified: float = Field(description="修改时间（Unix 秒）")
+
+
+class LlmBridgeFileList(BaseModel):
+    path: str = Field(description="相对工作目录的路径；根目录为空")
+    entries: list[LlmBridgeFileEntryOut] = Field(description="文件夹在前，按名字排")
+    total: int = Field(description="这个文件夹里一共有几项（只列前 1000 项）")
+
+
+class LlmBridgeFileOut(BaseModel):
+    path: str
+    name: str
+    size: int
+    modified: float
+    media_type: str
+    binary: bool = Field(description="二进制或不是 UTF-8 的文字：不给内容")
+    truncated: bool = Field(description="文件比预览长：只给了开头一段（512 KB）")
+    text: str = Field(description="开头一段文字，已脱敏（看起来像密钥、令牌的换成 ***）")
+    downloadable: bool = Field(description="不超过下载上限（50 MB）")
+
+
 class LlmBridgeTurnOut(BaseModel):
     turn_id: str
     status: str

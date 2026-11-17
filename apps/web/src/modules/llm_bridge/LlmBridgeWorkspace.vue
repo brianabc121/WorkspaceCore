@@ -13,6 +13,7 @@ import ManagerOperation from './ManagerOperation.vue'
 import DeployManager from './DeployManager.vue'
 import DeployProgress from './DeployProgress.vue'
 import BridgeAccounts from './BridgeAccounts.vue'
+import BridgeOverview from './BridgeOverview.vue'
 import BridgeSettingsForm from './BridgeSettingsForm.vue'
 import BridgeEnvironments from './BridgeEnvironments.vue'
 import BridgeSessions from './BridgeSessions.vue'
@@ -73,6 +74,13 @@ const connection = computed(() => {
 const install = computed(() => selected.value?.deployment ?? null)
 const removed = computed(() => !!install.value && !install.value.target_id)
 
+// 全部重新检查（效果图右上角）：重新读状态，同时让管理器重新检测到各平台的连通性（旧版本的管理器不支持时不算出错）
+const rechecking = ref(false)
+async function recheckAll() {
+  if (!selected.value || rechecking.value) return
+  rechecking.value = true
+  try { await Promise.all([status.refetch(), selected.value.enabled ? api.recheckConnectivity(selected.value.id).catch(() => undefined) : undefined]) } finally { rechecking.value = false }
+}
 function toGrants() { document.getElementById('lb-grants')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }) }
 
 const ALL = PLATFORMS.map(p => p.id)
@@ -291,11 +299,12 @@ function remove(bridge: Bridge) {
               <p class="lb-detail-where">{{ location(selected, true) }}</p>
             </div>
             <div class="lb-detail-actions">
-              <button type="button" class="secondary-button lb-head-btn" :disabled="status.isFetching.value" @click="status.refetch()"><RefreshCw aria-hidden="true" />刷新状态</button>
+              <button type="button" class="secondary-button lb-head-btn" :disabled="rechecking || status.isFetching.value" title="重新读这个管理器的状态，并重新检测它到各平台的连通性" @click="recheckAll"><RefreshCw aria-hidden="true" />{{ rechecking ? '正在检查…' : '全部重新检查' }}</button>
             </div>
           </header>
           <p v-if="removed" role="note" class="lb-warn">服务器已从工作台移除：工作台登录不上去了，只能删除登记；容器要到那台服务器上手动处理。</p>
           <p v-else-if="install?.outdated" role="note" class="lb-warn">工作台带的版本比它新：可以“重新部署”来升级，登录状态和会话记录都保留。</p>
+          <BridgeOverview v-if="status.data.value?.reachable" :status="status.data.value" />
           <div class="lb-tabs" role="tablist" :aria-label="`MCP 管理器「${selected.name}」`">
             <button v-for="t in TABS" :key="t.key" type="button" role="tab" :aria-selected="tab === t.key" @click="tab = t.key">{{ t.name }}</button>
           </div>

@@ -177,6 +177,7 @@ _LABELS: dict[str, str] = {
     "llm_bridge.chat_queue_moved": "调整排队中消息的顺序",
     "llm_bridge.chat_attachment_uploaded": "上传附件",
     "llm_bridge.chat_attachment_downloaded": "下载附件",
+    "llm_bridge.work_file_downloaded": "下载开发会话工作目录里的文件",
     "llm_bridge.chat_reimported": "重新导入官方程序里的会话",
     "llm_bridge.chat_resume_now": "让中断的回合现在就继续",
     "llm_bridge.chat_resume_cancelled": "取消自动继续",

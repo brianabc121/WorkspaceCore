@@ -532,6 +532,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
         )
 
+    # 开发会话工作目录里的文件（T-____）：只读；下载给原文件，太大的不给
+    @app.get("/admin/environments/{env_id}/sessions")
+    async def admin_environment_sessions(
+        request: Request, env_id: str, _: Admin, limit: int = 50
+    ) -> dict[str, Any]:
+        return {"sessions": engine_of(request).environment_sessions(env_id, limit)}
+
+    @app.get("/admin/sessions/{session_id}/files")
+    async def admin_session_files(
+        request: Request, session_id: str, _: Admin, path: str = ""
+    ) -> dict[str, Any]:
+        return engine_of(request).work_files(session_id, path)
+
+    @app.get("/admin/sessions/{session_id}/files/content", response_model=None)
+    async def admin_session_file(
+        request: Request, session_id: str, _: Admin, path: str, download: bool = False
+    ) -> dict[str, Any] | FileResponse:
+        engine = engine_of(request)
+        if not download:
+            return engine.work_file(session_id, path)
+        target = engine.work_file_path(session_id, path)
+        return FileResponse(
+            target,
+            media_type="application/octet-stream",
+            filename=target.name,
+            content_disposition_type="attachment",
+            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+        )
+
     @app.get("/admin/sessions/{session_id}/queue")
     async def admin_queue(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
         return engine_of(request).queue_view(session_id)

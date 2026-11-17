@@ -27,7 +27,7 @@ from typing import Any
 
 from bridge import attachments as files
 from bridge import connectivity as net
-from bridge import quota
+from bridge import quota, workfiles
 from bridge.channels import SLOT_LABELS, Channel, canonical, find
 from bridge.config import Settings
 from bridge.drivers.base import (
@@ -1739,6 +1739,45 @@ class Engine:
         if session is None:
             raise BridgeError("NOT_FOUND", "没有这个会话")
         return session
+
+    # ---- 开发会话工作目录里的文件（T-____，页面上“开发环境”里浏览；只读）----
+    def environment_sessions(self, env_id: str, limit: int = 50) -> list[Row]:
+        """用这个开发环境建的会话（最近活动的在前），带上工作目录还能不能浏览。"""
+        if self.store.get_environment(env_id) is None:
+            raise BridgeError("NOT_FOUND", "没有这个环境")
+        busy = self.store.busy_sessions()
+        rows = self.store.list_sessions(
+            include_archived=True, environment_id=env_id, limit=min(max(limit, 1), 200)
+        )
+        out = []
+        for row in rows:
+            try:
+                workfiles.session_root(self.settings.work_dir, row)
+                browsable = True
+            except workfiles.FileError:
+                browsable = False
+            out.append(self.admin_session_view(row, busy) | {"browsable": browsable})
+        return out
+
+    def _in_workdir(self, session_id: str, action: Any, path: str) -> Any:
+        session = self._required_session(session_id)
+        try:
+            root = workfiles.session_root(self.settings.work_dir, session)
+            return action(root, path)
+        except workfiles.FileError as error:
+            raise BridgeError(error.code, error.message) from None
+
+    def work_files(self, session_id: str, path: str) -> Row:
+        """会话工作目录里一个文件夹的内容（文件夹在前，按名字排）。"""
+        return dict(self._in_workdir(session_id, workfiles.list_dir, path))
+
+    def work_file(self, session_id: str, path: str) -> Row:
+        """一个文件的信息和开头一段文字（脱敏）。"""
+        return dict(self._in_workdir(session_id, workfiles.preview, path))
+
+    def work_file_path(self, session_id: str, path: str) -> Path:
+        """下载用的原文件。"""
+        return Path(self._in_workdir(session_id, workfiles.download, path))
 
     # ---- 连不连得上各平台（T-0240）----
     async def connectivity(self, refresh: bool = False) -> Row:
