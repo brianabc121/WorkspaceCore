@@ -141,9 +141,12 @@ async function bundle() {
 async function remove() {
   const host = props.host
   if (!window.confirm(`移除容器服务器「${host.name}」？凭证立即失效。服务器上的 runner-agent 与 Docker 不会被卸载。`)) return
-  if (await act(async () => {
+  // 删除成功就先让页面关掉详情，再刷新列表：刷新后这台服务器不在列表里了，本组件随详情一起卸载，
+  // 卸载之后再发的事件 Vue 会丢掉，页面就会停在“找不到这台容器服务器”
+  await act(async () => {
     await auth.api.DELETE('/api/v1/runner/hosts/{host_id}', { params: { header, path: { host_id: host.id }, query: { version: host.version } } })
-  }, '已移除容器服务器')) emit('removed')
+    emit('removed')
+  }, '已移除容器服务器')
 }
 
 // 页头的状态：部署到哪一步了

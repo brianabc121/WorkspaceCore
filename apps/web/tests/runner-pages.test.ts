@@ -151,9 +151,12 @@ describe('容器服务器页：模板、执行记录与设置', () => {
 
   it('saves the reclaim policy with the version and removes the host after confirmation', async () => {
     const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let removed = false
     const requests = setup(r => {
       if (path(r) === '/api/v1/runner/hosts/host-1/policy') return Response.json(host({ version: 5 }))
-      if (path(r) === '/api/v1/runner/hosts/host-1' && r.method === 'DELETE') return new Response(null, { status: 204 })
+      if (path(r) === '/api/v1/runner/hosts/host-1' && r.method === 'DELETE') { removed = true; return new Response(null, { status: 204 }) }
+      // 移除以后服务器不在列表里了：详情随之收起，页面也不能停在“找不到这台容器服务器”
+      if (path(r) === '/api/v1/runner/overview' && removed) return Response.json(overview({ host: null }))
       return undefined
     })
     const { router } = await openApp('/runner?host_id=host-1')
@@ -173,6 +176,8 @@ describe('容器服务器页：模板、执行记录与设置', () => {
     await fireEvent.click(within(screen.getByRole('region', { name: '连接与部署' })).getByRole('button', { name: '移除容器服务器' }))
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('凭证立即失效'))
     await vi.waitFor(() => expect(router.currentRoute.value.query).toEqual({}))
+    expect(await within(screen.getByRole('region', { name: '服务器列表' })).findByText(/还没有容器服务器/)).toBeVisible()
+    expect(screen.queryByText(/找不到这台容器服务器/)).not.toBeInTheDocument()
     const del = requests.find(r => r.method === 'DELETE' && path(r) === '/api/v1/runner/hosts/host-1')!
     expect(new URL(del.url).searchParams.get('version')).toBe('4')
   })
