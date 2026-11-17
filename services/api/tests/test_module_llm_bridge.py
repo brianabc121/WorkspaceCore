@@ -1147,3 +1147,63 @@ async def test_tool_failures_are_explicit(rig: Rig) -> None:
         )
     )
     assert refused["code"].startswith("FORBIDDEN")
+
+
+async def test_chat_only_grant_stays_away_from_codex_dev_sessions(rig: Rig) -> None:
+    """原来只给了 ChatGPT（只能聊天）的实例按 codex:chat 存（T-0280）：能和 Codex 对话，
+    但有接手权限也读不到、发不了别人的 Codex 开发会话，也建不了开发会话。"""
+    env = rig.env
+    fake_driver = importlib.import_module("bridge.drivers.fake")
+    rig.bridge_app.state.engine.drivers["openai"] = fake_driver.FakeDriver()
+    made = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/environments",
+        json={"platform": "codex", "name": "仓库", "sandbox": "exec"},
+    )
+    assert made.status_code == 201, made.text
+    env_id = made.json()["id"]
+    instance = await new_instance(env, name="dev-owner")
+    await rig.grant(instance, can_write=True, platforms=["codex"], environment_ids=[env_id])
+    owner = await issue_token(env, instance)
+    dev_args = {"platform": "codex", "mode": "dev", "environment": env_id, "request_id": "d1"}
+    dev = ok(await call(env, owner, "llm_bridge_session_create", dev_args))["session_id"]
+    chat_args = {"platform": "codex", "mode": "chat", "request_id": "c1"}
+    chat = ok(await call(env, owner, "llm_bridge_session_create", chat_args))["session_id"]
+
+    limited = await rig.agent(
+        "chat-only", can_write=True, can_account=True, can_takeover=True, platforms=["chatgpt"]
+    )
+    grants = (await rig.api("GET", "/grants")).json()["grants"]
+    assert next(g for g in grants if g["instance_name"] == "chat-only")["platforms"] == [
+        "codex:chat"
+    ]
+    for name, arguments in (
+        ("llm_bridge_session_get", {"session_id": dev}),
+        ("llm_bridge_queue", {"session_id": dev}),
+        ("llm_bridge_send", {"session_id": dev, "text": "插话", "request_id": "x1"}),
+    ):
+        assert tool_error(await call(env, limited, name, arguments))["code"] == "NOT_FOUND", name
+    ok(await call(env, limited, "llm_bridge_session_get", {"session_id": chat}))
+    listed = ok(await call(env, limited, "llm_bridge_session_list", {"scope": "account"}))
+    assert {s["session_id"] for s in listed["sessions"]} == {chat}
+    refused = tool_error(
+        await call(env, limited, "llm_bridge_session_create", {**dev_args, "request_id": "d2"})
+    )
+    assert refused["code"] == "FORBIDDEN_CAPABILITY" and "对话" in refused["message"]
+    mine = ok(
+        await call(env, limited, "llm_bridge_session_create", {**chat_args, "request_id": "c2"})
+    )
+    assert (mine["platform"], mine["mode"]) == ("codex", "chat")
+    # 聊天页按 Codex 筛选：codex 和旧名字 chatgpt 各查一次再合并（新版本两次一样），不重复
+    listed = await rig.api(
+        "GET", f"/bridges/{rig.bridge_id}/chat/sessions", params={"platform": "codex"}
+    )
+    assert listed.status_code == 200, listed.text
+    ids = [s["session_id"] for s in listed.json()["sessions"]]
+    assert sorted(ids) == sorted({dev, chat, mine["session_id"]}) and len(ids) == len(set(ids))
+    paged = await rig.api(
+        "GET",
+        f"/bridges/{rig.bridge_id}/chat/sessions",
+        params={"platform": "codex", "limit": 2, "offset": 0},
+    )
+    assert len(paged.json()["sessions"]) == 2 and paged.json()["next_offset"] == 2

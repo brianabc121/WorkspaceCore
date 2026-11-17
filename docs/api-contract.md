@@ -782,7 +782,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `GET` / `POST /api/v1/llm_bridge/bridges/{id}/environments`，`PUT` / `DELETE .../environments/{env_id}` | 开发环境：`platform`、`name`、`repo_url`（只收 https）、`branch`、`sandbox`（`read_only` / `workspace_write` / `exec`）、`network`、`description`、`enabled` |
 | `GET /api/v1/llm_bridge/bridges/{id}/sessions?limit&offset&sync` | 会话桥上的会话；`sync=true` 先登记官方程序里有、桥里没有的会话 |
 | `GET .../sessions/{session_id}/turns` | 一个会话的回合（最新在前）：消息、状态、结果或失败原因 |
-| `GET /api/v1/llm_bridge/grants`，`PUT /api/v1/llm_bridge/grants/{instance_id}` | 每个实例的权限：`enabled`、`can_write`、`can_account`、`can_takeover`、`platforms`（空 = 全部）、`bridge_ids`（允许用的 MCP 管理器：`null` = 全部，包括以后添加的；空列表 = 一个都不能用；填了不存在的 id 时 `422`）。`enabled=false` 时三项权限一并收回，`platforms` 与 `bridge_ids` 保留 |
+| `GET /api/v1/llm_bridge/grants`，`PUT /api/v1/llm_bridge/grants/{instance_id}` | 每个实例的权限：`enabled`、`can_write`、`can_account`、`can_takeover`、`platforms`（空 = 全部；一项是平台，或 `codex:chat` = 只能和 Codex 对话、不能用开发模式，原来只给了 `chatgpt` 的授权迁移成它，T-0280；收到 `chatgpt` 也按 `codex:chat` 处理）、`bridge_ids`（允许用的 MCP 管理器：`null` = 全部，包括以后添加的；空列表 = 一个都不能用；填了不存在的 id 时 `422`）。`enabled=false` 时三项权限一并收回，`platforms` 与 `bridge_ids` 保留 |
 
 状态里的 `platforms` 是这座桥控制的平台；每个账号和通道带 `enabled`（这座桥是否控制它对应的平台），没勾选的通道 `available=false`。
 
@@ -1035,7 +1035,7 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 **权限与保护的补充**（T-0247，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 第 2 节）：
 
 - 实例权限多一项 `environment_ids`：这个实例能用的开发环境（环境编号）。默认空列表——一个都不能用，新建开发会话返回 `FORBIDDEN_CAPABILITY`，`llm_bridge_environments` 也只列出勾选的。没有 `can_write` 时保存下来的是空列表。
-- 管理员给实例选的平台随每次调用带给管理器（请求头 `X-Bridge-Platforms`），由管理器按**会话所属的平台**检查：发送、取回合、读会话、取消、归档这些不带 `platform` 参数的调用同样受限，不属于允许平台的会话按“没有这个会话”回答；`llm_bridge_status` 只给出允许的平台。
+- 管理员给实例选的平台随每次调用带给管理器（请求头 `X-Bridge-Platforms`），由管理器按**会话所属的平台**检查：发送、取回合、读会话、取消、归档这些不带 `platform` 参数的调用同样受限，不属于允许平台的会话按“没有这个会话”回答；`llm_bridge_status` 只给出允许的平台。只能对话的授权（`codex:chat`）连带会话的用法一起检查：开发会话同样按“没有这个会话”回答。请求头里给了 `codex` / `codex:chat` 时一并带上旧名字 `chatgpt`，没升级的管理器按它自己的 `chatgpt`（只能聊天）检查；新版本的管理器把请求头里的 `chatgpt` 当成 `codex:chat`（T-0280）。
 - 要发给平台的内容（智能体的 `text` / `title`，人在聊天页发的消息、新建会话的第一条、同问的问题、修改排队中的消息）先过工作台的密钥扫描：像令牌、私钥的返回 `VALIDATION_FAILED`（接口是 422），不发、不存。
 - `llm_bridge_session_create` 多一个可选的 `request_id`：同一个实例用同一个重试，得到的是同一个会话。没等到回答时的提示按工具给出，不再让没有幂等号的调用“直接重试”。
 - `llm_bridge_send` 发到不是自己建的会话时，结果里有 `takeover: true`。

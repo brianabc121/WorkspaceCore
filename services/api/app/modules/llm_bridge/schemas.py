@@ -31,6 +31,44 @@ def _platform_in(value: Any) -> Any:
 
 # 收到旧名字 chatgpt 按 codex 处理；接口说明（OpenAPI、工具参数）里只列现在的平台
 Platform = Annotated[Literal["codex", "claude", "workbuddy"], BeforeValidator(_platform_in)]
+
+# 实例授权里的平台：一项是平台（不限用法），或 codex:chat（只能和 Codex 对话，不能用开发模式）。
+# 原来只给了 ChatGPT 的实例只能聊天：迁移成 codex:chat，不放宽成整个 Codex（T-0280）
+CODEX_CHAT_ONLY = "codex:chat"
+
+
+def _grant_in(value: Any) -> Any:
+    if value == "chatgpt":
+        return CODEX_CHAT_ONLY
+    return _platform_in(value)
+
+
+GrantPlatform = Annotated[
+    Literal["codex", "codex:chat", "claude", "workbuddy"], BeforeValidator(_grant_in)
+]
+
+
+def grant_platforms(values: Any) -> list[str]:
+    """授权里的平台列表整理一下：旧名字换掉、去重；给了整个 codex 就不用再写只能对话。"""
+    items = [_grant_in(str(v)) for v in values] if isinstance(values, list | tuple) else []
+    out = list(dict.fromkeys(items))
+    if "codex" in out and CODEX_CHAT_ONLY in out:
+        out.remove(CODEX_CHAT_ONLY)
+    return out
+
+
+def grant_allows(values: Any, platform: str, mode: str | None = None) -> bool:
+    """授权允不允许这个平台（给了用法时还看用法）；空列表是都允许。"""
+    granted = grant_platforms(values)
+    if not granted:
+        return True
+    platform = canonical_platform(platform)
+    if platform in granted:
+        return True
+    modes = {g.partition(":")[2] for g in granted if g.startswith(f"{platform}:")}
+    return bool(modes) and (mode is None or mode in modes)
+
+
 Slot = Literal["openai", "claude", "workbuddy"]
 ALL_PLATFORMS: tuple[str, ...] = ("codex", "claude", "workbuddy")
 Sandbox = Literal["read_only", "workspace_write", "exec"]
@@ -469,7 +507,10 @@ class LlmBridgeGrantIn(_In):
     can_write: bool = False
     can_account: bool = False
     can_takeover: bool = False
-    platforms: list[Platform] = Field(default=[], description="允许的平台；空表示都允许")
+    platforms: list[GrantPlatform] = Field(
+        default=[],
+        description="允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）",
+    )
     bridge_ids: list[UUID] | None = Field(
         default=None,
         max_length=100,
@@ -491,7 +532,9 @@ class LlmBridgeGrantOut(BaseModel):
     can_write: bool
     can_account: bool
     can_takeover: bool
-    platforms: list[str]
+    platforms: list[str] = Field(
+        description="允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）"
+    )
     bridge_ids: list[UUID] | None = Field(
         description="允许用的 MCP 管理器；null 表示都允许，空列表表示一个都不允许"
     )

@@ -331,6 +331,66 @@ async def test_platform_limit_follows_the_session(bridge: Bridge) -> None:
     assert {c["platform"] for c in old_name["channels"]} == {"codex"}
 
 
+async def test_chat_only_callers_cannot_reach_dev_sessions(bridge: Bridge) -> None:
+    """只能对话的调用方（平台:chat，T-0280）：能建、能续对话会话；别人的开发会话读不到、发不了。
+
+    旧名字 chatgpt 当时就是只能对话的 Codex：请求头里带着它也只按“只能对话”算，不放宽成整个 codex。
+    """
+    env = await bridge.admin(
+        "POST",
+        "/admin/environments",
+        json={"platform": "fake", "mode": "dev", "name": "仓库", "sandbox": "exec"},
+    )
+    dev = await bridge.tool(
+        "owner",
+        "llm_session_create",
+        {"platform": "fake", "mode": "dev", "environment": env.json()["id"]},
+    )
+    chat = await _session(bridge, "owner")
+    # 只能对话：开发会话和“不存在”一样；对话会话照常
+    hidden = await _limited(
+        bridge, "agent", "fake:chat", "llm_session_get", {"session_id": dev["session_id"]}
+    )
+    assert hidden["error"]["code"] == "NOT_FOUND"
+    sent = await _limited(
+        bridge,
+        "agent",
+        "fake:chat",
+        "llm_send",
+        {"session_id": dev["session_id"], "text": "x", "request_id": "d1"},
+    )
+    assert sent["error"]["code"] == "NOT_FOUND"
+    seen = await _limited(bridge, "agent", "fake:chat", "llm_session_get", {"session_id": chat})
+    assert "error" not in seen
+    listed = await _limited(bridge, "agent", "fake:chat", "llm_session_list", {"scope": "account"})
+    assert {s["session_id"] for s in listed["sessions"]} == {chat}
+    # 新建：对话可以，开发不行；概况里只有对话通道
+    made = await _limited(bridge, "agent", "fake:chat", "llm_session_create", CHAT)
+    assert "error" not in made, made
+    refused = await _limited(
+        bridge,
+        "agent",
+        "fake:chat",
+        "llm_session_create",
+        {"platform": "fake", "mode": "dev", "environment": env.json()["id"]},
+    )
+    assert refused["error"]["code"] == "FORBIDDEN"
+    refused = await _limited(
+        bridge, "agent", "fake:chat", "llm_environments", {"platform": "fake", "mode": "dev"}
+    )
+    assert refused["error"]["code"] == "FORBIDDEN"
+    status = await _limited(bridge, "agent", "fake:chat", "llm_status", {})
+    assert {(c["platform"], c["mode"]) for c in status["channels"]} == {("fake", "chat")}
+    # 整个平台都给了：开发会话也能用
+    full = await _limited(
+        bridge, "agent", "fake", "llm_session_get", {"session_id": dev["session_id"]}
+    )
+    assert "error" not in full
+    # 旧名字 chatgpt 只按“只能对话的 codex”算
+    old = await _limited(bridge, "agent", "chatgpt", "llm_status", {})
+    assert {(c["platform"], c["mode"]) for c in old["channels"]} <= {("codex", "chat")}
+
+
 async def test_create_with_request_id_is_idempotent(bridge: Bridge) -> None:
     """新建会话带幂等号：重试、同时到的两次调用，得到的都是同一个会话（T-0247）。"""
     args = {**CHAT, "request_id": "c-1"}

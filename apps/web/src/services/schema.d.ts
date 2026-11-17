@@ -12237,10 +12237,10 @@ export interface components {
             environment_ids: string[];
             /**
              * Platforms
-             * @description 允许的平台；空表示都允许
+             * @description 允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）
              * @default []
              */
-            platforms: ("codex" | "claude" | "workbuddy")[];
+            platforms: ("codex" | "codex:chat" | "claude" | "workbuddy")[];
         };
         /** LlmBridgeGrantList */
         LlmBridgeGrantList: {
@@ -12274,7 +12274,10 @@ export interface components {
             instance_id: string;
             /** Instance Name */
             instance_name: string;
-            /** Platforms */
+            /**
+             * Platforms
+             * @description 允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）
+             */
             platforms: string[];
         };
         /** LlmBridgeIn */

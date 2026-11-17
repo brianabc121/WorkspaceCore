@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import ManagementSection from '../../components/management/ManagementSection.vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import GrantEnvironments from './GrantEnvironments.vue'
-import { PLATFORMS, bridgeError, type Bridge, type Grant, type GrantBody, type LlmBridgeApi, type Platform } from './api'
+import { PLATFORMS, bridgeError, type Bridge, type Grant, type GrantBody, type LlmBridgeApi } from './api'
 
 // 按实例的权限：哪个智能体能用大模型会话、能用哪些 MCP 管理器、能做到哪一步。每次改动立即保存（owner）。
 // 关掉“启用”时其余权限一并收回（后端也这样处理）。
@@ -22,7 +22,11 @@ const FLAGS = [
 ] as const
 type Flag = (typeof FLAGS)[number]['key']
 
-const bodyOf = (g: Grant): GrantBody => ({ enabled: g.enabled, can_write: g.can_write, can_account: g.can_account, can_takeover: g.can_takeover, platforms: g.platforms.filter((p): p is Platform => PLATFORMS.some(x => x.id === p)), bridge_ids: g.bridge_ids ?? null, environment_ids: [...g.environment_ids] })
+// 允许的平台：一项是平台，或 codex:chat（只能和 Codex 对话，不能用开发模式；原来只勾了 ChatGPT 的实例是这一项，T-0280）
+type GrantPlatform = GrantBody['platforms'][number]
+const CODEX_CHAT: GrantPlatform = 'codex:chat'
+const GRANT_IDS: GrantPlatform[] = [...PLATFORMS.map(p => p.id as GrantPlatform), CODEX_CHAT]
+const bodyOf = (g: Grant): GrantBody => ({ enabled: g.enabled, can_write: g.can_write, can_account: g.can_account, can_takeover: g.can_takeover, platforms: g.platforms.filter((p): p is GrantPlatform => (GRANT_IDS as string[]).includes(p)), bridge_ids: g.bridge_ids ?? null, environment_ids: [...g.environment_ids] })
 async function save(g: Grant, body: GrantBody) {
   if (busy.value) return
   busy.value = g.instance_id; error.value = notice.value = ''
@@ -33,9 +37,11 @@ function setEnabled(g: Grant, enabled: boolean) {
   return save(g, enabled ? { ...bodyOf(g), enabled: true } : { ...bodyOf(g), enabled: false, can_write: false, can_account: false, can_takeover: false })
 }
 const setFlag = (g: Grant, flag: Flag, value: boolean) => save(g, { ...bodyOf(g), [flag]: value })
-function setPlatform(g: Grant, platform: Platform, on: boolean) {
+function setPlatform(g: Grant, platform: GrantPlatform, on: boolean) {
   const current = bodyOf(g).platforms
-  return save(g, { ...bodyOf(g), platforms: PLATFORMS.map(p => p.id).filter(id => (id === platform ? on : current.includes(id))) })
+  // 整个 Codex 和“只能对话”二选一
+  const other = platform === 'codex' ? CODEX_CHAT : platform === CODEX_CHAT ? 'codex' : null
+  return save(g, { ...bodyOf(g), platforms: GRANT_IDS.filter(id => (id === platform ? on : current.includes(id) && !(on && id === other))) })
 }
 // “全部”取消勾选时改成现在这几个（效果一样，但以后新添加的不会自动算进来）
 const setAllBridges = (g: Grant, all: boolean) => save(g, { ...bodyOf(g), bridge_ids: all ? null : props.bridges.map(b => b.id) })
@@ -75,6 +81,8 @@ const checked = (event: Event) => (event.target as HTMLInputElement).checked
         <fieldset class="lb-checks" :disabled="!g.enabled" :aria-label="`${g.instance_name}允许的平台`">
           <legend>允许的平台{{ g.enabled && !g.platforms.length ? '（现在：全部）' : '' }}</legend>
           <label v-for="p in PLATFORMS" :key="p.id" class="check-field"><input type="checkbox" :checked="g.platforms.includes(p.id)" @change="setPlatform(g, p.id, checked($event))" />{{ p.name }}</label>
+          <label class="check-field"><input type="checkbox" :checked="g.platforms.includes(CODEX_CHAT)" @change="setPlatform(g, CODEX_CHAT, checked($event))" />Codex（只能对话）</label>
+          <p class="form-help">“Codex（只能对话）”：能和 Codex 聊天，不能用开发模式，也读不到别人的开发会话。原来只勾了 ChatGPT 的实例升级后是这一项。</p>
         </fieldset>
         <fieldset v-if="bridges.length" class="lb-checks" :disabled="!g.enabled" :aria-label="`${g.instance_name}允许的 MCP 管理器`">
           <legend>允许的 MCP 管理器</legend>

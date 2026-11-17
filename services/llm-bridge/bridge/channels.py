@@ -38,6 +38,18 @@ def canonical(platform: str) -> str:
     return ALIASES.get(platform, platform)
 
 
+def grant_token(item: str) -> str:
+    """调用方“能用哪些平台”里的一项（X-Bridge-Platforms）。
+
+    一项是平台（不限用法），或“平台:用法”（只能用这种用法，例如 codex:chat 只能对话）。
+    旧名字 chatgpt 当时就是只能对话的 Codex：在这里换成 codex:chat，不放宽成整个 codex（T-0280）。
+    """
+    if item == "chatgpt":
+        return "codex:chat"
+    platform, sep, mode = item.partition(":")
+    return f"{canonical(platform)}{sep}{mode}"
+
+
 CHANNELS: tuple[Channel, ...] = (
     Channel(
         "codex",

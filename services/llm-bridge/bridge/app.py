@@ -29,7 +29,7 @@ from starlette.types import Receive, Scope, Send
 
 from bridge import __version__, hooks
 from bridge import attachments as attachment_rules
-from bridge.channels import CHANNELS, FAKE_CHANNELS, SLOT_LABELS, canonical, find
+from bridge.channels import CHANNELS, FAKE_CHANNELS, SLOT_LABELS, canonical, find, grant_token
 from bridge.config import Settings, get_settings
 from bridge.drivers.base import Driver
 from bridge.drivers.cli_stream import CliStreamDriver, claude_profile, codebuddy_profile
@@ -134,11 +134,13 @@ def resolve_caller(request: Request) -> Caller:
         scopes = frozenset(s for s in (part.strip() for part in raw.split(",")) if s in SCOPES)
         # 工作台按管理员给这个实例选的平台带过来；没带这个头是不限（人在聊天页）
         limited = request.headers.get("x-bridge-platforms")
-        # 旧名字 chatgpt 按 codex 处理（T-0280）
+        # 一项是平台或“平台:用法”；旧名字 chatgpt 是只能对话的 codex（T-0280）
         platforms = (
             None
             if limited is None
-            else frozenset(canonical(p) for p in (part.strip() for part in limited.split(",")) if p)
+            else frozenset(
+                grant_token(p) for p in (part.strip() for part in limited.split(",")) if p
+            )
         )
         return Caller(caller_id, label, scopes, platforms, _source(request))
     store: Store = request.app.state.store

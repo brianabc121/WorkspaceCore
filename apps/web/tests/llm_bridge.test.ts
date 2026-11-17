@@ -549,6 +549,29 @@ describe('大模型客户端管理', () => {
     expect(bodies).toEqual([{ enabled: true, can_write: true, can_account: true, can_takeover: false, platforms: ['codex'], bridge_ids: null, environment_ids: [ENV] }])
   })
 
+  it('keeps an instance that only had ChatGPT to chatting with Codex, and lets the owner widen it to all of Codex', async () => {
+    // 原来只勾了 ChatGPT 的实例升级后是“Codex（只能对话）”（T-0280）：不能用开发模式、读不到别人的开发会话
+    let current = grant({ platforms: ['codex:chat'] })
+    const requests = setup('owner', async r => {
+      if (path(r) === '/api/v1/llm_bridge/grants') return Response.json({ grants: [current] })
+      if (path(r) === `/api/v1/llm_bridge/grants/${INSTANCE}` && r.method === 'PUT') { current = { ...current, ...(await r.clone().json()) }; return Response.json(current) }
+      return undefined
+    })
+    await openApp('/llm_bridge?view=manage')
+    const row = await screen.findByRole('group', { name: '实例权限：甲' })
+    const platforms = within(row).getByRole('group', { name: '甲允许的平台' })
+    expect(within(platforms).getByLabelText('Codex（只能对话）')).toBeChecked()
+    expect(within(platforms).getByLabelText('Codex')).not.toBeChecked()
+    expect(within(platforms).queryByLabelText('ChatGPT')).not.toBeInTheDocument()
+    expect(within(platforms).getByText(/原来只勾了 ChatGPT 的实例升级后是这一项/)).toBeVisible()
+    // 勾上整个 Codex：只能对话那一项一并去掉（二选一）
+    await fireEvent.click(within(platforms).getByLabelText('Codex'))
+    await screen.findByText('已保存「甲」的权限。')
+    const bodies = await Promise.all(writes(requests).map(r => r.clone().json()))
+    expect(bodies.map(b => b.platforms)).toEqual([['codex']])
+    await waitFor(() => expect(within(row).getByLabelText('Codex（只能对话）')).not.toBeChecked())
+  })
+
   it('lists the sessions of every manager, filters them, searches the content and sums up usage', async () => {
     const indexed = (over: Partial<Schema['LlmBridgeIndexSessionOut']> = {}): Schema['LlmBridgeIndexSessionOut'] => ({
       bridge_id: BRIDGE, bridge_name: '主账号', session_id: `bs_${'a'.repeat(20)}`, platform: 'claude', mode: 'dev', model: 'sonnet', title: '季度复盘', status: 'active', origin: 'bridge',

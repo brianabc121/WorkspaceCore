@@ -149,9 +149,10 @@ def test_chatgpt_becomes_codex_in_every_stored_place(temp_database_url: str) -> 
     grants = asyncio.run(
         _fetch(temp_database_url, "SELECT instance_id, platforms FROM workspace.llm_bridge_grants")
     )
-    # 换名、去重、保留原来的顺序；空列表（都允许）不动
+    # 原来只给了 ChatGPT（只能聊天）：变成只能和 Codex 对话，不放宽成整个 Codex；
+    # 已经给了 Codex 的，ChatGPT 并进去。去重、保留原来的顺序；空列表（都允许）不动
     assert {r["instance_id"]: json.loads(r["platforms"]) for r in grants} == {
-        chat_only: ["codex"],
+        chat_only: ["codex:chat"],
         mixed: ["claude", "codex", "workbuddy"],
         untouched: [],
     }

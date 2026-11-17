@@ -38,7 +38,7 @@ export const OWNER_KIND: Record<string, string> = { agent: '智能体', user: '�
 export type SourceTask = { run_id?: string; task_id?: string; title?: string; project_id?: string }
 export const sourceTasks = (source: Record<string, unknown> | null | undefined): SourceTask[] => (Array.isArray(source?.tasks) ? (source.tasks as SourceTask[]).filter(t => t && typeof t.task_id === 'string') : [])
 export type GrantBody = Schema['LlmBridgeGrantIn']
-export type Platform = GrantBody['platforms'][number]
+export type Platform = Schema['LlmChatCreateIn']['platform']
 export type BridgeSession = Schema['LlmBridgeSessionList']['sessions'][number]
 export type Turn = Schema['LlmBridgeTurnOut']
 export type Slot = 'openai' | 'claude' | 'workbuddy'

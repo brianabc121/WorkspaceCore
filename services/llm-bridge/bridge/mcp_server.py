@@ -89,7 +89,9 @@ async def run_tool(
     args = data.model_dump()
     if name == "llm_status":
         return await engine.caller_overview(caller)
-    if name in ("llm_models", "llm_environments") and not caller.may_use(args["platform"]):
+    if name in ("llm_models", "llm_environments") and not caller.may_use(
+        args["platform"], args.get("mode")
+    ):
         raise BridgeError("FORBIDDEN", f"管理员没有给你开 {args['platform']} 这个平台")
     if name == "llm_models":
         return {"models": await engine.models(args["platform"], args["mode"])}

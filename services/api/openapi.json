@@ -13566,10 +13566,11 @@
           },
           "platforms": {
             "default": [],
-            "description": "允许的平台；空表示都允许",
+            "description": "允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）",
             "items": {
               "enum": [
                 "codex",
+                "codex:chat",
                 "claude",
                 "workbuddy"
               ],
@@ -13653,6 +13654,7 @@
             "type": "string"
           },
           "platforms": {
+            "description": "允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）",
             "items": {
               "type": "string"
             },
