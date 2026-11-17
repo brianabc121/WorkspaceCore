@@ -137,6 +137,12 @@ class LoginChallenge:
     verification_url: str | None = None
     user_code: str | None = None
     detail: str = ""
+    # 逐步进度（网页登录，T-0276）：每一步 {key, status, detail, started_at, finished_at}；
+    # 运行信息是脱敏后的文字行。驱动原地更新这两个列表，“查登录进度”随时读到最新的
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    log: list[str] = field(default_factory=list)
+    started_at: str | None = None
+    finished_at: str | None = None
 
 
 EventSink = Callable[[str, dict[str, Any]], Awaitable[None]]

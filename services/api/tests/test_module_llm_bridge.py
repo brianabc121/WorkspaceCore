@@ -268,6 +268,52 @@ async def test_starting_a_login_waits_longer_than_other_admin_calls(rig: Rig) ->
     assert READ_TIMEOUT < LOGIN_READ_TIMEOUT < 95.0  # 比页面等的时间短，页面总能拿到工作台的答复
 
 
+def test_login_progress_is_passed_on_with_limits() -> None:
+    """登录进度（T-0276）：步骤与运行信息照转，限长；不认识的字段丢掉；没有进度是 none。"""
+    from app.modules.llm_bridge.service import LOGIN_LOG_LINES, LOGIN_STEPS_MAX, login_out
+
+    data = {
+        "state": "pending",
+        "verification_url": "https://www.codebuddy.ai/login?state=x",
+        "detail": "",
+        "steps": [{"key": f"s{i}", "status": "done", "detail": "x" * 900} for i in range(20)]
+        + [{"status": "done"}, "bad"],
+        "log": [f"line {i}" for i in range(500)],
+        "started_at": "2026-11-17T03:00:00+00:00",
+        "extra": "ignored",
+    }
+    out = login_out(data)
+    assert len(out.steps) == LOGIN_STEPS_MAX and len(out.steps[0].detail) == 500
+    assert len(out.log) == LOGIN_LOG_LINES and out.log[-1] == "line 499"
+    assert out.started_at == "2026-11-17T03:00:00+00:00" and out.finished_at is None
+    assert "extra" not in out.model_dump()
+    assert login_out(None).state == "none" and login_out(None).steps == []
+    # 旧版本的会话桥没有逐步进度：照旧只有状态和网址
+    old = login_out({"state": "pending", "verification_url": "https://x.test/", "detail": ""})
+    assert old.steps == [] and old.log == [] and old.verification_url == "https://x.test/"
+
+
+async def test_web_login_progress_reaches_the_page_when_it_fails(rig: Rig) -> None:
+    """测试环境里没有 codebuddy 程序：网页登录在“启动登录服务”那一步失败，
+    失败原因和运行信息经工作台的“查登录进度”原样给到页面（T-0276）。"""
+    started = await rig.api(
+        "POST", f"/bridges/{rig.bridge_id}/accounts/workbuddy/login", json={"method": "web_intl"}
+    )
+    assert started.status_code >= 400, started.text
+    assert "codebuddy" in started.json()["error"]["message"]
+    state = (await rig.api("GET", f"/bridges/{rig.bridge_id}/accounts/workbuddy/login")).json()
+    assert state["state"] == "failed" and state["finished_at"] and state["started_at"]
+    assert [(s["key"], s["status"]) for s in state["steps"]] == [
+        ("start", "failed"),
+        ("request_url", "pending"),
+        ("wait_user", "pending"),
+        ("finish", "pending"),
+    ]
+    assert "codebuddy" in state["steps"][0]["detail"]
+    assert any("启动 codebuddy 失败" in line for line in state["log"])
+    assert state["detail"] == state["steps"][0]["detail"]
+
+
 async def test_managers_control_their_own_platforms_and_accounts(rig: Rig) -> None:
     """人类的例子：1 号管理器控制 claude / workbuddy，2 号多一个 codex；各自一套账号。"""
     env = rig.env

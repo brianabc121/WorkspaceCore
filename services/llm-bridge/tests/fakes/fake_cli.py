@@ -93,7 +93,12 @@ if "--serve" in args:
                 self.reply(200, {"data": {"success": True, "authUrl": url}})
 
     CONFIG.mkdir(parents=True, exist_ok=True)
-    HTTPServer(("127.0.0.1", int(args[args.index("--port") + 1])), Handler).serve_forever()
+    port = int(args[args.index("--port") + 1])
+    server = HTTPServer(("127.0.0.1", port), Handler)
+    # 和官方程序一样，启动信息里带着访问口令（管理器记运行信息时要替换掉）
+    print(f"Gateway listening on http://127.0.0.1:{port} password={PASSWORD}", flush=True)
+    print(f"access token {PASSWORD}", flush=True)
+    server.serve_forever()
 if args == ["--help"]:
     print("  --model <model>  Model. Currently supported: (auto, fast-model, deep-model)")
     sys.exit(0)

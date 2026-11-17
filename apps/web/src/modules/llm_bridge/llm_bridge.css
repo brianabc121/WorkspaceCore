@@ -109,6 +109,11 @@
 .lb-net-ms { font-variant-numeric: tabular-nums; color: var(--muted); }
 .lb-net-error { grid-column: 1 / -1; color: var(--danger); font-size: .8rem; }
 .lb-login-url { overflow-wrap: anywhere; }
+/* 网页登录的逐步进度（T-0276）：拿到网址后在步骤下面单独一块，醒目地给出要打开的网址 */
+.lb-login-open { display: grid; gap: 4px; padding: 12px 14px; border-radius: 10px; background: var(--accent-soft); overflow-wrap: anywhere; }
+.lb-login-open p { margin: 0; }
+.lb-login-open .lb-login-url { font-weight: 600; }
+.ssh-job-after .lb-actions { margin-top: 10px; }
 
 /* ---- 子页面（T-0262，效果图“管理器与账号”“会话纪要”）：页内一张大卡片，标题、说明、右上角操作 ---- */
 .lb-page { padding: 20px 22px 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow); }

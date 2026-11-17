@@ -182,6 +182,7 @@ describe('大模型客户端管理', () => {
   })
 
   it('logs CodeBuddy in through a web page: a link to open, no code, no container login', { timeout: 20000 }, async () => {
+    // 旧版本的 MCP 管理器：不报告每一步、没有 started_at；“开始登录”直接给网址
     let polls = 0, loggedIn = false
     const wb = (over: Partial<Schema['LlmBridgeAccountOut']> = {}) => account({ slot: 'workbuddy', label: 'CodeBuddy', login_methods: ['web_cn', 'web_intl', 'api_key'], ...over })
     const url = 'https://copilot.tencent.com/login?state=abc'
@@ -190,8 +191,8 @@ describe('大模型客户端管理', () => {
       if (path(r) !== `${base}/accounts/workbuddy/login`) return undefined
       if (r.method === 'POST') return Response.json({ state: 'pending', verification_url: url, user_code: null, detail: '' })
       polls += 1
-      if (polls >= 2) loggedIn = true
-      return Response.json({ state: loggedIn ? 'done' : 'pending', detail: '' })
+      if (polls >= 3) loggedIn = true
+      return Response.json({ state: loggedIn ? 'done' : polls === 1 ? 'none' : 'pending', detail: '' })
     })
     await openApp('/llm_bridge?view=manage')
     const card = await screen.findByRole('article', { name: '账号：CodeBuddy' })
@@ -204,20 +205,108 @@ describe('大模型客户端管理', () => {
     expect(within(form).queryByLabelText('API 密钥', { selector: 'input[type="password"]' })).not.toBeInTheDocument()
     await fireEvent.click(within(form).getByRole('button', { name: '获取登录网址' }))
 
-    const panel = await screen.findByRole('region', { name: '网页登录' })
-    const link = within(panel).getByRole('link', { name: url })
+    // 逐步进度（T-0276），和智能体服务器的初始化一个样式；旧管理器按页面知道的情况显示
+    const progress = await screen.findByRole('region', { name: '登录「CodeBuddy」的进度' })
+    const open = await within(progress).findByRole('group', { name: '打开登录网址' })
+    const link = within(open).getByRole('link', { name: url })
     expect(link).toHaveAttribute('href', url)
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(within(panel).queryByText(/验证码：/)).not.toBeInTheDocument()
+    expect(progress).not.toHaveTextContent('验证码')
+    const steps = within(progress).getAllByRole('listitem')
+    expect(steps.map(li => li.getAttribute('data-status'))).toEqual(['done', 'done', 'done', 'running', 'pending'])
+    expect(steps[0]).toHaveTextContent('把请求交给 MCP 管理器「主账号」')
+    expect(steps[3]).toHaveTextContent('等你在自己的浏览器里打开网址并登录')
+    expect(within(progress).getByText('这个 MCP 管理器的版本不报告每一步，重新部署（升级）后就能看到。')).toBeVisible()
     expect(await writes(requests)[0]!.clone().json()).toEqual({ method: 'web_cn' })
 
-    expect(await screen.findByText('「CodeBuddy」已登录。', {}, { timeout: 10000 })).toBeVisible()
-    expect(screen.queryByRole('region', { name: '网页登录' })).not.toBeInTheDocument()
+    expect(await screen.findByText('「CodeBuddy」已登录。', { selector: '[role="status"]:not(strong)' }, { timeout: 10000 })).toBeVisible()
+    expect(progress).toHaveAttribute('data-status', 'succeeded')
+    await fireEvent.click(within(progress).getByRole('button', { name: '关闭' }))
+    expect(screen.queryByRole('region', { name: '登录「CodeBuddy」的进度' })).not.toBeInTheDocument()
     expect(await within(card).findByText('网页登录（国内站）')).toBeVisible()
   })
 
-  // 开始网页登录要先在管理器里启动 CodeBuddy 的登录服务，常常超过普通请求的 15 秒：请求没有完整答复时不重新发起，改查登录进度
+  it('shows each step the MCP manager reports while CodeBuddy starts its login service, then the link and the result', { timeout: 30000 }, async () => {
+    const wb = account({ slot: 'workbuddy', label: 'CodeBuddy', login_methods: ['web_cn', 'web_intl', 'api_key'] })
+    const url = 'https://www.codebuddy.ai/login?state=xyz'
+    const step = (key: string, status: string, detail = '') => ({ key, status, detail, started_at: null, finished_at: null })
+    // 上一次失败的登录（开始前查到的）：不能当成这一次的结果
+    let progress: Record<string, unknown> = { state: 'failed', started_at: '2026-11-17T02:00:00+00:00', detail: '上一次的失败', steps: [step('start', 'failed', '上一次的失败')], log: [] }
+    let answer: (r: Response) => void = () => {}
+    const requests = setup('owner', r => {
+      if (path(r) === `${base}/status`) return Response.json(status({ accounts: [wb] }))
+      if (path(r) !== `${base}/accounts/workbuddy/login`) return undefined
+      if (r.method === 'POST') return new Promise<Response>(resolve => { answer = resolve })
+      return Response.json(progress)
+    })
+    await openApp('/llm_bridge?view=manage')
+    const card = await screen.findByRole('article', { name: '账号：CodeBuddy' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录CodeBuddy' }))
+    const form = within(card).getByRole('form', { name: '登录CodeBuddy' })
+    await fireEvent.click(within(form).getByLabelText('网页登录（国际站）'))
+    await fireEvent.click(within(form).getByRole('button', { name: '获取登录网址' }))
+
+    const panel = await screen.findByRole('region', { name: '登录「CodeBuddy」的进度' })
+    expect(panel).toHaveAttribute('data-status', 'running')
+    expect(panel).toHaveTextContent('MCP 管理器「主账号」 · 网页登录（国际站）')
+    expect(panel).not.toHaveTextContent('上一次的失败')
+    // 管理器接手、正在启动登录服务：这一步进行中，下面是最新的运行输出
+    progress = { state: 'pending', started_at: '2026-11-17T03:00:00+00:00', detail: '', verification_url: null, steps: [step('start', 'running'), step('request_url', 'pending'), step('wait_user', 'pending'), step('finish', 'pending')], log: ['03:00:01 启动 codebuddy --serve（只监听 127.0.0.1:41234）', '03:00:02 Gateway listening on http://127.0.0.1:41234 password=***'] }
+    await waitFor(() => expect(within(panel).getAllByRole('listitem').map(li => li.getAttribute('data-status'))).toEqual(['done', 'running', 'pending', 'pending', 'pending']), { timeout: 5000 })
+    const items = within(panel).getAllByRole('listitem')
+    expect(items[1]).toHaveTextContent('启动 CodeBuddy 的登录服务')
+    expect(items[2]).toHaveTextContent('向 CodeBuddy（国际站）申请登录网址')
+    expect(within(panel).getByLabelText('最新输出')).toHaveTextContent('password=***')
+    expect(panel).toHaveTextContent('正在执行第 2 / 5 步')
+
+    // 拿到网址：前两步完成，等你登录
+    const got = { state: 'pending', started_at: '2026-11-17T03:00:00+00:00', detail: '', verification_url: url, steps: [step('start', 'done', '用时 3.2 秒'), step('request_url', 'done', '用时 1.1 秒'), step('wait_user', 'running', '在你自己的浏览器里打开网址并登录（最多等 10 分钟）'), step('finish', 'pending')], log: [] }
+    answer(Response.json(got))
+    progress = got
+    const link = await within(panel).findByRole('link', { name: url })
+    expect(link).toHaveAttribute('href', url)
+    expect(within(panel).getByText('用时 3.2 秒')).toBeVisible()
+    // 人在网页上登录完
+    progress = { ...got, state: 'done', finished_at: '2026-11-17T03:01:00+00:00', steps: [step('start', 'done'), step('request_url', 'done'), step('wait_user', 'done', '已在浏览器里登录'), step('finish', 'done', '账号：测试账号')] }
+    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'succeeded'), { timeout: 5000 })
+    expect(within(panel).getByText('「CodeBuddy」已登录。')).toBeVisible()
+    expect(writes(requests).filter(r => path(r).endsWith('/accounts/workbuddy/login'))).toHaveLength(1)
+  })
+
+  it('puts the reason under the failed step with the manager output, and offers to try again', { timeout: 30000 }, async () => {
+    const wb = account({ slot: 'workbuddy', label: 'CodeBuddy', login_methods: ['web_cn', 'web_intl', 'api_key'] })
+    const step = (key: string, status: string, detail = '') => ({ key, status, detail, started_at: null, finished_at: null })
+    const reason = '向 CodeBuddy 申请登录网址没有成功：account.login.failed。常见原因：这个 MCP 管理器所在的服务器访问不了这个站点'
+    let started = false
+    const requests = setup('owner', r => {
+      if (path(r) === `${base}/status`) return Response.json(status({ accounts: [wb] }))
+      if (path(r) !== `${base}/accounts/workbuddy/login`) return undefined
+      // 管理器报“平台出错”：工作台按 503 UNAVAILABLE 原文转给页面
+      if (r.method === 'POST') { started = true; return Response.json({ error: { code: 'UNAVAILABLE', message: reason, request_id: 'r', details: {} } }, { status: 503 }) }
+      return Response.json(!started ? { state: 'none', detail: '' } : { state: 'failed', started_at: '2026-11-17T03:00:00+00:00', finished_at: '2026-11-17T03:00:05+00:00', detail: reason, steps: [step('start', 'done', '用时 2.0 秒'), step('request_url', 'failed', reason), step('wait_user', 'pending'), step('finish', 'pending')], log: ['03:00:03 向 CodeBuddy 申请登录网址（登录方式 internal）', `03:00:05 失败：${reason}`] })
+    })
+    await openApp('/llm_bridge?view=manage')
+    const card = await screen.findByRole('article', { name: '账号：CodeBuddy' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录CodeBuddy' }))
+    await fireEvent.click(within(within(card).getByRole('form', { name: '登录CodeBuddy' })).getByRole('button', { name: '获取登录网址' }))
+
+    const panel = await screen.findByRole('region', { name: '登录「CodeBuddy」的进度' })
+    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'failed'))
+    const items = within(panel).getAllByRole('listitem')
+    expect(items.map(li => li.getAttribute('data-status'))).toEqual(['done', 'done', 'failed', 'pending', 'pending'])
+    expect(within(items[2]!).getByRole('alert')).toHaveTextContent(`失败原因${reason}`)
+    expect(within(items[3]!).getByText('未执行')).toBeVisible()
+    expect(panel).toHaveTextContent('完成 2 / 5 步，在第 3 步失败')
+    // 运行信息可以展开看
+    await fireEvent.click(within(items[2]!).getByRole('button', { name: '查看命令输出' }))
+    expect(panel.querySelector('details')!.textContent).toContain('向 CodeBuddy 申请登录网址（登录方式 internal）')
+    // 重新获取：再发起一次
+    await fireEvent.click(within(panel).getByRole('button', { name: '重新获取登录网址' }))
+    await waitFor(() => expect(writes(requests).filter(r => path(r).endsWith('/accounts/workbuddy/login'))).toHaveLength(2))
+  })
+
+  // 开始网页登录要先在管理器里启动 CodeBuddy 的登录服务，常常超过普通请求的 15 秒：请求没有完整答复时不重新发起，改查登录进度（T-0275）
   for (const [name, broken] of [
     ['the connection drops', () => { throw new TypeError('Failed to fetch') }],
     ['a CDN in front of the site times out (Cloudflare 524)', () => new Response('<html>524</html>', { status: 524, headers: { 'content-type': 'text/html' } })],
@@ -231,8 +320,8 @@ describe('大模型客户端管理', () => {
         if (path(r) !== `${base}/accounts/workbuddy/login`) return undefined
         if (r.method === 'POST') return broken()
         polls += 1
-        // 第一次查时管理器还在启动登录服务（没有在登录）；之后申请到了网址
-        return Response.json(polls === 1 ? { state: 'none', detail: '' } : { state: 'pending', verification_url: url, user_code: null, detail: '' })
+        // 开始前、刚断开时管理器还在启动登录服务（没有在登录）；之后申请到了网址
+        return Response.json(polls <= 2 ? { state: 'none', detail: '' } : { state: 'pending', verification_url: url, user_code: null, detail: '' })
       })
       await openApp('/llm_bridge?view=manage')
       const card = await screen.findByRole('article', { name: '账号：CodeBuddy' })
@@ -241,22 +330,23 @@ describe('大模型客户端管理', () => {
       await fireEvent.click(within(form).getByLabelText('网页登录（国际站）'))
       await fireEvent.click(within(form).getByRole('button', { name: '获取登录网址' }))
 
-      const panel = await screen.findByRole('region', { name: '网页登录' })
-      expect(within(panel).getByText('正在等待登录网址…')).toBeVisible()
+      const panel = await screen.findByRole('region', { name: '登录「CodeBuddy」的进度' })
+      expect(await within(panel).findByText('“开始登录”的请求没等到答复，正在向管理器查进度')).toBeVisible()
       expect(screen.queryByText(/连接中断或超时/)).not.toBeInTheDocument()
       const link = await within(panel).findByRole('link', { name: url }, { timeout: 10000 })
       expect(link).toHaveAttribute('href', url)
-      expect(within(panel).getByText('正在等待你完成登录…')).toBeVisible()
+      expect(panel).toHaveAttribute('data-status', 'running')
       // 只发起了一次：没有重启管理器里的登录服务
       expect(writes(requests).filter(r => path(r).endsWith('/accounts/workbuddy/login'))).toHaveLength(1)
       await fireEvent.click(within(panel).getByRole('button', { name: '不等了' }))
+      expect(screen.queryByRole('region', { name: '登录「CodeBuddy」的进度' })).not.toBeInTheDocument()
     })
   }
 
-  it('says why when no CodeBuddy login link turns up in time, and explains the wait while the request runs', { timeout: 30000 }, async () => {
+  it('says why when no CodeBuddy login link turns up in time', { timeout: 30000 }, async () => {
     const wb = account({ slot: 'workbuddy', label: 'CodeBuddy', login_methods: ['web_cn', 'web_intl', 'api_key'] })
     let answer: (r: Response) => void = () => {}
-    setup('owner', r => {
+    const requests = setup('owner', r => {
       if (path(r) === `${base}/status`) return Response.json(status({ accounts: [wb] }))
       if (path(r) !== `${base}/accounts/workbuddy/login`) return undefined
       if (r.method === 'POST') return new Promise<Response>(resolve => { answer = resolve })
@@ -265,18 +355,19 @@ describe('大模型客户端管理', () => {
     await openApp('/llm_bridge?view=manage')
     const card = await screen.findByRole('article', { name: '账号：CodeBuddy' })
     await fireEvent.click(within(card).getByRole('button', { name: '登录CodeBuddy' }))
-    const form = within(card).getByRole('form', { name: '登录CodeBuddy' })
-    await fireEvent.click(within(form).getByRole('button', { name: '获取登录网址' }))
-    // 请求还在等：说明在做什么、要多久
-    expect(await within(form).findByText('正在启动「CodeBuddy」的登录服务并申请登录网址，可能要一分钟左右，请稍候。')).toBeVisible()
+    await fireEvent.click(within(within(card).getByRole('form', { name: '登录CodeBuddy' })).getByRole('button', { name: '获取登录网址' }))
+    const panel = await screen.findByRole('region', { name: '登录「CodeBuddy」的进度' })
+    // 请求还在等：第一步“交给 MCP 管理器”进行中
+    expect(within(panel).getAllByRole('listitem')[0]).toHaveAttribute('data-status', 'running')
     // 工作台等管理器也超时了（503）：改查进度；一直没有网址，到时间说明原因，不当成已登录
+    await waitFor(() => expect(writes(requests)).toHaveLength(1))
     answer(fail(503, 'EXTERNAL_UNAVAILABLE'))
-    const panel = await screen.findByRole('region', { name: '网页登录' })
-    expect(within(panel).getByText('正在等待登录网址…')).toBeVisible()
+    expect(await within(panel).findByText('“开始登录”的请求没等到答复，正在向管理器查进度')).toBeVisible()
     const now = Date.now()
     vi.spyOn(Date, 'now').mockReturnValue(now + 10 * 60_000)
-    expect(await screen.findByText(/没有拿到「CodeBuddy」的登录网址/, {}, { timeout: 10000 })).toBeVisible()
-    expect(screen.queryByRole('region', { name: '网页登录' })).not.toBeInTheDocument()
+    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'failed'), { timeout: 10000 })
+    expect(panel).toHaveTextContent('没有拿到「CodeBuddy」的登录网址')
+    expect(within(panel).getAllByRole('listitem')[0]).toHaveAttribute('data-status', 'failed')
     expect(screen.queryByText('「CodeBuddy」已登录。')).not.toBeInTheDocument()
   })
 

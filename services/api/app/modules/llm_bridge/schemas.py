@@ -313,11 +313,31 @@ class LlmBridgeLoginIn(_In):
     oauth_token: str | None = Field(default=None, max_length=2000)
 
 
+class LlmBridgeLoginStepOut(BaseModel):
+    """登录过程的一步（T-0276）：key 是 start / request_url / wait_user / finish（网页登录）。"""
+
+    key: str
+    status: str = Field(description="pending / running / done / failed / skipped")
+    detail: str = ""
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
 class LlmBridgeLoginOut(BaseModel):
     state: str = Field(description="pending / done / failed / none")
     verification_url: str | None = None
     user_code: str | None = None
     detail: str = ""
+    steps: list[LlmBridgeLoginStepOut] = Field(
+        default_factory=list,
+        description="逐步进度（会话桥支持时才有，T-0276）：启动登录服务、申请登录网址、等人登录、确认结果",
+    )
+    log: list[str] = Field(
+        default_factory=list,
+        description="运行信息：会话桥做了什么、官方程序本机服务的输出（会话桥已脱敏，这里只限长）",
+    )
+    started_at: str | None = None
+    finished_at: str | None = None
 
 
 class LlmBridgeAccountStateOut(BaseModel):
