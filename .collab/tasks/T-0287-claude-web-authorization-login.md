@@ -58,3 +58,4 @@ updated: 2026-11-17
 ## 进度日志
 - 2026-11-17 claude：人类在对话中提出；最初直接拿令牌查账号资料的做法与方案 6.3 节冲突，经人类决定撤回，范围改为网页授权登录。
 - 2026-11-17 17:18 UTC · claude · status in_progress → done：Claude 网页授权登录、订阅令牌分步说明、接口与页面、测试与文档已完成
+- 2026-11-17 17:39 UTC · claude · CI 的浏览器验收（ci-llm-bridge / workspace）在 7fc7d9d 上失败：脚本用 getByLabel('授权码') 找输入框，表单本身叫“提交授权码”，Playwright 严格模式匹配到两个元素。改为按角色精确匹配输入框和按钮；同一段标记在本地用 Playwright 核对：旧写法 2 个、新写法 1 个。真实镜像里官方程序给出 claude.com 登录网址那几步已经通过。ci-security / deps 失败是 picomatch 新公告（GHSA-fc5q-39xc-vjpf，无修复版），与本任务无关，已交人类决定。

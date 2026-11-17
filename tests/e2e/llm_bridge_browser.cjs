@@ -332,8 +332,9 @@ async function main() {
     const authorizeUrl = await authorize.getByRole('link').first().getAttribute('href')
     check(/^https:\/\/claude\.com\/cai\/oauth\/authorize\?/.test(authorizeUrl || ''), `应拿到 Claude 的登录网址：${authorizeUrl}`)
     await claudeLogin.getByText('官方程序用授权码完成登录').waitFor()
-    await authorize.getByLabel('授权码').fill('abc')
-    await authorize.getByRole('button', { name: '提交授权码' }).click()
+    // 按角色精确找输入框：表单本身也叫“提交授权码”，getByLabel('授权码') 会连表单一起匹配上
+    await authorize.getByRole('textbox', { name: '授权码', exact: true }).fill('abc')
+    await authorize.getByRole('button', { name: '提交授权码', exact: true }).click()
     await authorize.getByText(/授权码不完整/).waitFor()
     const waiting = await api(page, workspace, 'GET', `/api/v1/llm_bridge/bridges/${oneId}/accounts/claude/login`)
     check(waiting.body?.state === 'pending' && waiting.body?.needs_code === true, `管理器应在等授权码：${JSON.stringify(waiting.body)}`)
