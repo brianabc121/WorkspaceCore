@@ -7,7 +7,7 @@ import { PLATFORM_MARK } from './chat/chatApi'
 import BridgeConnectivity from './BridgeConnectivity.vue'
 import LoginProgress, { type LoginJob } from './LoginProgress.vue'
 import { ApiError } from '../../services/api'
-import { ACCOUNT_STATE, METHODS, MODES, PLATFORMS, PLATFORM_SLOT, bridgeError, methodName, platformName, seconds, type Account, type ConnectivityTarget, type Bridge, type BridgeStatus, type LlmBridgeApi, type LoginBody, type LoginMethod, type LoginState, type Platform, type Slot } from './api'
+import { ACCOUNT_STATE, DNS_SLOW_MS, METHODS, MODES, PLATFORMS, PLATFORM_SLOT, bridgeError, methodName, platformName, seconds, type Account, type ConnectivityTarget, type Bridge, type BridgeStatus, type LlmBridgeApi, type LoginBody, type LoginMethod, type LoginState, type Platform, type Slot } from './api'
 
 // 一个 MCP 管理器的平台与账号：它控制哪些平台（owner 勾选，立即保存）、这些平台的账号登录情况与操作、
 // 通道、排队与进行中的回合数。没勾选的平台不能登录，智能体也用不了；已有的登录保留着，可以退出。
@@ -91,13 +91,14 @@ async function askQuota() {
   asking.value = true; askError.value = ''
   try { await props.api.refreshQuota(props.bridge.id) } catch (e) { askError.value = bridgeError(e) } finally { asking.value = false }
 }
-// 连通性的一句话：可用（最快的那个地址的延迟）/ 被平台拒绝 / 连不上
+// 连通性的一句话：可用（最快的那个地址的延迟）/ 被平台拒绝 / 连不上；域名解析慢时补一句（T-0278）
 function netSummary(slot: string) {
   const info = net.data.value?.slots[slot]
   if (!info) return null
   const ok = info.targets.filter((t: ConnectivityTarget) => t.ok && t.latency_ms != null).map((t: ConnectivityTarget) => t.latency_ms!)
-  if (info.ok) return { tone: 'ok', text: `可用${ok.length ? ` · ${Math.min(...ok)} ms` : ''}` }
-  return { tone: 'bad', text: info.targets.some((t: ConnectivityTarget) => t.state === 'blocked') ? '被平台拒绝' : '连不上' }
+  const dns = info.targets.some((t: ConnectivityTarget) => (t.timings?.dns_ms ?? 0) >= DNS_SLOW_MS) ? ' · 域名解析慢' : ''
+  if (info.ok) return { tone: 'ok', text: `可用${ok.length ? ` · ${Math.min(...ok)} ms` : ''}${dns}` }
+  return { tone: 'bad', text: `${info.targets.some((t: ConnectivityTarget) => t.state === 'blocked') ? '被平台拒绝' : '连不上'}${dns}` }
 }
 // 运行概览：展开看每个平台同时在跑几个会话、上限多少
 const showLoad = ref(false)

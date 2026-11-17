@@ -878,6 +878,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 **平台连通性**（T-0240）。`GET /api/v1/llm_bridge/bridges/{bridge_id}/connectivity?refresh=`（admin）：由管理器在它那台服务器上访问各平台的地址（不带凭据）。
 返回 `supported`（旧版本的管理器为 false）和 `slots`（键是账号槽位 `openai` / `claude` / `workbuddy`）：每个槽位 `ok`、`need`（`all` 都要可用 / `any` 有一个就行）、`checked_at`、
 `targets[]`（`host`、`label`、`ok`、`state`：`ok` 可用 / `blocked` 连得上但被平台拒绝 / `unreachable` 连不上；`latency_ms`、`http_status`、`error`）。结果一分钟内复用，`refresh=true` 重新测。
+分步用时（T-0278）：`latency_ms` 是建立连接（TCP 握手，一次网络往返，和 ping 可比）的毫秒数，连不上时为空；`timings`（`dns_ms` 域名解析、`connect_ms` 建立连接、`tls_ms` 加密握手、`response_ms` 发出请求到收到应答头）每一步的用时，没做到的那一步为空；`stage` 连不上时卡在哪一步（`dns` / `connect` / `tls` / `response`）；`address` 连上的 IP；`via_proxy` 是否经容器的 HTTPS 代理（这时域名由代理解析，`dns_ms` 为空）。超时只算到收到应答头（12 秒），读页面正文和关连接不计入。旧版本的管理器没有这几个字段，`latency_ms` 是一次完整访问的总耗时。
 
 登录等操作里平台那边没成功时，接口返回 `503 UNAVAILABLE` 并带管理器写的原因（T-0239）；`EXTERNAL_UNAVAILABLE` 只表示管理器本身连不上。
 

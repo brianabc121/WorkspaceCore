@@ -745,6 +745,18 @@ async def test_connectivity_is_measured_by_the_manager(rig: Rig) -> None:  # noq
         if target.host == "claude.ai":
             note = "平台拒绝了这台服务器的访问（HTTP 403）"
             return {"state": "blocked", "latency_ms": 9, "http_status": 403, "error": note}
+        if target.host == "api.anthropic.com":  # 新版本的管理器：每一步的用时（T-0278）
+            timings = {"dns_ms": 4012, "connect_ms": 2, "tls_ms": 9, "response_ms": 380}
+            return {
+                "state": "ok",
+                "latency_ms": 2,
+                "http_status": 401,
+                "error": None,
+                "stage": None,
+                "timings": timings,
+                "address": "162.159.140.245",
+                "via_proxy": False,
+            }
         return {"state": "ok", "latency_ms": 37, "http_status": 401, "error": None}
 
     engine.probe_host = probe
@@ -760,6 +772,19 @@ async def test_connectivity_is_measured_by_the_manager(rig: Rig) -> None:  # noq
         False,
         9,
     )
+    timed = claude["targets"][0]
+    assert timed["latency_ms"] == 2 and timed["timings"] == {
+        "dns_ms": 4012,
+        "connect_ms": 2,
+        "tls_ms": 9,
+        "response_ms": 380,
+    }
+    assert (timed["address"], timed["via_proxy"], timed["stage"]) == (
+        "162.159.140.245",
+        False,
+        None,
+    )
+    assert blocked["timings"] is None  # 旧版本的管理器没有分步用时，照样能显示
     assert data["slots"]["openai"]["ok"] is True
     count = len(calls)
     await rig.api("GET", path)

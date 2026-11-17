@@ -904,12 +904,65 @@ describe('大模型客户端管理', () => {
     expect(within(claude).getByText('1800 ms')).toBeVisible()
     expect(within(claude).getByText('延迟比较高：能用，但登录和回答会慢一些。')).toBeVisible()
     expect(within(claude).queryByRole('alert')).not.toBeInTheDocument()
+    // 旧版本的管理器没有分步用时：说明这个数是总耗时，不是网络延迟（T-0278）
+    expect(within(claude).getByText(/这个 MCP 管理器是旧版本：毫秒数是完整访问一次的总耗时/)).toBeVisible()
+    expect(within(claude).queryByLabelText(/^每一步的用时/)).not.toBeInTheDocument()
 
     await fireEvent.click(screen.getByRole('button', { name: '重新检测连通性' }))
     await waitFor(() => expect(within(openai).queryByRole('alert')).not.toBeInTheDocument())
     expect(within(openai).getAllByText('40 ms')).toHaveLength(3)
     expect(requests.some(r => path(r) === `${base}/connectivity` && new URL(r.url).searchParams.get('refresh') === 'true')).toBe(true)
     expect(writes(requests)).toEqual([])
+  })
+
+  it('shows the connect time as latency, times each step and points at slow name resolution', async () => {
+    type Target = Schema['LlmBridgeConnectivityTargetOut']
+    const timings = (dns_ms: number | null, connect_ms: number | null, tls_ms: number | null, response_ms: number | null) => ({ dns_ms, connect_ms, tls_ms, response_ms })
+    const ok = (host: string, label: string, t: Target['timings'], extra: Partial<Target> = {}): Target => ({ host, label, ok: true, state: 'ok', latency_ms: t!.connect_ms ?? null, http_status: 401, error: null, timings: t, stage: null, address: '162.159.140.245', via_proxy: false, ...extra })
+    const data: Schema['LlmBridgeConnectivityOut'] = { supported: true, slots: {
+      openai: { ok: false, need: 'all', checked_at: 1794528000, targets: [
+        ok('chatgpt.com', 'ChatGPT（订阅登录、对话）', timings(4012, 2, 9, 380)),
+        ok('auth.openai.com', 'OpenAI 登录（设备码）', timings(4102, 2, 11, 3500)),
+        { host: 'api.openai.com', label: 'OpenAI API（API 密钥）', ok: false, state: 'unreachable', latency_ms: null, http_status: null, error: '域名解析超时：没有解析出平台的地址（共等了 12 秒）', timings: timings(null, null, null, null), stage: 'dns', address: null, via_proxy: false },
+      ] },
+      claude: { ok: true, need: 'all', checked_at: 1794528000, targets: [
+        ok('api.anthropic.com', 'Anthropic API', timings(null, 120, 30, 200), { address: null, via_proxy: true }),
+        ok('claude.ai', 'Claude（订阅登录）', timings(null, 110, 28, 150), { address: null, via_proxy: true }),
+      ] },
+    } }
+    setup('owner', r => (path(r) === `${base}/connectivity` ? Response.json(data) : undefined))
+    await openApp('/llm_bridge?view=manage')
+    const openai = await screen.findByRole('group', { name: '平台连通性：OpenAI（ChatGPT / Codex）' })
+    const rows = await within(openai).findAllByRole('listitem')
+    // 延迟是建立连接的时间（和 ping 可比），每一步分开列出，慢的那一步标出来
+    expect(within(rows[0]!).getByText('2 ms')).toBeVisible()
+    const steps = within(openai).getByLabelText('每一步的用时：chatgpt.com')
+    expect(steps).toHaveTextContent('解析 4012 ms')
+    expect(steps).toHaveTextContent('连接 2 ms')
+    expect(steps).toHaveTextContent('加密握手 9 ms')
+    expect(steps).toHaveTextContent('平台应答 380 ms')
+    expect(steps).toHaveTextContent('IP 162.159.140.245')
+    expect(within(steps).getByText('解析 4012 ms')).toHaveClass('is-slow')
+    expect(within(steps).getByText('连接 2 ms')).not.toHaveClass('is-slow')
+    // 卡在哪一步写清楚
+    expect(within(openai).getByLabelText('每一步的用时：api.openai.com')).toHaveTextContent('解析没有完成')
+    expect(rows[2]).toHaveTextContent('域名解析超时：没有解析出平台的地址（共等了 12 秒）')
+    // 用不了的原因是解析慢，不让人去换服务器
+    const alert = within(openai).getByRole('alert')
+    expect(alert).toHaveTextContent('卡在域名解析上（见下面），不一定是这台服务器访问不了平台。')
+    expect(alert).not.toHaveTextContent('部署到能访问这个平台的服务器上')
+    expect(within(openai).getByText(/域名解析慢（最慢 4\.1 秒）：MCP 管理器的容器每查一次域名都要等好几秒/)).toHaveTextContent('建立连接最多只用了 2 ms，网络本身不慢。')
+    expect(within(openai).getByText('平台应答慢（最慢 3.5 秒）：网络本身没问题，是平台那边回得慢。')).toBeVisible()
+    expect(within(openai).getByText(/延迟是建立连接用的时间（一次网络往返），可以和服务器上 ping 的结果对照。/)).toBeVisible()
+    expect(within(openai).queryByText(/这个 MCP 管理器是旧版本/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('连不上 · 域名解析慢').length).toBeGreaterThan(0)
+    // 经 HTTPS 代理：域名由代理解析，没有解析这一步
+    const claude = screen.getByRole('group', { name: '平台连通性：Claude' })
+    const viaProxy = within(claude).getByLabelText('每一步的用时：api.anthropic.com')
+    expect(viaProxy).toHaveTextContent('经 HTTPS 代理（域名由代理解析）')
+    expect(viaProxy).not.toHaveTextContent('解析 ')
+    expect(within(claude).queryByText(/域名解析慢/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('可用 · 110 ms').length).toBeGreaterThan(0)
   })
 
   it('lists sessions, syncs on request and shows the turns of a session', async () => {

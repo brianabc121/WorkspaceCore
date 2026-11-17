@@ -254,6 +254,22 @@ class LlmBridgeQuotaList(BaseModel):
     platforms: dict[str, LlmBridgeQuotaOut]
 
 
+class LlmBridgeConnectivityTimingsOut(BaseModel):
+    """一次访问每一步用的毫秒数（T-0278）；没做到的那一步为空。"""
+
+    dns_ms: int | None = Field(
+        default=None, description="域名解析；经 HTTPS 代理时由代理解析，为空"
+    )
+    connect_ms: int | None = Field(
+        default=None,
+        description="建立连接（TCP 握手，一次网络往返，和 ping 可比）；经代理时含代理连上平台",
+    )
+    tls_ms: int | None = Field(default=None, description="加密握手（TLS）")
+    response_ms: int | None = Field(
+        default=None, description="平台应答：发出请求到收到应答头（含平台自己处理的时间）"
+    )
+
+
 class LlmBridgeConnectivityTargetOut(BaseModel):
     host: str = Field(description="平台的地址（域名）")
     label: str = Field(description="这个地址是做什么用的")
@@ -262,9 +278,22 @@ class LlmBridgeConnectivityTargetOut(BaseModel):
         description="ok 可用；blocked 连得上但被平台拒绝（这台服务器的 IP 或地区不被允许）；"
         "unreachable 连不上"
     )
-    latency_ms: int | None = Field(description="从发起到收到应答的毫秒数；连不上时为空")
+    latency_ms: int | None = Field(
+        description="延迟：建立连接用的毫秒数（一次网络往返，和 ping 可比）；连不上时为空。"
+        "旧版本的管理器（没有 timings）给的是一次完整访问的总耗时"
+    )
     http_status: int | None = Field(default=None, description="平台回的 HTTP 状态码")
     error: str | None = Field(default=None, description="不可用时的说明")
+    timings: LlmBridgeConnectivityTimingsOut | None = Field(
+        default=None, description="每一步的用时；旧版本的管理器没有"
+    )
+    stage: str | None = Field(
+        default=None,
+        description="连不上时卡在哪一步：dns 域名解析 / connect 建立连接 / tls 加密握手 / "
+        "response 等平台应答",
+    )
+    address: str | None = Field(default=None, description="连上的是平台的哪个 IP；经代理时为空")
+    via_proxy: bool | None = Field(default=None, description="是否经容器设置的 HTTPS 代理访问")
 
 
 class LlmBridgeConnectivitySlotOut(BaseModel):
