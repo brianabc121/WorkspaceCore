@@ -188,7 +188,10 @@ async function main() {
     await form.getByLabel('管理令牌').fill(bridgeToken)
     await form.getByRole('button', { name: '添加', exact: true }).click()
     await page.getByText(`已添加「${ONE}」。`).waitFor()
-    await card(page, ONE).getByText('已启用').waitFor()
+    // 卡片上的启用开关是开着的（T-0286：原来是“已启用”标签）
+    const enabled = card(page, ONE).getByRole('switch', { name: `启用${ONE}` })
+    await enabled.waitFor()
+    check(await enabled.getAttribute('aria-checked') === 'true', '新添加的管理器应是启用的')
     check(!(await page.content()).includes(bridgeToken), '管理令牌不应留在页面上')
     const listed = await bridges()
     check(listed.length === 1 && listed[0].has_token, `添加后的列表不对：${JSON.stringify(listed)}`)
@@ -478,6 +481,7 @@ async function main() {
     await card(page, ONE).getByRole('switch', { name: `启用${ONE}` }).click()
     await page.getByText(`已停用「${ONE}」。`).waitFor()
     await page.getByRole('note').filter({ hasText: '这个 MCP 管理器已停用' }).waitFor()
+    check(await card(page, ONE).getByRole('switch', { name: `启用${ONE}` }).getAttribute('aria-checked') === 'false', '停用后卡片上的开关应是关着的')
     if (two) {
       // 删掉 2 号（先把它控制的平台改回全部：这个容器别的验收还要用）：只允许用它的实例一个都用不了，不会变成“都能用”
       const restoreTwo = await api(page, workspace, 'PUT', `/api/v1/llm_bridge/bridges/${twoId}/settings`, { platforms: ALL_PLATFORMS })
