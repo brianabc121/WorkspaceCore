@@ -366,8 +366,8 @@ async def test_managers_control_their_own_platforms_and_accounts(rig: Rig) -> No
     }
     assert not codex_on["one"]["chat"]["enabled"] and not codex_on["one"]["chat"]["available"]
     assert codex_on["two"]["chat"]["enabled"] and codex_on["two"]["chat"]["available"]
-    chatgpt = next(c for c in two["channels"] if c["platform"] == "chatgpt")
-    assert not chatgpt["enabled"]  # 2 号只勾了 Codex，没勾 ChatGPT 聊天
+    # 没有单独的 ChatGPT 平台了（T-0280）：纯聊天就是 codex.chat
+    assert "chatgpt" not in {c["platform"] for c in two["channels"]}
 
     # 每个管理器单独维护一套账号：同一个平台在两个管理器上登录不同的账号
     for bridge_id, account in (

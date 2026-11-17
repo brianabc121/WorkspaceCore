@@ -326,6 +326,9 @@ async def test_platform_limit_follows_the_session(bridge: Bridge) -> None:
     assert len(seen["messages"]) == 2
     only = await _limited(bridge, "agent", "fake", "llm_status", {})
     assert {c["platform"] for c in only["channels"]} == {"fake"}
+    # 旧名字 chatgpt（没升级的工作台带过来的）按 codex 处理（T-0280）
+    old_name = await _limited(bridge, "agent", "chatgpt", "llm_status", {})
+    assert {c["platform"] for c in old_name["channels"]} == {"codex"}
 
 
 async def test_create_with_request_id_is_idempotent(bridge: Bridge) -> None:
@@ -809,13 +812,15 @@ async def test_channels_and_validation(bridge: Bridge) -> None:
     assert (await _send(bridge, "c1", a, "x", "bad id!"))["error"]["code"] == "VALIDATION_FAILED"
     assert (await bridge.tool("c1", "no_such_tool"))["error"]["code"] == "NOT_FOUND"
     overview = await bridge.tool("c1", "llm_status")
-    assert {"platform": "chatgpt", "mode": "chat"}.items() <= overview["channels"][0].items()
+    # 没有单独的 ChatGPT 平台了（T-0280）：纯聊天就是 codex.chat
+    assert {"platform": "codex", "mode": "chat"}.items() <= overview["channels"][0].items()
+    assert "chatgpt" not in {c["platform"] for c in overview["channels"]}
 
 
 async def test_controlled_platforms(bridge: Bridge) -> None:
     """一座桥可以只控制一部分平台：没勾选的不能登录、不能新建和发送，已有的记录还能看。"""
     status = (await bridge.admin("GET", "/admin/status")).json()
-    everything = ["chatgpt", "codex", "claude", "workbuddy", "fake"]
+    everything = ["codex", "claude", "workbuddy", "fake"]
     assert status["platforms"] == status["settings"]["platforms"] == everything
     assert all(a["enabled"] for a in status["accounts"].values())
     a = await _session(bridge, "c1")
@@ -843,6 +848,7 @@ async def test_controlled_platforms(bridge: Bridge) -> None:
     # 没勾选的平台：不能新建、不能查模型和环境、不能向已有会话发送、不能登录
     for tool, arguments in (
         ("llm_session_create", {"platform": "codex", "mode": "chat"}),
+        # 旧名字 chatgpt 按 codex 处理（T-0280）
         ("llm_models", {"platform": "chatgpt", "mode": "chat"}),
         ("llm_environments", {"platform": "codex", "mode": "dev"}),
         ("llm_session_create", {"platform": "fake", "mode": "chat"}),
@@ -865,17 +871,19 @@ async def test_controlled_platforms(bridge: Bridge) -> None:
     # 已有的登录可以退出
     assert (await bridge.admin("POST", "/admin/accounts/fake/logout")).status_code == 200
 
-    # 2 号管理器控制 claude / workbuddy / codex：openai 槽位可用，但 ChatGPT 聊天通道没开
+    # 2 号管理器控制 claude / workbuddy / codex：openai 槽位可用，聊天和开发都走 codex。
+    # 没升级的工作台可能同时带着旧名字 chatgpt：按 codex 处理、去重
     saved = await bridge.admin(
-        "PUT", "/admin/settings", json={"platforms": ["claude", "workbuddy", "codex", "fake"]}
+        "PUT",
+        "/admin/settings",
+        json={"platforms": ["claude", "chatgpt", "workbuddy", "codex", "fake"]},
     )
     assert saved.json()["platforms"] == ["codex", "claude", "workbuddy", "fake"]
     status = (await bridge.admin("GET", "/admin/status")).json()
     assert status["accounts"]["openai"]["enabled"]
     channels = {(c["platform"], c["mode"]): c for c in status["channels"]}
-    assert channels[("codex", "chat")]["available"] and not channels[("chatgpt", "chat")]["enabled"]
-    refused = await bridge.tool("c1", "llm_session_create", {"platform": "chatgpt", "mode": "chat"})
-    assert refused["error"]["code"] == "NOT_SUPPORTED"
+    assert channels[("codex", "chat")]["available"] and channels[("codex", "chat")]["enabled"]
+    assert ("chatgpt", "chat") not in channels
     # 重新勾选后，原来的会话可以接着用
     await bridge.admin(
         "POST",
@@ -1165,3 +1173,40 @@ def test_connectivity_tells_a_block_page_from_a_normal_answer() -> None:
         classify(403, {"cf-mitigated": "challenge"}, "<title>Just a moment...</title>")[0] == "ok"
     )
     assert classify(403, {}, "<title>Just a moment...</title>")[0] == "ok"
+
+
+def test_old_chatgpt_records_become_codex(tmp_path: Path) -> None:
+    """旧库升级（T-0280）：平台 chatgpt 的会话、额度、暂停、设置改成 codex。
+
+    内容不动；可以重复打开。
+    """
+    path = tmp_path / "old.db"
+    store = Store(path)
+    now = time.time()
+    for sid, platform in (("s_chat", "chatgpt"), ("s_dev", "codex")):
+        store._db.execute(
+            "INSERT INTO sessions (id, platform, mode, slot, title, created_at, updated_at)"
+            " VALUES (?, ?, ?, 'openai', ?, ?, ?)",
+            (sid, platform, "chat" if platform == "chatgpt" else "dev", sid, now, now),
+        )
+    store.save_quota("chatgpt", [{"kind": "primary", "used_percent": 40.0}])
+    store.save_quota("chatgpt", [{"kind": "weekly", "used_percent": 10.0}])
+    store.save_quota("codex", [{"kind": "primary", "used_percent": 55.0}])
+    store.set_pause("chatgpt", now + 600, True, "额度用完")
+    store.set_setting("platforms", ["chatgpt", "claude", "codex"])
+    store._db.close()
+
+    for _ in range(2):  # 第二次打开什么都不改
+        upgraded = Store(path)
+        sessions = {row["id"]: row for row in upgraded.list_sessions(limit=10)}
+        assert {sid: (row["platform"], row["mode"]) for sid, row in sessions.items()} == {
+            "s_chat": ("codex", "chat"),
+            "s_dev": ("codex", "dev"),
+        }
+        rows = upgraded.quota_windows()
+        quota = {(row["platform"], row["kind"]): row["used_percent"] for row in rows}
+        # 同一个账号：codex 已有的为准，没有的从 chatgpt 挪过来
+        assert quota == {("codex", "primary"): 55.0, ("codex", "weekly"): 10.0}
+        assert set(upgraded.pauses()) == {"codex"}
+        assert upgraded.get_setting("platforms") == ["codex", "claude"]
+        upgraded._db.close()

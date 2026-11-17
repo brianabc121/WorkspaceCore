@@ -775,7 +775,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST /api/v1/llm_bridge/bridges` | 登记（添加一个 MCP 管理器）：`name`、`base_url`（http / https）、`token`（≥ 32 个字符，加密保存）、可选 `platforms`（它控制的平台，至少一个）。填了 `platforms` 就先写进会话桥，同时验证地址和令牌：`503 EXTERNAL_UNAVAILABLE` / `503 BRIDGE_AUTH_FAILED` / `409 BRIDGE_OUTDATED`（会话桥版本太旧）时不登记。`409 NAME_TAKEN` |
 | `PATCH` / `DELETE /api/v1/llm_bridge/bridges/{id}` | 改名字、地址、令牌、启用停用；删除登记（不影响会话桥容器；各实例权限的 `bridge_ids` 里去掉它，只允许用它的实例之后一个都不能用） |
 | `GET /api/v1/llm_bridge/bridges/{id}/status` | 各账号槽位（`openai` / `claude` / `workbuddy`）的登录状态、通道、排队数、设置；连不上时 `reachable=false` 加 `error`，不报错。账号的 `identity` 是打码后的账号标识（用密钥或令牌登录时为空），`registered` 表示这座桥登记过这个平台的账号（退出登录后仍为 true，“更换账号”后才清掉），`method` 只在已登录时有值 |
-| `PUT /api/v1/llm_bridge/bridges/{id}/settings` | `platforms`（控制的平台：`chatgpt` / `codex` / `claude` / `workbuddy`，至少一个）、`concurrency`（1 ~ 16）、`turn_timeout_seconds`（30 ~ 21600）、`send_per_hour`、`max_text_chars`、`claude_subscription_ack`。没勾选的平台不能登录（`409 CONFLICT`）、不能新建会话和发送；已有的登录和会话记录保留 |
+| `PUT /api/v1/llm_bridge/bridges/{id}/settings` | `platforms`（控制的平台：`codex` / `claude` / `workbuddy`，至少一个；旧名字 `chatgpt` 按 `codex` 处理，T-0280）、`concurrency`（1 ~ 16）、`turn_timeout_seconds`（30 ~ 21600）、`send_per_hour`、`max_text_chars`、`claude_subscription_ack`。没勾选的平台不能登录（`409 CONFLICT`）、不能新建会话和发送；已有的登录和会话记录保留 |
 | `POST /api/v1/llm_bridge/bridges/{id}/accounts/{slot}/login` | `method`：`device_code`（返回 `verification_url`、`user_code`，`state=pending`）/ `api_key` / `oauth_token` / `existing`。Claude 的非 `api_key` 方式在确认风险前 `403 FORBIDDEN` |
 | `GET .../accounts/{slot}/login` | 登录进行到哪一步：`pending` / `done` / `failed` / `none` |
 | `POST .../accounts/{slot}/refresh` / `logout` / `reset` | 重新检查状态；退出登录；更换账号（归档这个槽位的全部会话，返回 `archived_sessions`） |
@@ -818,7 +818,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 
 **限流与消息队列**（T-0236，`docs/v2/LLM_BRIDGE_QUEUE_PLAN.md` 第 2、4 节）。
 
-- 设置（`PUT .../bridges/{id}/settings`）：`concurrency` 的含义改成“每个**平台**同时进行的会话数”（默认 3，ChatGPT / Codex / Claude / CodeBuddy 各算各的；超过的排队等名额，不拒绝）；新增 `min_start_interval_seconds`（同一个平台两次开始之间至少隔几秒，默认 2，0–60）。
+- 设置（`PUT .../bridges/{id}/settings`）：`concurrency` 的含义改成“每个**平台**同时进行的会话数”（默认 3，Codex / Claude / CodeBuddy 各算各的；超过的排队等名额，不拒绝）；新增 `min_start_interval_seconds`（同一个平台两次开始之间至少隔几秒，默认 2，0–60）。
 - 状态（`GET .../bridges/{id}/status`）多一个 `load`：每个平台的 `running`（进行中的会话数）、`waiting`（在等的会话数）、`limit`。
 - 会话在处理时再发的消息进这个会话的队列（`status=queued`），不打断正在处理的；队列持久化，管理器重启后继续。
 
@@ -980,7 +980,7 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 
 **聊天页的日常体验**（T-0253，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.3）：
 
-- `PUT .../chat/sessions/{session_id}/model`（admin，`{model}`）：换这个会话之后的回合用的模型，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换（每个回合起一次官方程序，模型是那一次的参数）；ChatGPT / Codex 的会话 422 `NOT_SUPPORTED`，已归档的 409。记审计 `chat_session_model_changed`。
+- `PUT .../chat/sessions/{session_id}/model`（admin，`{model}`）：换这个会话之后的回合用的模型，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换（每个回合起一次官方程序，模型是那一次的参数）；Codex 的会话 422 `NOT_SUPPORTED`，已归档的 409。记审计 `chat_session_model_changed`。
 - 会话的标题在发出第一条消息时就定下来（之前要等第一回合做完）。
 
 **清空上下文**（T-0255）：

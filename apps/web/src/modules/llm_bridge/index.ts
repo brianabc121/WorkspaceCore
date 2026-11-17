@@ -20,7 +20,7 @@ export default defineModule({
   // 应用中心：“打开应用”
   management: { primaryPath: '/llm_bridge', category: '智能体' },
   nav: [
-    { path: '/llm_bridge', title: '大模型客户端', section: '应用', description: '像各家的客户端一样和 ChatGPT / Codex / Claude / CodeBuddy 对话、看智能体开的会话；并管理一个或多个 MCP 管理器：每个管理器控制选定的平台、单独登录一套账号，智能体经它发指令并管理会话（owner / admin 可用，管理器与账号只有 owner 能改）。每个管理器是独立部署的容器。', minRole: 'admin', icon: Cable },
+    { path: '/llm_bridge', title: '大模型客户端', section: '应用', description: '像各家的客户端一样和 Codex / Claude / CodeBuddy 对话、看智能体开的会话；并管理一个或多个 MCP 管理器：每个管理器控制选定的平台、单独登录一套账号，智能体经它发指令并管理会话（owner / admin 可用，管理器与账号只有 owner 能改）。每个管理器是独立部署的容器。', minRole: 'admin', icon: Cable },
   ],
   routes: [
     { path: '/llm_bridge', component: () => import('./LlmBridgePage.vue'), meta: { wide: true } },

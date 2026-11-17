@@ -6,11 +6,33 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-Platform = Literal["chatgpt", "codex", "claude", "workbuddy"]
+# 已经去掉的平台的旧名字 → 现在的平台（T-0280）：原来单列的“ChatGPT 聊天”就是 Codex app-server 的
+# 纯聊天通道（codex.chat），不再单列。旧名字在请求、旧版本管理器的返回、库里的旧记录里都可能出现
+PLATFORM_ALIASES = {"chatgpt": "codex"}
+
+
+def canonical_platform(value: str) -> str:
+    """旧名字换成现在的平台名（chatgpt → codex）；别的原样返回。"""
+    return PLATFORM_ALIASES.get(value, value)
+
+
+def canonical_platforms(values: Any) -> list[str]:
+    """平台列表：换成现在的名字、去重，保留顺序。"""
+    if not isinstance(values, list | tuple):
+        return []
+    return list(dict.fromkeys(canonical_platform(str(v)) for v in values))
+
+
+def _platform_in(value: Any) -> Any:
+    return canonical_platform(value) if isinstance(value, str) else value
+
+
+# 收到旧名字 chatgpt 按 codex 处理；接口说明（OpenAPI、工具参数）里只列现在的平台
+Platform = Annotated[Literal["codex", "claude", "workbuddy"], BeforeValidator(_platform_in)]
 Slot = Literal["openai", "claude", "workbuddy"]
-ALL_PLATFORMS: tuple[str, ...] = ("chatgpt", "codex", "claude", "workbuddy")
+ALL_PLATFORMS: tuple[str, ...] = ("codex", "claude", "workbuddy")
 Sandbox = Literal["read_only", "workspace_write", "exec"]
 
 

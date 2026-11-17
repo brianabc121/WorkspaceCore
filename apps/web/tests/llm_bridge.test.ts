@@ -18,10 +18,10 @@ const as = (role: Role) => Response.json({ ...me, workspaces: [{ ...workspace, r
 const lbModule: Schema['ModuleOut'] = { ...newsModule, key: 'llm_bridge', name: '大模型客户端', tools: [], widgets: [] }
 
 const bridge: Schema['LlmBridgeOut'] = { id: BRIDGE, name: '主账号', base_url: 'http://10.0.0.5:8787', enabled: true, has_token: true, created_at: at, updated_at: at }
-const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'OpenAI（ChatGPT / Codex）', enabled: true, state: 'logged_out', registered: false, identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
-const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, digest_enabled: true, digest_follow_retention: true, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] }
+const account = (over: Partial<Schema['LlmBridgeAccountOut']>): Schema['LlmBridgeAccountOut'] => ({ slot: 'openai', label: 'Codex', enabled: true, state: 'logged_out', registered: false, identity: null, method: null, detail: '', first_login_at: null, login_methods: ['device_code', 'api_key', 'existing'], running: 0, ...over })
+const settings: Schema['LlmBridgeSettings'] = { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, digest_enabled: true, digest_follow_retention: true, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['codex', 'claude', 'workbuddy'] }
 const status = (over: Partial<Schema['LlmBridgeStatusOut']> = {}): Schema['LlmBridgeStatusOut'] => ({
-  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 1, running: 2, load: {}, quota: {}, settings,
+  reachable: true, error: '', version: '0.1.0', platforms: ['codex', 'claude', 'workbuddy'], queued: 1, running: 2, load: {}, quota: {}, settings,
   accounts: [
     account({ state: 'logged_in', registered: true, identity: 'a***@example.com', method: 'device_code', first_login_at: 1794528000 }),
     account({ slot: 'claude', label: 'Claude', login_methods: ['api_key', 'oauth_token', 'existing'] }),
@@ -65,7 +65,7 @@ describe('大模型客户端管理', () => {
     expect(await within(list).findByRole('button', { name: '查看 MCP 管理器：主账号' })).toBeVisible()
     expect(within(list).getByText('http://10.0.0.5:8787')).toBeVisible()
 
-    const openai = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
+    const openai = await screen.findByRole('article', { name: '账号：Codex' })
     expect(within(openai).getByText('已登录')).toBeVisible()
     expect(within(openai).getByText('a***@example.com')).toBeVisible()
     expect(within(openai).getByText('设备码登录')).toBeVisible()
@@ -110,8 +110,8 @@ describe('大模型客户端管理', () => {
     await fireEvent.update(within(form).getByLabelText('管理令牌'), TOKEN)
     // 控制的平台默认全选；一个都不勾不能添加
     const choose = within(form).getByRole('group', { name: '控制的平台' })
-    for (const name of ['ChatGPT', 'Codex', 'Claude', 'CodeBuddy']) expect(within(choose).getByLabelText(name)).toBeChecked()
-    for (const name of ['ChatGPT', 'Codex', 'Claude', 'CodeBuddy']) await fireEvent.click(within(choose).getByLabelText(name))
+    for (const name of ['Codex', 'Claude', 'CodeBuddy']) expect(within(choose).getByLabelText(name)).toBeChecked()
+    for (const name of ['Codex', 'Claude', 'CodeBuddy']) await fireEvent.click(within(choose).getByLabelText(name))
     await fireEvent.click(within(form).getByRole('button', { name: '添加' }))
     expect(await screen.findByText('至少勾选一个要控制的平台。')).toBeVisible()
     expect(writes(requests)).toEqual([])
@@ -148,7 +148,7 @@ describe('大模型客户端管理', () => {
     expect(writes(requests)).toEqual([])
   })
 
-  it('shows the ChatGPT device code in the login progress, polls the state and refreshes the status when it is done', { timeout: 20000 }, async () => {
+  it('shows the Codex device code (ChatGPT account) in the login progress, polls the state and refreshes the status when it is done', { timeout: 20000 }, async () => {
     // 旧版本的 MCP 管理器：不报告每一步、没有 started_at；“开始登录”直接给网址和验证码（T-0279 起也用逐步进度的样式）
     let polls = 0, loggedIn = false
     const requests = setup('owner', r => {
@@ -160,13 +160,13 @@ describe('大模型客户端管理', () => {
       return Response.json({ state: loggedIn ? 'done' : 'pending', detail: '' })
     })
     const view = await openApp('/llm_bridge?view=manage')
-    const card = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
-    await fireEvent.click(within(card).getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' }))
-    const form = within(card).getByRole('form', { name: '登录OpenAI（ChatGPT / Codex）' })
+    const card = await screen.findByRole('article', { name: '账号：Codex' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录Codex' }))
+    const form = within(card).getByRole('form', { name: '登录Codex' })
     await fireEvent.click(within(form).getByLabelText('设备码登录'))
     await fireEvent.click(within(form).getByRole('button', { name: '获取验证码' }))
 
-    const progress = await screen.findByRole('region', { name: '登录「OpenAI（ChatGPT / Codex）」的进度' })
+    const progress = await screen.findByRole('region', { name: '登录「Codex」的进度' })
     expect(progress).toHaveTextContent('MCP 管理器「主账号」 · 设备码登录')
     const open = await within(progress).findByRole('group', { name: '打开网址并输入验证码' })
     expect(within(open).getByRole('link', { name: 'https://auth.example.com/device' })).toHaveAttribute('rel', 'noopener noreferrer')
@@ -179,7 +179,7 @@ describe('大模型客户端管理', () => {
     expect(within(progress).getByText('这个 MCP 管理器的版本不报告每一步，重新部署（升级）后就能看到。')).toBeVisible()
     expect(await writes(requests)[0]!.clone().json()).toEqual({ method: 'device_code' })
 
-    expect(await screen.findByText('「OpenAI（ChatGPT / Codex）」已登录。', { selector: '[role="status"]:not(strong)' }, { timeout: 10000 })).toBeVisible()
+    expect(await screen.findByText('「Codex」已登录。', { selector: '[role="status"]:not(strong)' }, { timeout: 10000 })).toBeVisible()
     expect(progress).toHaveAttribute('data-status', 'succeeded')
     expect(within(progress).queryByRole('group', { name: '打开网址并输入验证码' })).not.toBeInTheDocument()
     expect(await screen.findByText('n***@example.com')).toBeVisible()
@@ -191,7 +191,7 @@ describe('大模型客户端管理', () => {
     expect(polls).toBe(done)
   })
 
-  it('shows each step of the ChatGPT device login the MCP manager reports, with its output, then the code and the result', { timeout: 30000 }, async () => {
+  it('shows each step of the Codex device login the MCP manager reports, with its output, then the code and the result', { timeout: 30000 }, async () => {
     const step = (key: string, status: string, detail = '') => ({ key, status, detail, started_at: null, finished_at: null })
     let progress: Record<string, unknown> = { state: 'done', started_at: '2026-11-17T02:00:00+00:00', detail: '', steps: [step('start', 'done')], log: [] }
     let answer: (r: Response) => void = () => {}
@@ -201,13 +201,13 @@ describe('大模型客户端管理', () => {
       return Response.json(progress)
     })
     await openApp('/llm_bridge?view=manage')
-    const card = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
-    await fireEvent.click(within(card).getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' }))
-    const form = within(card).getByRole('form', { name: '登录OpenAI（ChatGPT / Codex）' })
+    const card = await screen.findByRole('article', { name: '账号：Codex' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录Codex' }))
+    const form = within(card).getByRole('form', { name: '登录Codex' })
     await fireEvent.click(within(form).getByLabelText('设备码登录'))
     await fireEvent.click(within(form).getByRole('button', { name: '获取验证码' }))
 
-    const panel = await screen.findByRole('region', { name: '登录「OpenAI（ChatGPT / Codex）」的进度' })
+    const panel = await screen.findByRole('region', { name: '登录「Codex」的进度' })
     expect(panel).toHaveAttribute('data-status', 'running')
     // 管理器接手、正在向 OpenAI 申请设备码：这一步进行中，下面是这边做了什么
     progress = { state: 'pending', started_at: '2026-11-17T03:00:00.120+00:00', detail: '', verification_url: null, user_code: null, steps: [step('start', 'done', '已在运行'), step('request_code', 'running'), step('wait_user', 'pending'), step('finish', 'pending')], log: ['03:00:00 Codex 的本机程序（codex app-server）已在运行', '03:00:00 向 OpenAI 申请设备码（account/login/start，最多等 60 秒；要访问 auth.openai.com）'] }
@@ -230,7 +230,7 @@ describe('大模型客户端管理', () => {
     await waitFor(() => expect(panel).toHaveAttribute('data-status', 'succeeded'), { timeout: 5000 })
     // 成功后每一步收起来，说明照样在
     expect(panel).toHaveTextContent('OpenAI 确认登录成功')
-    expect(within(panel).getByText('「OpenAI（ChatGPT / Codex）」已登录。')).toBeVisible()
+    expect(within(panel).getByText('「Codex」已登录。')).toBeVisible()
     expect(writes(requests).filter(r => path(r).endsWith('/accounts/openai/login'))).toHaveLength(1)
   })
 
@@ -244,13 +244,13 @@ describe('大模型客户端管理', () => {
       return Response.json(!started ? { state: 'none', detail: '' } : { state: 'failed', started_at: '2026-11-17T03:00:00+00:00', finished_at: '2026-11-17T03:00:09+00:00', detail: reason, steps: [step('start', 'done', '已在运行'), step('request_code', 'failed', reason), step('wait_user', 'pending'), step('finish', 'pending')], log: ['03:00:09 申请设备码出错（8.7 秒）：error sending request for url', `03:00:09 失败：${reason}`] })
     })
     await openApp('/llm_bridge?view=manage')
-    const card = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
-    await fireEvent.click(within(card).getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' }))
-    const form = within(card).getByRole('form', { name: '登录OpenAI（ChatGPT / Codex）' })
+    const card = await screen.findByRole('article', { name: '账号：Codex' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录Codex' }))
+    const form = within(card).getByRole('form', { name: '登录Codex' })
     await fireEvent.click(within(form).getByLabelText('设备码登录'))
     await fireEvent.click(within(form).getByRole('button', { name: '获取验证码' }))
 
-    const panel = await screen.findByRole('region', { name: '登录「OpenAI（ChatGPT / Codex）」的进度' })
+    const panel = await screen.findByRole('region', { name: '登录「Codex」的进度' })
     await waitFor(() => expect(panel).toHaveAttribute('data-status', 'failed'))
     const items = within(panel).getAllByRole('listitem')
     expect(items.map(li => li.getAttribute('data-status'))).toEqual(['done', 'done', 'failed', 'pending', 'pending'])
@@ -460,11 +460,11 @@ describe('大模型客户端管理', () => {
       return Response.json({ state: 'pending', detail: '' })
     })
     const view = await openApp('/llm_bridge?view=manage')
-    const card = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
-    await fireEvent.click(within(card).getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' }))
+    const card = await screen.findByRole('article', { name: '账号：Codex' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录Codex' }))
     await fireEvent.click(within(card).getByLabelText('设备码登录'))
     await fireEvent.click(within(card).getByRole('button', { name: '获取验证码' }))
-    await screen.findByRole('region', { name: '登录「OpenAI（ChatGPT / Codex）」的进度' })
+    await screen.findByRole('region', { name: '登录「Codex」的进度' })
     await waitFor(() => expect(polls).toBeGreaterThanOrEqual(2), { timeout: 5000 })
     const seen = polls
     view.unmount()
@@ -669,10 +669,10 @@ describe('大模型客户端管理', () => {
     expect(await names(first, '1 号控制的平台')).toEqual(['Claude已登录', 'CodeBuddy未登录'])
     expect(await names(second, '2 号控制的平台')).toEqual(['Codex未登录', 'Claude已登录', 'CodeBuddy未登录'])
 
-    // 1 号的详情：只有它控制的平台的账号和通道；没勾选的 ChatGPT / Codex 没登录过，不显示
+    // 1 号的详情：只有它控制的平台的账号和通道；没勾选的 Codex 没登录过，不显示
     const panel = await screen.findByRole('tabpanel', { name: '平台与账号' })
     expect(await within(panel).findByText('a***@example.com')).toBeVisible()
-    expect(within(panel).queryByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })).not.toBeInTheDocument()
+    expect(within(panel).queryByRole('article', { name: '账号：Codex' })).not.toBeInTheDocument()
     const control = within(panel).getByRole('group', { name: '控制的平台' })
     expect(within(control).getByLabelText('Claude')).toBeChecked()
     expect(within(control).getByLabelText('Codex')).not.toBeChecked()
@@ -683,7 +683,7 @@ describe('大模型客户端管理', () => {
     expect(await within(await screen.findByRole('tabpanel', { name: '平台与账号' })).findByText('b***@example.com')).toBeVisible()
     expect(screen.queryByText('a***@example.com')).not.toBeInTheDocument()
     expect(second).toHaveAttribute('aria-current', 'true')
-    expect(screen.getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '登录Codex' })).toBeVisible()
   })
 
   it('finds managers by name, opens the tab named in the address and keeps the actions in the 管理操作 menu', async () => {
@@ -740,10 +740,10 @@ describe('大模型客户端管理', () => {
     expect(await screen.findByText('「主账号」不再控制 Codex。')).toBeVisible()
     expect(await writes(requests)[0]!.clone().json()).toEqual({ platforms: ['claude'] })
     // 还登录着的平台留一张卡片：说明原因，只能退出登录，不能再登录
-    const openai = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
+    const openai = await screen.findByRole('article', { name: '账号：Codex' })
     expect(await within(openai).findByText(/这个管理器没有勾选这个平台/)).toBeVisible()
-    expect(within(openai).getByRole('button', { name: '退出登录OpenAI（ChatGPT / Codex）' })).toBeVisible()
-    expect(within(openai).queryByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' })).not.toBeInTheDocument()
+    expect(within(openai).getByRole('button', { name: '退出登录Codex' })).toBeVisible()
+    expect(within(openai).queryByRole('button', { name: '登录Codex' })).not.toBeInTheDocument()
 
     // 最后一个不能取消
     await fireEvent.click(within(await control()).getByLabelText('Claude'))
@@ -966,7 +966,7 @@ describe('大模型客户端管理', () => {
       return Response.json(new URL(r.url).searchParams.get('refresh') === 'true' ? fixed : first)
     })
     await openApp('/llm_bridge?view=manage')
-    const openai = await screen.findByRole('group', { name: '平台连通性：OpenAI（ChatGPT / Codex）' })
+    const openai = await screen.findByRole('group', { name: '平台连通性：Codex' })
     expect(await within(openai).findByText('这台服务器用不了')).toBeVisible()
     const rows = within(openai).getAllByRole('listitem')
     expect(rows[0]).toHaveTextContent('chatgpt.com')
@@ -978,7 +978,7 @@ describe('大模型客户端管理', () => {
     expect(rows[1]).toHaveTextContent('平台拒绝了这台服务器的访问（HTTP 403，拦截页）')
     expect(rows[2]).toHaveTextContent('连不上')
     expect(rows[2]).toHaveTextContent('超时（8 秒内没有应答）')
-    expect(within(openai).getByRole('alert')).toHaveTextContent(/用不了OpenAI（ChatGPT \/ Codex）：登录和对话都会失败。\s*网络是通的，但平台拒绝了这台服务器/)
+    expect(within(openai).getByRole('alert')).toHaveTextContent(/用不了Codex：登录和对话都会失败。\s*网络是通的，但平台拒绝了这台服务器/)
     // 可用但延迟高：提醒一句
     const claude = screen.getByRole('group', { name: '平台连通性：Claude' })
     expect(within(claude).getAllByText('可用').length).toBeGreaterThan(0)
@@ -1013,7 +1013,7 @@ describe('大模型客户端管理', () => {
     } }
     setup('owner', r => (path(r) === `${base}/connectivity` ? Response.json(data) : undefined))
     await openApp('/llm_bridge?view=manage')
-    const openai = await screen.findByRole('group', { name: '平台连通性：OpenAI（ChatGPT / Codex）' })
+    const openai = await screen.findByRole('group', { name: '平台连通性：Codex' })
     const rows = await within(openai).findAllByRole('listitem')
     // 延迟是建立连接的时间（和 ping 可比），每一步分开列出，慢的那一步标出来
     expect(within(rows[0]!).getByText('2 ms')).toBeVisible()

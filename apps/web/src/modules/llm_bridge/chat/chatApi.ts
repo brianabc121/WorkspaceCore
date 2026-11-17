@@ -336,7 +336,7 @@ export const hasContext = (messages: { role: string }[]) => {
 /** 这个管理器上能新建会话的平台：只列它控制的；带是否已登录、能用哪几种用法 */
 export function platformChoices(status: BridgeStatus | undefined) {
   const channels = (status?.channels ?? []).filter(c => c.enabled && (c.mode === 'chat' || c.mode === 'dev'))
-  const order: Platform[] = ['chatgpt', 'codex', 'claude', 'workbuddy']
+  const order: Platform[] = ['codex', 'claude', 'workbuddy']
   return order.filter(id => channels.some(c => c.platform === id)).map(id => {
     const mine = channels.filter(c => c.platform === id)
     const account = status?.accounts.find(a => a.slot === mine[0]!.slot)
@@ -356,7 +356,7 @@ export function ownerText(session: Pick<ChatSession, 'owner_kind' | 'owner'>): s
 }
 
 /** 列表和各处用的平台标记（两个字母以内） */
-export const PLATFORM_MARK: Record<string, string> = { chatgpt: 'G', codex: 'Cx', claude: 'Cl', workbuddy: 'W' }
+export const PLATFORM_MARK: Record<string, string> = { codex: 'Cx', claude: 'Cl', workbuddy: 'W' }
 
 /** 把回答按三个反引号拆成普通文字和代码块：只做这一种格式，其余按纯文字显示（不渲染 HTML） */
 export function splitText(text: string): { code: boolean; text: string; lang?: string }[] {

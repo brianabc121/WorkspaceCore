@@ -82,6 +82,18 @@ def _error_of(body: Any) -> BridgeCallError | None:
     return None
 
 
+def platforms_header(platforms: tuple[str, ...]) -> str:
+    """X-Bridge-Platforms 的值。
+
+    没升级的管理器还单列 chatgpt（就是 codex 的纯聊天）：给了 codex 就一并带上，
+    让它那边旧的 chatgpt 会话照样能用；新版本的管理器把 chatgpt 当成 codex（T-0280）。
+    """
+    allowed = list(platforms)
+    if "codex" in allowed and "chatgpt" not in allowed:
+        allowed.append("chatgpt")
+    return ",".join(allowed)
+
+
 @dataclass(frozen=True)
 class BridgeCaller:
     """代表哪个实例调用，以及它的权限范围（write / account / takeover）。"""
@@ -131,7 +143,7 @@ class BridgeClient:
             "X-Bridge-Scopes": ",".join(caller.scopes),
         }
         if caller.platforms is not None:
-            headers["X-Bridge-Platforms"] = ",".join(caller.platforms)
+            headers["X-Bridge-Platforms"] = platforms_header(caller.platforms)
         if caller.source:
             headers["X-Bridge-Source"] = quote(json.dumps(caller.source, ensure_ascii=False))
         body = {

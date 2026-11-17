@@ -1,6 +1,7 @@
 # 大模型会话桥（llm-bridge）
 
-一个 Docker 部署的 MCP 服务：多个调用方（OpenClaw）经它向 ChatGPT / Codex / Claude / WorkBuddy 发指令、管理会话。
+一个 Docker 部署的 MCP 服务：多个调用方（OpenClaw）经它向 Codex / Claude / CodeBuddy（WorkBuddy）发指令、管理会话。
+原来单列的“ChatGPT 聊天”就是 Codex 的纯聊天模式（`codex.chat`），T-0280 起不再单列；旧名字 `chatgpt` 按 `codex` 处理。
 方案见 [`docs/v2/LLM_BRIDGE_PLAN.md`](../../docs/v2/LLM_BRIDGE_PLAN.md)，接口核验见
 [`docs/decisions/2026-11-13-llm-bridge-verification.md`](../../docs/decisions/2026-11-13-llm-bridge-verification.md)。
 

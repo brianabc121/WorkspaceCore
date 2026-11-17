@@ -23,13 +23,13 @@ from urllib.parse import unquote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
 from bridge import __version__, hooks
 from bridge import attachments as attachment_rules
-from bridge.channels import CHANNELS, FAKE_CHANNELS, SLOT_LABELS, find
+from bridge.channels import CHANNELS, FAKE_CHANNELS, SLOT_LABELS, canonical, find
 from bridge.config import Settings, get_settings
 from bridge.drivers.base import Driver
 from bridge.drivers.cli_stream import CliStreamDriver, claude_profile, codebuddy_profile
@@ -134,10 +134,11 @@ def resolve_caller(request: Request) -> Caller:
         scopes = frozenset(s for s in (part.strip() for part in raw.split(",")) if s in SCOPES)
         # 工作台按管理员给这个实例选的平台带过来；没带这个头是不限（人在聊天页）
         limited = request.headers.get("x-bridge-platforms")
+        # 旧名字 chatgpt 按 codex 处理（T-0280）
         platforms = (
             None
             if limited is None
-            else frozenset(p for p in (part.strip() for part in limited.split(",")) if p)
+            else frozenset(canonical(p) for p in (part.strip() for part in limited.split(",")) if p)
         )
         return Caller(caller_id, label, scopes, platforms, _source(request))
     store: Store = request.app.state.store
@@ -173,7 +174,7 @@ class LoginBody(_Body):
 
 
 class EnvironmentBody(_Body):
-    platform: str
+    platform: Annotated[str, AfterValidator(canonical)]
     mode: Literal["dev", "cloud"]
     name: str = Field(min_length=1, max_length=60)
     repo_url: str | None = Field(default=None, max_length=500)
@@ -436,7 +437,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         rows = engine.store.list_sessions(
             include_archived=True,
             status=None if status == "all" else status,
-            platform=platform or None,
+            platform=canonical(platform) if platform else None,
             query=q.strip()[:120] or None,
             limit=min(max(limit, 1), 200) + 1,
             offset=max(offset, 0),

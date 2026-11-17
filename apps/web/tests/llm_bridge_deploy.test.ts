@@ -18,7 +18,7 @@ const BRIDGE = '11111111-1111-4111-8111-111111111111', NEW = '44444444-4444-4444
 const SERVER = '55555555-5555-4555-8555-555555555555', COLD = '66666666-6666-4666-8666-666666666666', HOST = '88888888-8888-4888-8888-888888888888'
 const JOB = '77777777-7777-4777-8777-777777777777', JOB2 = '99999999-9999-4999-8999-999999999999', JOB3 = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const PASSWORD = 'login-password-for-sudo'
-const ALL = ['chatgpt', 'codex', 'claude', 'workbuddy']
+const ALL = ['codex', 'claude', 'workbuddy']
 const api = '/api/v1/llm_bridge'
 const path = (r: Request) => new URL(r.url).pathname
 const as = (role: Role) => Response.json({ ...me, workspaces: [{ ...workspace, role }] })
@@ -116,10 +116,12 @@ describe('一键部署 MCP 管理器', () => {
     expect(within(form).getByText(/不用填地址、令牌，也不用服务器的账号密码/)).toBeVisible()
     expect(within(form).queryByLabelText('部署到哪台服务器')).not.toBeInTheDocument()
     expect(within(form).queryByLabelText('登录密码')).not.toBeInTheDocument()
-    await fireEvent.click(within(form).getByRole('checkbox', { name: 'ChatGPT' }))
+    // 没有单独的 ChatGPT 平台了（T-0280）
+    expect(within(form).queryByRole('checkbox', { name: 'ChatGPT' })).not.toBeInTheDocument()
+    await fireEvent.click(within(form).getByRole('checkbox', { name: 'CodeBuddy' }))
     await fireEvent.click(within(form).getByRole('button', { name: '部署在本机' }))
     expect(await card('本机')).toBeVisible()
-    expect(bodies).toEqual([{ name: '本机', platforms: ['codex', 'claude', 'workbuddy'] }])
+    expect(bodies).toEqual([{ name: '本机', platforms: ['codex', 'claude'] }])
     expect(writes(requests)).toHaveLength(1)
 
     // 已经添加过：再打开时默认换到服务器；选回“本机”会说明已经加过，没有按钮
@@ -163,7 +165,7 @@ describe('一键部署 MCP 管理器', () => {
     expect(await within(form).findByText('已经有同名的 MCP 管理器，换一个名字。')).toBeVisible()
     await fireEvent.update(within(form).getByLabelText('名字'), '2 号')
     const control = within(form).getByRole('group', { name: '控制的平台' })
-    for (const name of ['ChatGPT', 'Codex', 'Claude', 'CodeBuddy']) await fireEvent.click(within(control).getByLabelText(name))
+    for (const name of ['Codex', 'Claude', 'CodeBuddy']) await fireEvent.click(within(control).getByLabelText(name))
     await start(form)
     expect(await within(form).findByText('至少勾选一个要控制的平台。')).toBeVisible()
     expect(writes(requests)).toEqual([])

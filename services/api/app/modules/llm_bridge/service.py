@@ -35,6 +35,7 @@ from app.modules.llm_bridge.models import (
 )
 from app.modules.llm_bridge.schemas import (
     ALL_PLATFORMS,
+    PLATFORM_ALIASES,
     LlmBridgeAccountOut,
     LlmBridgeChannelOut,
     LlmBridgeConnectivityOut,
@@ -59,6 +60,8 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeStatusOut,
     LlmBridgeUsageOut,
     LlmBridgeUsageRowOut,
+    canonical_platform,
+    canonical_platforms,
 )
 
 SLOTS = ("openai", "claude", "workbuddy")
@@ -495,19 +498,21 @@ class LlmBridgeService:
             for slot in SLOTS
             if slot in data.get("accounts", {})
         ]
-        # 旧版本的会话桥不报告 platforms：按“全部”处理
+        # 旧版本的会话桥不报告 platforms：按“全部”处理；
+        # 没升级的版本还单列 chatgpt，按 codex 算（T-0280）
         platforms = data.get("platforms")
         if not isinstance(platforms, list):
             platforms = list(ALL_PLATFORMS)
         return LlmBridgeStatusOut(
             reachable=True,
             version=str(data.get("version", "")),
-            platforms=[p for p in platforms if p in ALL_PLATFORMS],
+            platforms=[p for p in canonical_platforms(platforms) if p in ALL_PLATFORMS],
             accounts=accounts,
+            # 旧版本单列的 chatgpt.chat 就是 codex.chat：不再列出
             channels=[
                 LlmBridgeChannelOut(**c)
                 for c in data.get("channels", [])
-                if c["platform"] != "fake"
+                if c["platform"] not in ("fake", *PLATFORM_ALIASES)
             ],
             queued=int(data.get("queued", 0)),
             running=int(data.get("running", 0)),
@@ -555,7 +560,9 @@ class LlmBridgeService:
     def settings_out(data: dict[str, Any]) -> LlmBridgeSettings:
         values = dict(data)
         if isinstance(values.get("platforms"), list):
-            values["platforms"] = [p for p in values["platforms"] if p in ALL_PLATFORMS]
+            values["platforms"] = [
+                p for p in canonical_platforms(values["platforms"]) if p in ALL_PLATFORMS
+            ]
         return LlmBridgeSettings(**values)
 
     # ---- 按实例的权限 ----
@@ -751,7 +758,7 @@ class LlmBridgeService:
                         day=str(item.get("day") or ""),
                         bridge_id=bridge.id,
                         bridge_name=bridge.name,
-                        platform=str(item.get("platform") or ""),
+                        platform=canonical_platform(str(item.get("platform") or "")),
                         owner_kind=kind,
                         owner_id=owner_id,
                         owner=str(item.get("owner") or "")[:80],

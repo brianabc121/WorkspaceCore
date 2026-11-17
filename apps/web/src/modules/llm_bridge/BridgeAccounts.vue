@@ -21,7 +21,7 @@ const RECOVER_MS = 120_000
 const WEB_POLL_MS = 1500
 // 网页登录：和设备码一样，拿到网址后等人在自己的浏览器里完成
 const WEB_METHODS: LoginMethod[] = ['web_cn', 'web_intl']
-// 显示逐步进度的登录方式：网页登录（CodeBuddy，T-0276）和设备码登录（ChatGPT / Codex，T-0279）
+// 显示逐步进度的登录方式：网页登录（CodeBuddy，T-0276）和设备码登录（Codex，T-0279）
 const PROGRESS_METHODS: LoginMethod[] = [...WEB_METHODS, 'device_code']
 // 平台连通性（T-0240）：这个管理器所在的服务器到各平台能不能用、延迟多少；管理器连得上才测
 const bridgeId = toRef(() => (props.status?.reachable ? props.bridge.id : null))
@@ -35,7 +35,7 @@ async function recheckNet() {
 const netFailed = computed(() => netError.value || (net.error.value ? bridgeError(net.error.value) : ''))
 const error = ref(''), notice = ref(''), busy = ref('')
 const login = reactive({ slot: null as Slot | null, method: 'api_key' as LoginMethod, secret: '' })
-// 设备码登录（ChatGPT / Codex）和网页登录（CodeBuddy）：逐步进度，网址和验证码显示在进度卡片里
+// 设备码登录（Codex）和网页登录（CodeBuddy）：逐步进度，网址和验证码显示在进度卡片里
 const job = ref<LoginJob | null>(null)
 let recoverUntil = 0, webTimer: ReturnType<typeof setInterval> | null = null, webPolling = false, webRun = 0
 // 开始前管理器那边上一次登录的 started_at：查进度时只认这一次的，不把上一次的结果当成这一次的
@@ -77,7 +77,7 @@ const channelRows = computed(() => {
 })
 // 已控制平台：平时只读，点“编辑”才能勾选（勾选仍然立即保存，取消要确认）
 const editing = ref(false)
-// 一个账号槽位对应的平台（OpenAI 的账号同时给 ChatGPT 和 Codex 用）：卡片的标记和额度按它们来
+// 一个账号槽位对应的平台：卡片的标记和额度按它们来
 const platformsOf = (slot: string) => PLATFORMS.map(p => p.id).filter(id => PLATFORM_SLOT[id] === slot)
 const markOf = (slot: string) => platformsOf(slot).map(id => PLATFORM_MARK[id]).join('') || '?'
 const quotaOf = (slot: string) => platformsOf(slot).flatMap(id => (props.status?.quota?.[id] ? [{ platform: id, quota: props.status.quota[id]! }] : []))
@@ -157,7 +157,7 @@ function submitLogin(account: Account) {
   })
 }
 
-// ---- 网页登录（CodeBuddy，T-0276）与设备码登录（ChatGPT / Codex，T-0279）的逐步进度 ----
+// ---- 网页登录（CodeBuddy，T-0276）与设备码登录（Codex，T-0279）的逐步进度 ----
 // 点“获取登录网址 / 获取验证码”后一边等“开始登录”的答复（最多 95 秒：CodeBuddy 要先启动登录服务再申请网址，
 // Codex 申请设备码最多 60 秒），一边每 1.5 秒查一次进度，把管理器报告的每一步、运行信息显示出来；
 // 拿到网址（和验证码）后接着等你在浏览器里登录完。
@@ -277,7 +277,7 @@ function reset(account: Account) {
           <legend>已控制平台：</legend>
           <label v-for="p in PLATFORMS" :key="p.id" class="lb-control-chip"><input type="checkbox" :checked="controlled.includes(p.id)" @change="setPlatform(p.id, checked($event))" />{{ p.name }}</label>
         </fieldset>
-        <p class="lb-control-note">{{ editing ? '勾选的平台才能在这里登录、被智能体使用；改动立即保存，取消前会确认。' : '只有勾选的平台能在这里登录、被智能体使用。' }}ChatGPT 与 Codex 共用同一个账号。</p>
+        <p class="lb-control-note">{{ editing ? '勾选的平台才能在这里登录、被智能体使用；改动立即保存，取消前会确认。' : '只有勾选的平台能在这里登录、被智能体使用。' }}Codex 用 ChatGPT 账号登录。</p>
         <button v-if="canWrite" type="button" class="secondary-button lb-control-edit" :aria-pressed="editing" :aria-label="editing ? '完成编辑控制的平台' : '编辑控制的平台'" @click="editing = !editing"><component :is="editing ? Check : Pencil" aria-hidden="true" />{{ editing ? '完成' : '编辑' }}</button>
       </div>
 

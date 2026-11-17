@@ -30,6 +30,7 @@ from app.models.timeline import TaskRun
 from app.modules.llm_bridge import digests, memory, watches
 from app.modules.llm_bridge.client import BridgeCaller, BridgeCallError, BridgeClient
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeDigest, LlmBridgeGrant
+from app.modules.llm_bridge.schemas import canonical_platform, canonical_platforms
 from app.modules.llm_bridge.service import LlmBridgeService
 from app.modules.llm_bridge.tool_schemas import BridgeToolOutput
 from app.modules.llm_bridge.tools import SPECS, WRITE_TOOL_NAMES
@@ -277,7 +278,9 @@ async def _forward(
                 + "（它们只在新建会话时用）",
             )
     platform = (create or arguments).get("platform")
-    if platform and grant.platforms and platform not in grant.platforms:
+    if isinstance(platform, str):
+        platform = canonical_platform(platform)
+    if platform and grant.platforms and platform not in canonical_platforms(grant.platforms):
         raise ToolCallError("FORBIDDEN_CAPABILITY", f"管理员没有给你开 {platform} 这个平台")
     # 要发给第三方平台的内容先过密钥扫描：像密钥的不发、不存（例外九的“密钥拦截”）
     if any(
@@ -337,7 +340,7 @@ async def _forward(
         str(instance.id),
         instance.name,
         _scopes(grant),
-        tuple(grant.platforms) if grant.platforms else None,
+        tuple(canonical_platforms(grant.platforms)) if grant.platforms else None,
         source,
     )
     if tool == "llm_bridge_status" and bridge_name is None and len(bridges) > 1:
