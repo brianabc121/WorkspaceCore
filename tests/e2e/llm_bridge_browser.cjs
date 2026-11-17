@@ -387,7 +387,10 @@ async function main() {
     await page.getByText(`已保存「${INSTANCE}」的权限。`).waitFor()
     await grant.getByLabel('新建会话和发送').check()
     await grant.getByText('已启用').waitFor()
-    await grant.getByRole('group', { name: `${INSTANCE}允许的平台` }).getByLabel('Codex').check()
+    const allowed = grant.getByRole('group', { name: `${INSTANCE}允许的平台` })
+    // 没有单独的 ChatGPT；“Codex（只能对话）”和整个 Codex 是两项（T-0280），这里给整个 Codex
+    check(await allowed.getByLabel('ChatGPT').count() === 0 && await allowed.getByLabel('Codex（只能对话）').count() === 1, '允许的平台应是 Codex / Codex（只能对话）/ Claude / CodeBuddy')
+    await allowed.getByLabel('Codex', { exact: true }).check()
     await waitGrant((g) => g.enabled && g.can_write && !g.can_account && g.platforms.join() === 'codex' && g.bridge_ids === null, '启用后的权限不对')
     // 可用的开发环境（T-0247）：默认一个都不能用；这时还没有开发环境可勾
     const devEnvs = grant.getByRole('group', { name: `${INSTANCE}可用的开发环境`, exact: true })
