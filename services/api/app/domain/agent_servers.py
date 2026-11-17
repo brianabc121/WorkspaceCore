@@ -674,7 +674,10 @@ class AgentServerService:
             AgentInstance.id == instance_id, AgentInstance.workspace_id == access.workspace.id
         )
         if lock:
-            query = query.with_for_update().execution_options(populate_existing=True)
+            # FOR NO KEY UPDATE（T-0283）：部署、卸载、指定服务器之间照样排队，但不挡子表写入时的
+            # 外键检查（KEY SHARE）。原来用 FOR UPDATE：每分钟的主机数据上报先改服务器那一行、再写
+            # 实例样本，部署先锁实例、再锁服务器，两边互相等，Postgres 判定死锁、回滚部署
+            query = query.with_for_update(key_share=True).execution_options(populate_existing=True)
         instance = await self.db.scalar(query)
         if instance is None:
             raise ApiError(404, "NOT_FOUND", "实例不存在")

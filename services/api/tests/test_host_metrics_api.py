@@ -6,14 +6,18 @@
 整机告警与单个实例的告警（只提醒一次、恢复后再提醒）、30 天清理；get_host_status 只看自己。
 """
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from app.domain import host_metrics
+from app.domain.agent_servers import AgentServerService
+from app.domain.policy import WorkspaceAccess
 from app.models import AgentHostState, AgentServer
 from tests.helpers import run_sql
 from tests.test_agents_api import agent_headers
@@ -183,6 +187,32 @@ async def test_report_computes_rates_and_trends(env: ImEnv) -> None:
     mine = next(i for i in summary if i["instance_id"] == a["id"])
     assert mine["mem_used_percent"] == 50.0 and mine["disk_used_percent"] == 50.0
     assert mine["server_id"] == shown["server"]["id"] and mine["agent_mem_bytes"] == 512 * MB
+
+
+async def test_report_does_not_wait_for_a_locked_instance(env: ImEnv) -> None:
+    """部署、卸载、指定服务器时锁着实例行，每分钟的上报照样写进去（T-0283）。
+
+    原来锁实例用 FOR UPDATE：上报先改服务器那一行，再写实例统计（外键检查要对实例行加 KEY SHARE），
+    部署先锁实例、再锁服务器，两边互相等，Postgres 判定死锁、回滚部署（main b94f8a7 的 agents）。
+    现在锁实例用 FOR NO KEY UPDATE：部署之间照样排队，外键检查不用等。"""
+    a, _ = await agent(env, "甲")
+    token = await env.issue_token(a["id"])
+    await report(env, token, body())
+    await shift(env, 60)
+    # 这一分钟的实例样本还没有（每分钟第一次上报），写入时才做外键检查
+    await run_sql(
+        env.database_url,
+        "DELETE FROM workspace.agent_instance_samples WHERE instance_id = $1",
+        uuid.UUID(a["id"]),
+    )
+    service = AgentServerService(cast(Any, None), env.app.state.settings)
+    access = cast(WorkspaceAccess, SimpleNamespace(workspace=SimpleNamespace(id=env.workspace_id)))
+    async with env.app.state.sessionmaker() as db, db.begin():
+        service.db = db
+        await service._instance(access, uuid.UUID(a["id"]), lock=True)
+        await asyncio.wait_for(report(env, token, body(total=1_001_000, idle=900_750)), 15)
+    shown = await status(env, a["id"])
+    assert shown["current"]["cpu_percent"] == 25.0
 
 
 async def test_report_is_strict_and_rate_limited(env: ImEnv) -> None:
