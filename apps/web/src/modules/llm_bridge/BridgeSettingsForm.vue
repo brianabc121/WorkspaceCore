@@ -10,7 +10,7 @@ import { bridgeError, type Bridge, type BridgeStatus, type LlmBridgeApi, type Se
 const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; loading: boolean; loadError: unknown; canWrite: boolean }>()
 const emit = defineEmits<{ reload: [] }>()
 
-// 按效果图（T-____）分成四张卡片：运行控制、额度恢复后自动继续、会话与保留、高级设置；底部固定“取消更改 / 保存设置”。
+// 按效果图（T-0289）分成四张卡片：运行控制、额度恢复后自动继续、会话与保留、高级设置；底部固定“取消更改 / 保存设置”。
 // 标签用效果图的短说法，完整的说明在悬停提示里；字段、上下限和提交的内容和原来一样。
 const FIELDS = [
   { key: 'concurrency', label: '每个平台并行会话', unit: '个', short: '超出上限的会话自动排队。', help: '一个平台（Codex / Claude / CodeBuddy 各算各的）最多同时有几个会话在跑（1–16）；超过的排队等名额。调小可以降低账号被限制的风险。', min: 1, max: 16 },

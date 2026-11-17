@@ -102,7 +102,7 @@ class CliProfile:
     effort_flag: str = ""
 
 
-# Claude 的模型（T-____）：取自锁定版本 Claude Code 2.1.323 内置的模型菜单
+# Claude 的模型（T-0288）：取自锁定版本 Claude Code 2.1.323 内置的模型菜单
 # （二进制里 model_selector_config 中 id 为 "cc" 的那份：常用四个，其余在“更多模型”里），
 # 推理强度是各模型的 effort_levels；Haiku 4.5、Opus 4.1 不支持推理强度。
 # 前面四个是别名（--model 收别名或完整模型名，核验记录同上），总是指向这一族最新的模型；

@@ -147,7 +147,7 @@ describe('大模型聊天', () => {
     expect(theirs).toHaveTextContent('研究员 · 登录页点了没反应，帮我看看')
     expect(theirs).not.toHaveTextContent('Codex · 开发')
     expect(theirs).toHaveAttribute('title', 'Codex · 开发 · 研究员建的')
-    // 第二行右边是状态（T-____）：有回合在回答是“进行中”，做完了是“已完成”
+    // 第二行右边是状态（T-0288）：有回合在回答是“进行中”，做完了是“已完成”
     expect(within(theirs).getByText('进行中')).toHaveAttribute('data-state', 'busy')
     expect(within(today).getByRole('button', { name: /周报怎么写/ })).toHaveTextContent('已完成')
     // 列表里的时间：昨天的写“昨天 几点几分”；标题旁写着读到了几个；管理器那一栏写着连接状态
@@ -214,7 +214,7 @@ describe('大模型聊天', () => {
     const chips = screen.getByRole('list', { name: '会话的平台、模型与用法' })
     expect(chips).toHaveTextContent('Claude · 对话模式')
     expect(chips).toHaveTextContent('sonnet-5')
-    // 回合已经做完：写“已完成”，不是“进行中”（T-____）
+    // 回合已经做完：写“已完成”，不是“进行中”（T-0288）
     expect(within(info).getByText('已完成')).toBeVisible()
     expect(within(info).queryByText('进行中')).not.toBeInTheDocument()
     await fireEvent.click(within(info).getByRole('tab', { name: '执行记录' }))
@@ -1196,7 +1196,7 @@ describe('大模型聊天', () => {
 
     await fireEvent.update(within(form).getByLabelText('开发环境'), ENV)
     await fireEvent.update(within(form).getByLabelText('模型'), 'gpt-5')
-    // 推理强度按所选模型支持的列出，写中文名（T-____）
+    // 推理强度按所选模型支持的列出，写中文名（T-0288）
     const strength = await within(form).findByLabelText('推理强度')
     expect(within(strength).getAllByRole('option').map(o => o.textContent)).toEqual(['默认', '低', '高'])
     await fireEvent.update(strength, 'high')

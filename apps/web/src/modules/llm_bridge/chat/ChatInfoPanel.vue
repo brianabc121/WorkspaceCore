@@ -24,7 +24,7 @@ const turnIcon = (status?: string | null) => (status === 'completed' ? CheckCirc
 // 出处：智能体建这个会话时正在执行的任务（工作台记的，不保证就是引起这个会话的那一个）
 const tasks = computed(() => sourceTasks(props.session.source))
 const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
-// 状态和会话列表里的一样：回合在回答或排队时“进行中”，做完了“已完成”（T-____：原来没在回答也写“进行中”）
+// 状态和会话列表里的一样：回合在回答或排队时“进行中”，做完了“已完成”（T-0288：原来没在回答也写“进行中”）
 const state = computed(() => sessionState(props.session))
 const external = computed(() => props.session.origin === 'external')
 const mode = computed(() => `${MODES[props.session.mode] ?? props.session.mode}模式`)

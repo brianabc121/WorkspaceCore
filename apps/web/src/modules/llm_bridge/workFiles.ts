@@ -1,6 +1,6 @@
 import type { EnvSession, WorkEntry } from './api'
 
-// 开发环境里浏览会话工作目录（T-____）用到的小工具：文件的类型名、大小、时间，选哪个会话。
+// 开发环境里浏览会话工作目录（T-0289）用到的小工具：文件的类型名、大小、时间，选哪个会话。
 
 const TYPES: [RegExp, string][] = [
   [/\.(md|markdown)$/i, 'Markdown'],

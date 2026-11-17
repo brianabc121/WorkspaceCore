@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { Box } from '@lucide/vue'
 import { NO_QUOTA, platformName, quotaKind, quotaUsage, recentUse, resetText, seconds, type Quota, type QuotaWindow } from './api'
 
-// 一个平台的额度（T-0237），放在账号卡片的“使用额度”里（T-____ 按效果图重排）：
+// 一个平台的额度（T-0237），放在账号卡片的“使用额度”里（T-0289 按效果图重排）：
 // 每个窗口一行名字和已用比例，下面是重置时间和进度条；因为额度用完暂停到什么时候、有几个会话在等自动续跑。
 // 平台给的是已用百分比和重置时间，不是剩余 token 数；Claude 只在跑回合时顺带报出来，显示的是“最近一次看到的”；
 // CodeBuddy 的官方程序不给额度，照实说明。recent：是否在这里写最近 5 小时的用量（账号卡片把它放在卡片底部）。

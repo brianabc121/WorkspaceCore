@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { Activity, ArrowRight, Box, Clock, Play } from '@lucide/vue'
 import { platformName, type BridgeStatus } from './api'
 
-// 运行概览（T-____，效果图“管理器与账号”）：放在详情的标签上面，几个标签共用。
+// 运行概览（T-0289，效果图“管理器与账号”）：放在详情的标签上面，几个标签共用。
 // 进行中、排队中的回合数，管理器的版本；展开看每个平台同时在跑几个、上限多少。
 // 数的是回合：一个会话同时只跑一个回合，排队的可以有好几个。
 defineProps<{ status: BridgeStatus }>()

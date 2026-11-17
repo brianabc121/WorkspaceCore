@@ -61,7 +61,7 @@ async def test_live_codebuddy(tmp_path: Path) -> None:
 
 async def test_live_claude_model_and_effort_flags(tmp_path: Path) -> None:
     """不用登录：锁定版本的帮助文本里有驱动用到的 --model 和 --effort，
-    强度的可选值和 CLAUDE_MODELS 一致（T-____）。"""
+    强度的可选值和 CLAUDE_MODELS 一致（T-0288）。"""
     process = await asyncio.create_subprocess_exec(
         f"{CLI_DIR}/claude",
         "--help",

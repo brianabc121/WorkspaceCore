@@ -72,7 +72,7 @@
 
 `claude --cloud`：没有非交互的列表和结果接口，`claude.cloud` 是接口桩。
 
-**模型与推理强度（T-____，2026-11-17）**。核验方式：从 npm 下载锁定版本的 `@anthropic-ai/claude-code-linux-x64@2.1.323`，
+**模型与推理强度（T-0288，2026-11-17）**。核验方式：从 npm 下载锁定版本的 `@anthropic-ai/claude-code-linux-x64@2.1.323`，
 只解包、不运行，在二进制里读帮助文本和内置配置。
 
 - `--model <model>` 的帮助原文：“Model for the current session. Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name.”

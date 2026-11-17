@@ -1231,7 +1231,7 @@ async def test_chat_only_grant_stays_away_from_codex_dev_sessions(rig: Rig) -> N
 
 
 async def test_dev_session_files_can_be_browsed_previewed_and_downloaded(rig: Rig) -> None:
-    """开发环境里浏览会话的工作目录（T-____）：admin 能看文件夹和文件，预览脱敏；
+    """开发环境里浏览会话的工作目录（T-0289）：admin 能看文件夹和文件，预览脱敏；
     下载给原文件并记审计；跳不出工作目录；官方程序里同步来的会话不能浏览。"""
     made = await rig.api(
         "POST",

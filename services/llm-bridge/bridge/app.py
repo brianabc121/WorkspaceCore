@@ -532,7 +532,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
         )
 
-    # 开发会话工作目录里的文件（T-____）：只读；下载给原文件，太大的不给
+    # 开发会话工作目录里的文件（T-0289）：只读；下载给原文件，太大的不给
     @app.get("/admin/environments/{env_id}/sessions")
     async def admin_environment_sessions(
         request: Request, env_id: str, _: Admin, limit: int = 50

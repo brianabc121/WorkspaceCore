@@ -367,7 +367,7 @@ async def llm_bridge_delete_environment(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# ---- 开发会话工作目录里的文件（T-____，只读）----
+# ---- 开发会话工作目录里的文件（T-0289，只读）----
 # 人类 2026-11-17 决定：owner / admin 能下载原文件；下载记审计
 FilePath = Annotated[str, Query(max_length=1000, description="相对会话工作目录的路径；根目录不填")]
 _FILE_DOWNLOAD = {

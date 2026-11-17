@@ -356,7 +356,7 @@ export function ownerText(session: Pick<ChatSession, 'owner_kind' | 'owner'>): s
 }
 
 /**
- * 会话的状态（T-____）：有回合正在回答或排队时是“进行中”，否则是“已完成”（最近的回合做完了）；归档了是“已归档”。
+ * 会话的状态（T-0288）：有回合正在回答或排队时是“进行中”，否则是“已完成”（最近的回合做完了）；归档了是“已归档”。
  * 会话列表和会话详情都用它。
  */
 export function sessionState(session: Pick<ChatSession, 'status' | 'busy'>): { key: 'archived' | 'busy' | 'done'; text: string } {

@@ -25,7 +25,7 @@ export type LoginBody = Schema['LlmBridgeLoginIn']
 export type LoginMethod = LoginBody['method']
 export type LoginState = Schema['LlmBridgeLoginOut']
 export type Environment = Schema['LlmBridgeEnvironmentOut']
-/** 开发会话工作目录里的文件（T-____） */
+/** 开发会话工作目录里的文件（T-0289） */
 export type EnvSession = Schema['LlmBridgeEnvSessionOut']
 export type WorkEntry = Schema['LlmBridgeFileEntryOut']
 export type WorkFile = Schema['LlmBridgeFileOut']
@@ -214,7 +214,7 @@ export function useLlmBridge(scope: string) {
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/status', { params: at(id.value!), signal })) }),
     useEnvironments: (id: Ref<string>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'environments')), enabled: computed(active),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/environments', { params: at(id.value), signal })).environments }),
-    // 开发会话工作目录里的文件（T-____）：环境下的会话、文件夹的内容、文件的预览（已脱敏）；只读
+    // 开发会话工作目录里的文件（T-0289）：环境下的会话、文件夹的内容、文件的预览（已脱敏）；只读
     useEnvSessions: (id: Ref<string>, env: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'env-sessions', env.value)), enabled: computed(() => active() && !!env.value),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/environments/{env_id}/sessions', { params: { header, path: { bridge_id: id.value, env_id: env.value! } }, signal })).sessions }),
     useWorkFiles: (id: Ref<string>, session: Ref<string | null>, path: Ref<string>, enabled: Ref<boolean> = ref(true)) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'work-files', session.value, path.value)), enabled: computed(() => active() && !!session.value && enabled.value),

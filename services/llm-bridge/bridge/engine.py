@@ -1740,7 +1740,7 @@ class Engine:
             raise BridgeError("NOT_FOUND", "没有这个会话")
         return session
 
-    # ---- 开发会话工作目录里的文件（T-____，页面上“开发环境”里浏览；只读）----
+    # ---- 开发会话工作目录里的文件（T-0289，页面上“开发环境”里浏览；只读）----
     def environment_sessions(self, env_id: str, limit: int = 50) -> list[Row]:
         """用这个开发环境建的会话（最近活动的在前），带上工作目录还能不能浏览。"""
         if self.store.get_environment(env_id) is None:

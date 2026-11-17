@@ -4,7 +4,7 @@ import { FolderPlus, X } from '@lucide/vue'
 import { PLATFORM_MARK } from './chat/chatApi'
 import { PLATFORMS, SANDBOX, bridgeError, platformName, type Environment, type EnvironmentBody, type LlmBridgeApi, type Platform } from './api'
 
-// 新增 / 修改开发环境的弹窗（T-____，效果图“新增开发环境”）：基本信息（名称、运行平台）、代码仓库（可选）、
+// 新增 / 修改开发环境的弹窗（T-0289，效果图“新增开发环境”）：基本信息（名称、运行平台）、代码仓库（可选）、
 // 运行权限（访问权限、允许联网、启用环境）、说明（可选）。和原来的表单提交同样的内容、同样的校验。
 // 点外面不关（免得填了一半丢掉），Esc 和“取消”关；Tab 只在弹窗里转。
 const props = defineProps<{ api: LlmBridgeApi; bridgeId: string; env: Environment | null; platforms: readonly { id: Platform; name: string }[] }>()

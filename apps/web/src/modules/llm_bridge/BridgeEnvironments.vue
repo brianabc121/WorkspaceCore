@@ -10,7 +10,7 @@ import { defaultSession, rootName } from './workFiles'
 
 // 开发环境：智能体在哪个代码仓库、用什么权限干活。Codex / Claude / CodeBuddy 都有开发模式；
 // 用法固定是“开发”（云端通道目前只是占位）。新增时只能选这个 MCP 管理器控制的平台（状态还没读到时不限制，由后端把关）。
-// 按效果图（T-____）：左边是环境列表和文件夹树，中间是选中环境的一个会话的工作目录，右边预览文件；
+// 按效果图（T-0289）：左边是环境列表和文件夹树，中间是选中环境的一个会话的工作目录，右边预览文件；
 // 新增、修改环境在弹窗里。文件来自会话的工作目录（环境本身只是配置，没有常驻的目录）。
 const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; canWrite: boolean }>()
 const bridgeId = toRef(() => props.bridge.id)

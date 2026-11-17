@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight, Folder, FolderOpen } from '@lucide/vue'
 import type { LlmBridgeApi } from './api'
 import { join } from './workFiles'
 
-// 左栏“文件夹”树的一个节点（T-____）：只列文件夹；展开时才读它下面有什么。
+// 左栏“文件夹”树的一个节点（T-0289）：只列文件夹；展开时才读它下面有什么。
 // 当前打开的文件夹（current）所在的那一串会自动展开并标出来。点名字就打开那个文件夹。
 const props = defineProps<{ api: LlmBridgeApi; bridgeId: string; session: string; path: string; name: string; current: string; depth?: number }>()
 const emit = defineEmits<{ open: [path: string] }>()

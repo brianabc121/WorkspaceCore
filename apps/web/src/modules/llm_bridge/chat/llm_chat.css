@@ -89,7 +89,7 @@
 .lc-item-top time { flex: none; color: var(--muted); font-size: .74rem; font-variant-numeric: tabular-nums; }
 .lc-item-meta { display: flex; gap: 8px; min-width: 0; color: var(--muted); font-size: .78rem; }
 .lc-item-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* 会话的状态标签（T-____）：进行中 / 已完成 / 已归档 */
+/* 会话的状态标签（T-0288）：进行中 / 已完成 / 已归档 */
 .lc-status { flex: none; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border-radius: 999px; font-size: .7rem; font-weight: 600; line-height: 1.6; white-space: nowrap; background: var(--success-soft); color: var(--success); }
 .lc-status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .lc-status[data-state="busy"] { background: var(--accent-soft); color: var(--accent); }

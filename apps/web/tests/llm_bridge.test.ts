@@ -53,7 +53,7 @@ function setup(role: Role, handler?: (r: Request) => Response | undefined | Prom
 }
 const writes = (requests: Request[]) => requests.filter(r => r.method !== 'GET' && path(r).startsWith('/api/v1/llm_bridge'))
 const openTab = async (name: string) => { await fireEvent.click(await screen.findByRole('tab', { name })); return screen.findByRole('tabpanel', { name }) }
-/** 展开“平台与账号”下面的“连接诊断”（各平台的连通性详情和通道表，T-____ 起默认收起） */
+/** 展开“平台与账号”下面的“连接诊断”（各平台的连通性详情和通道表，T-0289 起默认收起） */
 async function openDiag() {
   const head = await screen.findByRole('button', { name: /^连接诊断/ })
   if (head.getAttribute('aria-expanded') !== 'true') await fireEvent.click(head)
@@ -86,7 +86,7 @@ describe('大模型客户端管理', () => {
     expect(within(workbuddy).getByText(/只能点“更换账号”/)).toBeVisible()
     expect(within(workbuddy).queryByRole('button', { name: '登录CodeBuddy' })).not.toBeInTheDocument()
     const overview = screen.getByRole('group', { name: '运行概览' })
-    // 运行概览在标签上面：进行中、排队中的回合数（T-____）
+    // 运行概览在标签上面：进行中、排队中的回合数（T-0289）
     expect(overview).toHaveTextContent(/进行中\s*2\s*个回合/)
     expect(overview).toHaveTextContent(/排队中\s*1\s*个回合/)
     // 通道按平台一行：支持的用法（不可用的标出来）、整体可用性、说明；在“连接诊断”里
@@ -154,7 +154,7 @@ describe('大模型客户端管理', () => {
     const grants = await screen.findByRole('group', { name: '实例权限：甲' })
     expect(grants).toBeDisabled()
     const env = await openTab('开发环境')
-    // 环境列表的悬停提示里写着权限（T-____）；admin 只能看，没有新增和环境设置
+    // 环境列表的悬停提示里写着权限（T-0289）；admin 只能看，没有新增和环境设置
     expect(await within(env).findByRole('button', { name: /工作台仓库/ })).toHaveAttribute('title', expect.stringContaining('可写工作区'))
     expect(within(env).queryByRole('button', { name: '新增环境' })).not.toBeInTheDocument()
     expect(within(env).queryByRole('button', { name: /环境设置/ })).not.toBeInTheDocument()
@@ -886,7 +886,7 @@ describe('大模型客户端管理', () => {
     })
     await openApp('/llm_bridge?view=manage')
     const set = await openTab('运行设置')
-    // 在“高级设置”里，点“上下文自动压缩”展开（T-____）
+    // 在“高级设置”里，点“上下文自动压缩”展开（T-0289）
     await fireEvent.click(await within(set).findByRole('button', { name: /上下文自动压缩/ }))
     const group = await within(set).findByRole('group', { name: '自动压缩的位置' })
     const claude = within(group).getByLabelText('Claude：上下文用到百分之多少时自动压缩')
@@ -932,7 +932,7 @@ describe('大模型客户端管理', () => {
   })
 
   it('browses the workdir of a session in a development environment and previews and downloads files', async () => {
-    // T-____：开发环境下选会话（默认最近的、还能浏览的），列文件夹、进子文件夹、预览 Markdown（预览 / 源码）、下载原文件
+    // T-0289：开发环境下选会话（默认最近的、还能浏览的），列文件夹、进子文件夹、预览 Markdown（预览 / 源码）、下载原文件
     const ENV = 'be_0123456789abcdef0123', S1 = 'bs_0123456789abcdef0123', S2 = 'bs_aaaaaaaaaaaaaaaaaaaa'
     const at = 1794528000
     const session = (id: string, title: string, browsable: boolean): Schema['LlmBridgeEnvSessionOut'] => ({ session_id: id, platform: 'claude', mode: 'dev', model: null, title, status: 'active', origin: 'bridge', owner: '甲', created_at: at, updated_at: at, turns: 1, busy: false, browsable })
@@ -1007,7 +1007,7 @@ describe('大模型客户端管理', () => {
 
     const env = await openTab('开发环境')
     await fireEvent.click(await within(env).findByRole('button', { name: '新增环境' }))
-    // 新增环境在弹窗里（T-____）：平台是三张卡片，访问权限、允许联网、启用环境
+    // 新增环境在弹窗里（T-0289）：平台是三张卡片，访问权限、允许联网、启用环境
     expect(within(env).getByRole('dialog', { name: '新增开发环境' })).toBeVisible()
     const form = within(env).getByRole('form', { name: '新增开发环境' })
     expect(within(form).queryByRole('radio', { name: 'ChatGPT' })).not.toBeInTheDocument()
@@ -1049,7 +1049,7 @@ describe('大模型客户端管理', () => {
     expect(within(codex).getByRole('progressbar', { name: '5 小时额度已用' })).toHaveValue(42)
     expect(within(codex).getAllByText(/套餐 plus/)[0]).toBeVisible()
     expect(within(codex).getByText('已过重置时间，等下一次回合确认')).toBeVisible()
-    // 近 5 小时的用量在卡片底部，完整说明在悬停提示里（T-____）
+    // 近 5 小时的用量在卡片底部，完整说明在悬停提示里（T-0289）
     const codexCard = screen.getByRole('article', { name: '账号：Codex' })
     expect(within(codexCard).getByText('近 5 小时 · 12,345 token')).toHaveAttribute('title', expect.stringMatching(/最近 5 小时经这个管理器用掉 12,345 个 token/))
     const claude = screen.getByRole('article', { name: '额度：Claude' })
@@ -1059,7 +1059,7 @@ describe('大模型客户端管理', () => {
     expect(within(claude).getByText('平台没有给出重置时间')).toBeVisible()
     expect(within(screen.getByRole('article', { name: '额度：CodeBuddy' })).getByText(/官方程序不提供剩余积分和重置时间/)).toBeVisible()
 
-    // CodeBuddy 的官方程序不给额度：照实说明（T-____ 起标题“额度由平台官网提供”）
+    // CodeBuddy 的官方程序不给额度：照实说明（T-0289 起标题“额度由平台官网提供”）
     expect(within(screen.getByRole('article', { name: '额度：CodeBuddy' })).getByText('额度由平台官网提供')).toBeVisible()
     await fireEvent.click(within(await cardMenu(codexCard, 'Codex')).getByRole('button', { name: '向平台查一次' }))
     await waitFor(() => expect(requests.some(r => path(r) === `${base}/quota` && new URL(r.url).searchParams.get('refresh') === 'true')).toBe(true))
@@ -1154,7 +1154,7 @@ describe('大模型客户端管理', () => {
     expect(within(openai).getByText('平台应答慢（最慢 3.5 秒）：网络本身没问题，是平台那边回得慢。')).toBeVisible()
     expect(within(openai).getByText(/延迟是建立连接用的时间（一次网络往返），可以和服务器上 ping 的结果对照。/)).toBeVisible()
     expect(within(openai).queryByText(/这个 MCP 管理器是旧版本/)).not.toBeInTheDocument()
-    // 账号卡片上的一行网络状态（T-____）：网络未连通 / 网络正常，域名解析慢时补一句
+    // 账号卡片上的一行网络状态（T-0289）：网络未连通 / 网络正常，域名解析慢时补一句
     expect(within(screen.getByRole('article', { name: '账号：Codex' })).getByText('网络未连通 · 域名解析慢')).toBeVisible()
     // 经 HTTPS 代理：域名由代理解析，没有解析这一步
     const claude = screen.getByRole('group', { name: '平台连通性：Claude' })

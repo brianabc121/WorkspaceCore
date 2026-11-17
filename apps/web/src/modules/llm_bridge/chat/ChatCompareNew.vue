@@ -16,7 +16,7 @@ interface Chosen extends ChatTarget { key: number; label: string }
 const targets = ref<Chosen[]>([])
 let nextKey = 1, touched = false
 const nameOf = (id: string) => props.bridges.find(b => b.id === id)?.name ?? '已删除的管理器'
-// 推理强度也写上、也算进“是不是同一个”：同一个模型可以用不同的强度同问（T-____）
+// 推理强度也写上、也算进“是不是同一个”：同一个模型可以用不同的强度同问（T-0288）
 const label = (t: ChatTarget) => `${platformName(t.platform)} · ${t.mode === 'dev' ? '开发 · ' : ''}${t.model || '默认模型'}${t.effort ? ` · ${effortName(t.effort)}` : ''} · ${nameOf(t.bridge_id)}`
 const same = (a: ChatTarget, b: ChatTarget) => a.bridge_id === b.bridge_id && a.platform === b.platform && a.mode === b.mode && (a.model ?? '') === (b.model ?? '') && (a.effort ?? '') === (b.effort ?? '') && (a.environment ?? '') === (b.environment ?? '')
 

@@ -5,7 +5,7 @@ import { answerHtml } from './chat/markdown'
 import { bridgeError, platformName, type EnvSession, type Environment, type LlmBridgeApi, type WorkEntry } from './api'
 import { isMarkdown, join, sizeText, timeText, typeName } from './workFiles'
 
-// 开发环境的工作目录（T-____，效果图“开发环境”）：中间是选中的环境、它的哪个会话、当前文件夹里的文件；右边预览选中的文件。
+// 开发环境的工作目录（T-0289，效果图“开发环境”）：中间是选中的环境、它的哪个会话、当前文件夹里的文件；右边预览选中的文件。
 // 文件来自那个会话在 MCP 管理器里的工作目录（人类 2026-11-17 选的做法）；只读。
 // 预览的文字已经脱敏（看起来像密钥、令牌的换成 ***）；Markdown 可以切换“预览 / 源码”，预览按知识库的安全渲染排版。
 // 下载给原文件（人类决定允许 owner / admin 下载原文件），工作台记一条审计。

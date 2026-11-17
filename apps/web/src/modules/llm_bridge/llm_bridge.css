@@ -274,7 +274,7 @@
 .lb-window-meta { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 4px 8px; margin: 6px 0 0; color: var(--muted); font-size: .78rem; }
 .lb-window-meta dd { margin: 0; min-width: 0; color: var(--text); overflow-wrap: anywhere; }
 
-/* ---- T-____ 按效果图：运行概览卡片（标签上面）、网络提示条、账号卡片、连接诊断 ---- */
+/* ---- T-0289 按效果图：运行概览卡片（标签上面）、网络提示条、账号卡片、连接诊断 ---- */
 .lb-bridge { container-type: inline-size; }
 .lb-overview-card { display: grid; grid-template-columns: minmax(170px, 1.3fr); grid-auto-flow: column; grid-auto-columns: minmax(80px, 1fr); align-items: center; gap: 12px 0; padding: 14px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
 .lb-overview-stat { padding: 0 0 0 20px; border-left: 1px solid var(--line); margin-left: 20px; }
@@ -469,7 +469,7 @@
   .dg-meta { grid-template-columns: auto minmax(0, 1fr); }
 }
 
-/* ---- 运行设置（T-____，效果图）：四张卡片两列排，底部固定“取消更改 / 保存设置” ---- */
+/* ---- 运行设置（T-0289，效果图）：四张卡片两列排，底部固定“取消更改 / 保存设置” ---- */
 .lb-settings { display: grid; gap: 14px; min-width: 0; }
 .lb-settings-form { display: grid; gap: 14px; }
 .lb-settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 14px; align-items: start; }
@@ -524,7 +524,7 @@
   .lb-set-row .lb-unit-input, .lb-set-row select { flex: 1 1 100%; }
 }
 
-/* ---- 开发环境（T-____，效果图）：左边环境与文件夹树，中间文件，右边预览；新增 / 修改在弹窗里 ---- */
+/* ---- 开发环境（T-0289，效果图）：左边环境与文件夹树，中间文件，右边预览；新增 / 修改在弹窗里 ---- */
 .lb-envs { display: grid; gap: 14px; min-width: 0; }
 .lb-envs-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
 .lb-envs-head h3 { margin: 0; font-size: 1.05rem; }

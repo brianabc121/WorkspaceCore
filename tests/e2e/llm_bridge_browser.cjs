@@ -112,12 +112,12 @@ async function manage(page, name) {
   if ((await menu.count()) && (await menu.getAttribute('aria-expanded')) !== 'true') await menu.click()
   return own
 }
-// “平台与账号”下面的“连接诊断”默认收起（T-____）：各平台的连通性详情和通道表在里面
+// “平台与账号”下面的“连接诊断”默认收起（T-0289）：各平台的连通性详情和通道表在里面
 async function openDiag(page) {
   const head = page.getByRole('button', { name: /^连接诊断/ })
   if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()
 }
-// 账号卡片的“…”：退出登录、更换账号、向平台查一次（T-____）
+// 账号卡片的“…”：退出登录、更换账号、向平台查一次（T-0289）
 async function cardMenu(page, label) {
   const more = account(page, label).getByRole('button', { name: `${label}的更多操作` })
   if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click()
@@ -357,7 +357,7 @@ async function main() {
     await tab(page, '开发环境').click()
     await page.getByText('还没有开发环境。').waitFor()
     await page.getByRole('button', { name: '新增环境' }).click()
-    // 新增环境在弹窗里（T-____）：平台是卡片（只列这个管理器控制的），访问权限、允许联网、启用环境
+    // 新增环境在弹窗里（T-0289）：平台是卡片（只列这个管理器控制的），访问权限、允许联网、启用环境
     form = page.getByRole('form', { name: '新增开发环境' })
     const offered = (await form.locator('.lb-plat-card').allInnerTexts()).map((t) => t.trim())
     check(offered.join() === 'Claude,CodeBuddy', `1 号新增环境时只应能选 Claude / CodeBuddy：${offered}`)

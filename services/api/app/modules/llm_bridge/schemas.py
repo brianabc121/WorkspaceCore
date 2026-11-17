@@ -487,7 +487,7 @@ class LlmBridgeSessionList(BaseModel):
     sync_failed: str = ""
 
 
-# ---- 开发会话工作目录里的文件（T-____）：页面上“开发环境”里浏览，只读 ----
+# ---- 开发会话工作目录里的文件（T-0289）：页面上“开发环境”里浏览，只读 ----
 class LlmBridgeEnvSessionOut(LlmBridgeSessionOut):
     busy: bool = Field(default=False, description="有回合正在回答或排队")
     browsable: bool = Field(
