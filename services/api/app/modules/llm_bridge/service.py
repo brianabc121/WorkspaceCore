@@ -408,9 +408,19 @@ class LlmBridgeService:
         )
 
     # ---- 转给会话桥的管理操作 ----
-    async def admin(self, row: LlmBridge, method: str, path: str, body: Any = None) -> Any:
+    async def admin(
+        self,
+        row: LlmBridge,
+        method: str,
+        path: str,
+        body: Any = None,
+        *,
+        read_timeout: float | None = None,
+    ) -> Any:
         try:
-            return await (await self.client(row)).admin(method, path, body)
+            return await (await self.client(row)).admin(
+                method, path, body, read_timeout=read_timeout
+            )
         except BridgeCallError as error:
             raise from_bridge(error) from error
         except ConnectorError as error:
@@ -425,9 +435,11 @@ class LlmBridgeService:
         path: str,
         body: Any = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        read_timeout: float | None = None,
     ) -> Any:
         """改动类的管理操作：成功后记审计（不记密钥）。"""
-        result = await self.admin(row, method, path, body)
+        result = await self.admin(row, method, path, body, read_timeout=read_timeout)
         await self._audit(access, action, row.id, {"bridge": row.name, **(metadata or {})})
         await self.db.commit()
         return result

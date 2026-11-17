@@ -217,6 +217,69 @@ describe('大模型客户端管理', () => {
     expect(await within(card).findByText('网页登录（国内站）')).toBeVisible()
   })
 
+  // 开始网页登录要先在管理器里启动 CodeBuddy 的登录服务，常常超过普通请求的 15 秒：请求没有完整答复时不重新发起，改查登录进度
+  for (const [name, broken] of [
+    ['the connection drops', () => { throw new TypeError('Failed to fetch') }],
+    ['a CDN in front of the site times out (Cloudflare 524)', () => new Response('<html>524</html>', { status: 524, headers: { 'content-type': 'text/html' } })],
+  ] as const) {
+    it(`recovers the CodeBuddy login link by polling when ${name}`, { timeout: 30000 }, async () => {
+      let polls = 0
+      const url = 'https://www.codebuddy.ai/login?state=xyz'
+      const wb = account({ slot: 'workbuddy', label: 'CodeBuddy', login_methods: ['web_cn', 'web_intl', 'api_key'] })
+      const requests = setup('owner', r => {
+        if (path(r) === `${base}/status`) return Response.json(status({ accounts: [wb] }))
+        if (path(r) !== `${base}/accounts/workbuddy/login`) return undefined
+        if (r.method === 'POST') return broken()
+        polls += 1
+        // 第一次查时管理器还在启动登录服务（没有在登录）；之后申请到了网址
+        return Response.json(polls === 1 ? { state: 'none', detail: '' } : { state: 'pending', verification_url: url, user_code: null, detail: '' })
+      })
+      await openApp('/llm_bridge?view=manage')
+      const card = await screen.findByRole('article', { name: '账号：CodeBuddy' })
+      await fireEvent.click(within(card).getByRole('button', { name: '登录CodeBuddy' }))
+      const form = within(card).getByRole('form', { name: '登录CodeBuddy' })
+      await fireEvent.click(within(form).getByLabelText('网页登录（国际站）'))
+      await fireEvent.click(within(form).getByRole('button', { name: '获取登录网址' }))
+
+      const panel = await screen.findByRole('region', { name: '网页登录' })
+      expect(within(panel).getByText('正在等待登录网址…')).toBeVisible()
+      expect(screen.queryByText(/连接中断或超时/)).not.toBeInTheDocument()
+      const link = await within(panel).findByRole('link', { name: url }, { timeout: 10000 })
+      expect(link).toHaveAttribute('href', url)
+      expect(within(panel).getByText('正在等待你完成登录…')).toBeVisible()
+      // 只发起了一次：没有重启管理器里的登录服务
+      expect(writes(requests).filter(r => path(r).endsWith('/accounts/workbuddy/login'))).toHaveLength(1)
+      await fireEvent.click(within(panel).getByRole('button', { name: '不等了' }))
+    })
+  }
+
+  it('says why when no CodeBuddy login link turns up in time, and explains the wait while the request runs', { timeout: 30000 }, async () => {
+    const wb = account({ slot: 'workbuddy', label: 'CodeBuddy', login_methods: ['web_cn', 'web_intl', 'api_key'] })
+    let answer: (r: Response) => void = () => {}
+    setup('owner', r => {
+      if (path(r) === `${base}/status`) return Response.json(status({ accounts: [wb] }))
+      if (path(r) !== `${base}/accounts/workbuddy/login`) return undefined
+      if (r.method === 'POST') return new Promise<Response>(resolve => { answer = resolve })
+      return Response.json({ state: 'none', detail: '' })
+    })
+    await openApp('/llm_bridge?view=manage')
+    const card = await screen.findByRole('article', { name: '账号：CodeBuddy' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录CodeBuddy' }))
+    const form = within(card).getByRole('form', { name: '登录CodeBuddy' })
+    await fireEvent.click(within(form).getByRole('button', { name: '获取登录网址' }))
+    // 请求还在等：说明在做什么、要多久
+    expect(await within(form).findByText('正在启动「CodeBuddy」的登录服务并申请登录网址，可能要一分钟左右，请稍候。')).toBeVisible()
+    // 工作台等管理器也超时了（503）：改查进度；一直没有网址，到时间说明原因，不当成已登录
+    answer(fail(503, 'EXTERNAL_UNAVAILABLE'))
+    const panel = await screen.findByRole('region', { name: '网页登录' })
+    expect(within(panel).getByText('正在等待登录网址…')).toBeVisible()
+    const now = Date.now()
+    vi.spyOn(Date, 'now').mockReturnValue(now + 10 * 60_000)
+    expect(await screen.findByText(/没有拿到「CodeBuddy」的登录网址/, {}, { timeout: 10000 })).toBeVisible()
+    expect(screen.queryByRole('region', { name: '网页登录' })).not.toBeInTheDocument()
+    expect(screen.queryByText('「CodeBuddy」已登录。')).not.toBeInTheDocument()
+  })
+
   it('stops polling when the page is left while a device login is pending', { timeout: 20000 }, async () => {
     let polls = 0
     setup('owner', r => {

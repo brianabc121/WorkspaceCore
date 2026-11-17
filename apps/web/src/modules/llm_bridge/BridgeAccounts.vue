@@ -15,6 +15,8 @@ const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeSt
 const emit = defineEmits<{ reload: [] }>()
 
 const POLL_MS = 3000
+// 开始网页登录没等到答复时，最多再查多久的登录进度（管理器启动登录服务最多 40 秒、申请网址最多 60 秒）
+const RECOVER_MS = 120_000
 // 网页登录：和设备码一样，拿到网址后等人在自己的浏览器里完成
 const WEB_METHODS: LoginMethod[] = ['web_cn', 'web_intl']
 // 平台连通性（T-0240）：这个管理器所在的服务器到各平台能不能用、延迟多少；管理器连得上才测
@@ -29,7 +31,9 @@ async function recheckNet() {
 const netFailed = computed(() => netError.value || (net.error.value ? bridgeError(net.error.value) : ''))
 const error = ref(''), notice = ref(''), busy = ref('')
 const login = reactive({ slot: null as Slot | null, method: 'api_key' as LoginMethod, secret: '' })
-const device = ref<{ slot: Slot; label: string; url: string; code: string } | null>(null)
+// fetching：开始登录那一次没等到答复（页面等不及、连接中断、网关超时），正在向管理器查登录网址
+const device = ref<{ slot: Slot; label: string; url: string; code: string; fetching?: boolean } | null>(null)
+let recoverUntil = 0
 const ackBusy = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null, polling = false
 
@@ -110,6 +114,9 @@ function openLogin(account: Account) {
   error.value = notice.value = ''
 }
 function closeLogin() { Object.assign(login, { slot: null, secret: '' }) }
+// 开始登录的请求没有完整的答复：页面等不及或连接中断（WRITE_UNKNOWN）、CDN / 网关超时（502、504、52x 的网页）、
+// 工作台等管理器超时（EXTERNAL_UNAVAILABLE）。管理器那边可能还在申请登录网址，结果未知
+const uncertain = (e: unknown) => e instanceof ApiError && (['WRITE_UNKNOWN', 'EXTERNAL_UNAVAILABLE'].includes(e.code) || (e.code === 'HTTP_ERROR' && (e.status === 502 || e.status === 504 || e.status >= 520)))
 
 async function act(name: string, action: () => Promise<string>) {
   if (busy.value) return
@@ -134,6 +141,14 @@ function submitLogin(account: Account) {
     try { out = await props.api.login(props.bridge.id, slot, body) } catch (e) {
       // 会话桥的设置里还没确认风险（例如别人刚关掉）：重新读状态，让确认框显示出来
       if (e instanceof ApiError && e.status === 403 && slot === 'claude' && method !== 'api_key') { emit('reload'); throw new ApiError(403, 'LB_ACK_REQUIRED', '要先确认风险') }
+      // 网页登录没等到答复：不再重新发起（会重启管理器里的登录服务，又要等同样久），改查登录进度，网址出来就显示
+      if (WEB_METHODS.includes(method) && uncertain(e)) {
+        login.secret = ''
+        device.value = { slot, label: account.label, url: '', code: '', fetching: true }
+        recoverUntil = Date.now() + RECOVER_MS
+        closeLogin(); startPolling(slot, account.label)
+        return ''
+      }
       throw e
     }
     login.secret = ''
@@ -155,9 +170,18 @@ function startPolling(slot: Slot, label: string) {
     polling = true
     try {
       const state = await props.api.loginState(props.bridge.id, slot)
-      if (!timer || state.state === 'pending') return
+      if (!timer) return
+      const fetching = !!device.value?.fetching
+      if (state.state === 'pending') {
+        // 找回的网址：开始登录那一次没等到答复，管理器随后申请到了
+        if (fetching && state.verification_url) device.value = { ...device.value!, url: state.verification_url, code: state.user_code ?? '', fetching: false }
+        return
+      }
+      // 管理器还在启动登录服务、申请网址：这期间登录进度是“没有在登录”
+      if (state.state === 'none' && fetching && Date.now() < recoverUntil) return
       stopPolling(); device.value = null
       if (state.state === 'done') { notice.value = `「${label}」已登录。`; error.value = '' }
+      else if (fetching && state.state === 'none') error.value = `没有拿到「${label}」的登录网址：管理器可能还在启动登录服务，或者已经失败。请稍后再点“获取登录网址”；一直不行时看 MCP 管理器的日志，或改用 API 密钥登录。`
       else error.value = state.detail || '登录没有完成，请重新登录。'
       emit('reload')
     } catch (e) {
@@ -217,10 +241,16 @@ function reset(account: Account) {
       </ul>
 
       <div v-if="device" class="lb-code" role="region" :aria-label="device.code ? '设备码登录' : '网页登录'">
-        <p>正在登录「{{ device.label }}」：在你自己的浏览器里打开下面的网址{{ device.code ? '，输入验证码' : '并登录' }}。完成后这里会自动更新。</p>
-        <p>网址：<a v-if="device.url.startsWith('https://')" class="asv-link lb-login-url" :href="device.url" target="_blank" rel="noopener noreferrer">{{ device.url }}</a><span v-else class="asv-code">{{ device.url || '没有给出网址' }}</span></p>
-        <p v-if="device.code">验证码：<strong>{{ device.code }}</strong></p>
-        <p role="status" class="form-help">正在等待你完成登录…</p>
+        <template v-if="device.fetching">
+          <p>正在为「{{ device.label }}」申请登录网址：管理器要先启动官方程序的登录服务，再向平台申请网址，可能要一两分钟。网址出来后显示在这里。</p>
+          <p role="status" class="form-help">正在等待登录网址…</p>
+        </template>
+        <template v-else>
+          <p>正在登录「{{ device.label }}」：在你自己的浏览器里打开下面的网址{{ device.code ? '，输入验证码' : '并登录' }}。完成后这里会自动更新。</p>
+          <p>网址：<a v-if="device.url.startsWith('https://')" class="asv-link lb-login-url" :href="device.url" target="_blank" rel="noopener noreferrer">{{ device.url }}</a><span v-else class="asv-code">{{ device.url || '没有给出网址' }}</span></p>
+          <p v-if="device.code">验证码：<strong>{{ device.code }}</strong></p>
+          <p role="status" class="form-help">正在等待你完成登录…</p>
+        </template>
         <div><button type="button" class="secondary-button" @click="cancelDevice">不等了</button></div>
       </div>
       <p v-if="askError" class="lb-warn is-red" role="alert">{{ askError }}</p>
@@ -274,6 +304,7 @@ function reset(account: Account) {
               <button type="button" class="secondary-button" :disabled="!!busy" @click="closeLogin">取消</button>
               <button type="submit" class="primary-button" :disabled="!!busy || needsAck(a.slot as Slot, login.method)">{{ busy === `${a.slot}:login` ? '正在登录…' : login.method === 'device_code' ? '获取验证码' : WEB_METHODS.includes(login.method) ? '获取登录网址' : login.method === 'existing' ? '使用已有的登录' : '登录' }}</button>
             </div>
+            <p v-if="busy === `${a.slot}:login` && WEB_METHODS.includes(login.method)" role="status" class="form-help">正在启动「{{ a.label }}」的登录服务并申请登录网址，可能要一分钟左右，请稍候。</p>
           </form>
         </article>
         <AccountQuota v-for="q in looseQuota" :key="q.platform" :platform="q.platform" :quota="q.quota" />

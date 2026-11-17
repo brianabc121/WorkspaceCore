@@ -12,6 +12,7 @@ from uuid import UUID
 from fastapi import Depends, Path, Query, Response, status
 
 from app.api.deps import csrf_protected
+from app.modules.llm_bridge.client import LOGIN_READ_TIMEOUT
 from app.modules.llm_bridge.deps import Admin, Owner, Service, router
 from app.modules.llm_bridge.schemas import (
     LlmBridgeAccountStateOut,
@@ -217,6 +218,7 @@ async def llm_bridge_login(
         f"/accounts/{slot}/login",
         body.model_dump(exclude_none=True),
         {"slot": slot, "method": body.method},
+        read_timeout=LOGIN_READ_TIMEOUT,
     )
     return LlmBridgeLoginOut(**data)
 

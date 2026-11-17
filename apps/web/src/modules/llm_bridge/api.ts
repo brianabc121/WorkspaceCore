@@ -273,8 +273,10 @@ export function useLlmBridge(scope: string) {
       const out = dataOf(await auth.slowApi.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions', { params: { ...at(id), query: { limit, offset: 0, sync: true } } }))
       await invalidate('bridge', id, 'sessions'); return out
     },
+    // 开始登录：CodeBuddy 网页登录要先在管理器里启动官方程序的登录服务，再申请登录网址，可能要一分多钟。
+    // 等 95 秒（工作台等管理器 90 秒，都在 CDN 单个请求 100 秒的上限之内）；更慢或连接中断时由页面改查登录进度
     async login(id: string, slot: Slot, body: LoginBody) {
-      return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login', { params: slotAt(id, slot), body }))
+      return dataOf(await auth.longApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login', { params: slotAt(id, slot), body }))
     },
     async loginState(id: string, slot: Slot) {
       return dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login', { params: slotAt(id, slot) }))

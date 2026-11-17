@@ -237,6 +237,37 @@ async def test_bridge_registration_and_admin(rig: Rig) -> None:
 
 
 @pytest.mark.integration
+async def test_starting_a_login_waits_longer_than_other_admin_calls(rig: Rig) -> None:
+    """开始登录等 90 秒（CodeBuddy 网页登录要先在管理器里启动官方程序的登录服务）；
+    查登录进度和其他管理操作仍按默认的 65 秒。页面那边等 95 秒，都在 CDN 的 100 秒之内。"""
+    from app.modules.llm_bridge.client import LOGIN_READ_TIMEOUT, READ_TIMEOUT
+
+    seen: list[tuple[str, str, float]] = []
+    original = rig.transport.handler
+
+    async def spy(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path, request.extensions["timeout"]["read"]))
+        response: httpx.Response = await original(request)  # type: ignore[misc]
+        return response
+
+    rig.transport.handler = spy
+    login = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/accounts/claude/login",
+        json={"method": "api_key", "api_key": "alice@example.com"},
+    )
+    assert login.status_code == 200, login.text
+    assert (
+        await rig.api("GET", f"/bridges/{rig.bridge_id}/accounts/claude/login")
+    ).status_code == 200
+    assert (await rig.api("GET", f"/bridges/{rig.bridge_id}/status")).status_code == 200
+    waits = {(method, path): read for method, path, read in seen}
+    assert waits[("POST", "/admin/accounts/claude/login")] == LOGIN_READ_TIMEOUT == 90.0
+    assert waits[("GET", "/admin/accounts/claude/login")] == READ_TIMEOUT
+    assert waits[("GET", "/admin/status")] == READ_TIMEOUT
+    assert READ_TIMEOUT < LOGIN_READ_TIMEOUT < 95.0  # 比页面等的时间短，页面总能拿到工作台的答复
+
+
 async def test_managers_control_their_own_platforms_and_accounts(rig: Rig) -> None:
     """人类的例子：1 号管理器控制 claude / workbuddy，2 号多一个 codex；各自一套账号。"""
     env = rig.env
