@@ -6,6 +6,11 @@ docs/decisions/2026-11-13-llm-bridge-verification.md 第 2 节。
 - 所有会话共用这一个进程和一个 CODEX_HOME（一个账号）；
 - 审批策略固定为 never，沙箱由环境决定；万一收到审批请求一律拒绝；
 - `chatgpt.chat` 也走这里：同一个 ChatGPT 登录，只读沙箱、空目录，当作纯聊天。
+
+设备码登录的逐步进度（T-0279，和 CodeBuddy 网页登录同一个样子）：启动 Codex 的本机程序、
+向 OpenAI 申请设备码、等人在浏览器里输入验证码并登录、确认结果。每一步的状态、起止时间、说明，
+以及这边做了什么（脱敏后的运行信息）都记在 LoginChallenge 里，“查登录进度”随时读到；
+验证码只给页面，不记进运行信息。
 """
 
 from __future__ import annotations
@@ -15,10 +20,12 @@ import contextlib
 import json
 import logging
 import os
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from bridge import __version__, quota
+from bridge.drivers import progress
 from bridge.drivers.base import (
     AccountStatus,
     ContextUsage,
@@ -37,6 +44,10 @@ from bridge.drivers.base import (
 )
 
 logger = logging.getLogger("bridge.codex")
+
+# 设备码登录的四步（顺序即显示顺序）；申请设备码最多等多久
+DEVICE_STEPS = ("start", "request_code", "wait_user", "finish")
+REQUEST_CODE_SECONDS = 60.0
 
 CHAT_INSTRUCTIONS = (
     "This session is a plain chat. Answer the user's message directly. "
@@ -111,9 +122,11 @@ class CodexDriver(Driver):
         self._active: dict[str, str] = {}
         self._login: LoginChallenge | None = None
         self._login_id: str | None = None
+        # 正在申请设备码（还没拿到 loginId）
+        self._requesting = False
         # “登录完成”的通知可能紧跟着 account/login/start 的应答到达，早于 login() 拿到应答：
-        # 那时还不知道是哪一次登录，先按 loginId 记下，login() 拿到应答后再认领
-        self._early_logins: dict[str, LoginChallenge] = {}
+        # 那时还不知道是哪一次登录，先按 loginId 记下（成功与否、原因），login() 拿到应答后再认领
+        self._early_logins: dict[str, tuple[bool, str]] = {}
 
     def supports(self, mode: Mode) -> bool:
         return mode in ("chat", "dev")
@@ -212,6 +225,12 @@ class CodexDriver(Driver):
                     future.set_exception(error)
             for queue in self._subs.values():
                 queue.put_nowait(_CLOSED)
+            login = self._login
+            if login is not None and login.state == "pending" and not self._requesting:
+                self._fail_login(
+                    "wait_user",
+                    "Codex 的本机程序（codex app-server）退出了，登录没有完成，请重新开始",
+                )
 
     async def _dispatch(self, message: dict[str, Any]) -> None:
         method = message.get("method")
@@ -241,19 +260,18 @@ class CodexDriver(Driver):
         params: dict[str, Any] = raw if isinstance(raw, dict) else {}
         if method == "account/login/completed":
             ok = bool(params.get("success"))
-            finished = LoginChallenge(
-                state="done" if ok else "failed",
-                detail="" if ok else str(params.get("error") or ""),
-            )
+            reason = "" if ok else str(params.get("error") or "")
             raw_id = params.get("loginId")
             key = raw_id if isinstance(raw_id, str) else ""
-            waiting = self._login is not None and self._login.state == "pending"
+            waiting = (
+                self._login is not None and self._login.state == "pending" and not self._requesting
+            )
             if waiting:
                 # 只认当前这一次登录的结果（没带编号的也算）；更早那次没做完的登录的结果不要
                 if key in ("", self._login_id or ""):
-                    self._login = finished
+                    self._complete_login(ok, reason)
             else:
-                self._early_logins[key] = finished
+                self._early_logins[key] = (ok, reason)
             return
         if method == "account/rateLimits/updated":
             # 账号级的通知，不属于哪个会话：记下最新的，回合结束或有人查的时候取
@@ -292,37 +310,117 @@ class CodexDriver(Driver):
             return self._login
         if method == "device_code":
             # 上一次登录的结果作废；从这里起到拿到应答之前到达的完成通知都先记下
-            self._login, self._login_id = None, None
+            self._login_id = None
             self._early_logins.clear()
-            try:
-                result = await self._call(
-                    "account/login/start", {"type": "chatgptDeviceCode"}, wait=60
-                )
-            except DriverError as error:
-                if error.kind not in ("platform_error", "timeout", "unavailable"):
-                    raise
-                # 申请设备码要访问 OpenAI：把原因和常见的两种情况写给人看
-                raise DriverError(
-                    error.kind,
-                    f"向 OpenAI 申请设备码没有成功：{error.message}。"
-                    "常见原因：这个 MCP 管理器所在的服务器访问不了 OpenAI"
-                    "（auth.openai.com、chatgpt.com）；或者这个 ChatGPT 账号（工作区）"
-                    "没有打开设备码登录。也可以改用“API 密钥”登录",
-                ) from error
-            raw_id = result.get("loginId")
-            self._login_id = raw_id if isinstance(raw_id, str) else None
-            # 完成通知已经先到了：直接是最终结果，不再让页面去等
-            early = self._early_logins.pop(self._login_id or "", None) or self._early_logins.pop(
-                "", None
-            )
-            self._early_logins.clear()
-            self._login = early or LoginChallenge(
+            self._login = LoginChallenge(
                 state="pending",
-                verification_url=result.get("verificationUrl"),
-                user_code=result.get("userCode"),
+                steps=progress.new_steps(DEVICE_STEPS),
+                log=[],
+                started_at=progress.iso(progress.now()),
             )
-            return self._login
+            self._requesting = True
+            try:
+                return await self._device_login()
+            finally:
+                self._requesting = False
         raise DriverError("not_supported", f"Codex 不支持登录方式 {method}")
+
+    async def _device_login(self) -> LoginChallenge:
+        """设备码登录的前两步（启动本机程序、申请设备码），拿到网址和验证码后开始等人去登录。"""
+        login = self._login
+        assert login is not None  # noqa: S101
+        steps, log = login.steps, login.log
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        running = self._proc is not None and self._proc.returncode is None
+        progress.mark(steps, "start", "running")
+        if not running:
+            progress.note(log, "启动 Codex 的本机程序（codex app-server）")
+        try:
+            await self._ensure()
+        except DriverError as error:
+            self._fail_login("start", error.message)
+            raise
+        if running:
+            progress.mark(steps, "start", "done", "已在运行")
+            progress.note(log, "Codex 的本机程序（codex app-server）已在运行")
+        else:
+            progress.mark(steps, "start", "done", f"已启动（用时 {loop.time() - began:.1f} 秒）")
+            progress.note(log, "Codex 的本机程序已就绪")
+        asked = loop.time()
+        progress.mark(steps, "request_code", "running")
+        progress.note(
+            log,
+            "向 OpenAI 申请设备码（account/login/start，"
+            f"最多等 {REQUEST_CODE_SECONDS:.0f} 秒；要访问 auth.openai.com）",
+        )
+        try:
+            result = await self._call(
+                "account/login/start", {"type": "chatgptDeviceCode"}, wait=REQUEST_CODE_SECONDS
+            )
+        except DriverError as error:
+            progress.note(log, f"申请设备码出错（{loop.time() - asked:.1f} 秒）：{error.message}")
+            if error.kind not in ("platform_error", "timeout", "unavailable"):
+                self._fail_login("request_code", error.message)
+                raise
+            # 申请设备码要访问 OpenAI：把原因和常见的两种情况写给人看
+            message = (
+                f"向 OpenAI 申请设备码没有成功：{error.message}。"
+                "常见原因：这个 MCP 管理器所在的服务器访问不了 OpenAI"
+                "（auth.openai.com、chatgpt.com）；或者这个 ChatGPT 账号（工作区）"
+                "没有打开设备码登录。也可以改用“API 密钥”登录"
+            )
+            self._fail_login("request_code", message)
+            raise DriverError(error.kind, message) from error
+        answer = result if isinstance(result, dict) else {}
+        raw_id = answer.get("loginId")
+        self._login_id = raw_id if isinstance(raw_id, str) else None
+        url, code = answer.get("verificationUrl"), answer.get("userCode")
+        progress.mark(steps, "request_code", "done", f"用时 {loop.time() - asked:.1f} 秒")
+        progress.note(log, f"收到设备码和登录网址：{url}" if url else "收到设备码")
+        progress.mark(
+            steps, "wait_user", "running", "Codex 会自己向 OpenAI 查登录结果，完成后自动进入下一步"
+        )
+        progress.note(log, "等你在浏览器里输入验证码并登录")
+        self._login = replace(
+            login,
+            verification_url=url if isinstance(url, str) else None,
+            user_code=code if isinstance(code, str) else None,
+        )
+        # 完成通知已经先到了：直接是最终结果，不再让页面去等
+        key = self._login_id or ""
+        early = self._early_logins.pop(key, None) or self._early_logins.pop("", None)
+        self._early_logins.clear()
+        if early is not None:
+            self._complete_login(*early)
+        return self._login
+
+    def _complete_login(self, ok: bool, reason: str) -> None:
+        """收到“登录完成”的通知：记下结果，最后两步结束。"""
+        login = self._login
+        if login is None:
+            return
+        steps, log = login.steps, login.log
+        finished = progress.iso(progress.now())
+        if ok:
+            progress.note(log, "收到 account/login/completed：登录成功")
+            progress.mark(steps, "wait_user", "done", "已在浏览器里完成登录")
+            progress.mark(steps, "finish", "done", "OpenAI 确认登录成功")
+            self._login = replace(login, state="done", detail="", finished_at=finished)
+            return
+        progress.note(log, f"收到 account/login/completed：没有成功（{reason or '没有给出原因'}）")
+        self._fail_login("wait_user", f"登录没有完成：{reason}" if reason else "登录没有完成")
+
+    def _fail_login(self, key: str, message: str) -> None:
+        """这一步失败：记下原因，后面没轮到的步骤保持“等待”（页面显示为未执行）。"""
+        login = self._login
+        if login is None:
+            return
+        progress.mark(login.steps, key, "failed", message)
+        progress.note(login.log, f"失败：{message}")
+        self._login = replace(
+            login, state="failed", detail=message, finished_at=progress.iso(progress.now())
+        )
 
     async def login_state(self) -> LoginChallenge | None:
         return self._login

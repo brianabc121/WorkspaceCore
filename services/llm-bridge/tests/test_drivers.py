@@ -91,6 +91,89 @@ async def test_codex_device_code_failure_says_why(codex: CodexDriver, tmp_path: 
     assert (await codex.login("device_code", {})).user_code == "ABCD-1234"
 
 
+async def test_codex_device_code_login_reports_each_step(
+    codex: CodexDriver, tmp_path: Path
+) -> None:
+    """ChatGPT 设备码登录的逐步进度（T-0279）：四步的状态和说明、运行信息；验证码不记进运行信息。"""
+    from bridge.drivers.codex import DEVICE_STEPS
+
+    challenge = await codex.login("device_code", {})
+    assert challenge.state == "pending" and challenge.started_at
+    assert [s["key"] for s in challenge.steps] == list(DEVICE_STEPS)
+    status = {s["key"]: s["status"] for s in challenge.steps}
+    assert status == {
+        "start": "done",
+        "request_code": "done",
+        "wait_user": "running",
+        "finish": "pending",
+    }
+    # 第一次登录时本机程序还没启动：这一步写用时
+    assert challenge.steps[0]["detail"].startswith("已启动（用时")
+    assert challenge.steps[1]["detail"].startswith("用时")
+    text = "\n".join(challenge.log)
+    assert "向 OpenAI 申请设备码" in text and "https://example.test/device" in text
+    assert "ABCD-1234" not in text  # 验证码只给页面
+
+    async def finished() -> bool:
+        state = await codex.login_state()
+        return state is not None and state.state != "pending"
+
+    await _until(finished)
+    done = await codex.login_state()
+    assert done is not None and done.state == "done" and done.finished_at
+    assert [s["status"] for s in done.steps] == ["done"] * 4
+    assert done.steps[3]["detail"] == "OpenAI 确认登录成功"
+    assert "登录成功" in done.log[-1]
+
+    # 再登录一次：本机程序已在运行
+    await codex.logout()
+    again = await codex.login("device_code", {})
+    assert again.steps[0]["detail"] == "已在运行" and again.log[0] != done.log[0]
+    await _until(finished)
+
+    # 人在浏览器里没有完成授权：等你登录那一步失败，写明原因
+    (tmp_path / "home" / "login-denied").touch()
+    await codex.logout()
+    await codex.login("device_code", {})
+    await _until(finished)
+    denied = await codex.login_state()
+    assert denied is not None and denied.state == "failed"
+    assert denied.detail == "登录没有完成：access_denied"
+    assert [s["status"] for s in denied.steps] == ["done", "done", "failed", "pending"]
+    assert "没有成功（access_denied）" in "\n".join(denied.log)
+
+
+async def test_codex_device_code_failure_keeps_the_steps(
+    codex: CodexDriver, tmp_path: Path
+) -> None:
+    """申请设备码没成功：查登录进度能看到失败在哪一步、官方程序回的原因。"""
+    _login_fails(tmp_path, True)
+    with pytest.raises(DriverError) as caught:
+        await codex.login("device_code", {})
+    state = await codex.login_state()
+    assert state is not None and state.state == "failed" and state.finished_at
+    assert state.detail == caught.value.message
+    assert [s["status"] for s in state.steps] == ["done", "failed", "pending", "pending"]
+    assert state.steps[1]["detail"].startswith("向 OpenAI 申请设备码没有成功：")
+    assert "申请设备码出错" in "\n".join(state.log)
+    assert "error sending request for url" in "\n".join(state.log)
+
+
+async def test_codex_exiting_while_waiting_fails_the_login(
+    codex: CodexDriver, tmp_path: Path
+) -> None:
+    """等人登录的时候本机程序退出了：不一直显示“等待中”，写明原因。"""
+    (tmp_path / "home").mkdir(exist_ok=True)
+    (tmp_path / "home" / "login-hold").touch()
+    challenge = await codex.login("device_code", {})
+    assert challenge.state == "pending"
+    await codex.stop()
+    state = await codex.login_state()
+    assert state is not None and state.state == "failed"
+    assert [s["status"] for s in state.steps] == ["done", "done", "failed", "pending"]
+    assert "退出了" in state.detail
+
+
 async def test_codex_account_and_models(codex: CodexDriver) -> None:
     assert not (await codex.status()).logged_in
     challenge = await codex.login("device_code", {})
@@ -127,6 +210,7 @@ async def test_codex_login_completed_before_the_reply_is_handled(
     (tmp_path / "home" / "complete-login-at-once").touch()
     challenge = await codex.login("device_code", {})
     assert challenge.state == "done"
+    assert [s["status"] for s in challenge.steps] == ["done"] * 4
     state = await codex.login_state()
     assert state is not None and state.state == "done"
     assert (await codex.status()).identity == "user@example.com"

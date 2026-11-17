@@ -7,7 +7,7 @@ import { PLATFORM_MARK } from './chat/chatApi'
 import BridgeConnectivity from './BridgeConnectivity.vue'
 import LoginProgress, { type LoginJob } from './LoginProgress.vue'
 import { ApiError } from '../../services/api'
-import { ACCOUNT_STATE, METHODS, MODES, PLATFORMS, PLATFORM_SLOT, bridgeError, methodName, platformName, seconds, type Account, type ConnectivityTarget, type Bridge, type BridgeStatus, type LlmBridgeApi, type LoginBody, type LoginMethod, type LoginState, type Platform, type Slot } from './api'
+import { ACCOUNT_STATE, DNS_SLOW_MS, METHODS, MODES, PLATFORMS, PLATFORM_SLOT, bridgeError, methodName, platformName, seconds, type Account, type ConnectivityTarget, type Bridge, type BridgeStatus, type LlmBridgeApi, type LoginBody, type LoginMethod, type LoginState, type Platform, type Slot } from './api'
 
 // 一个 MCP 管理器的平台与账号：它控制哪些平台（owner 勾选，立即保存）、这些平台的账号登录情况与操作、
 // 通道、排队与进行中的回合数。没勾选的平台不能登录，智能体也用不了；已有的登录保留着，可以退出。
@@ -15,13 +15,14 @@ import { ACCOUNT_STATE, METHODS, MODES, PLATFORMS, PLATFORM_SLOT, bridgeError, m
 const props = defineProps<{ api: LlmBridgeApi; bridge: Bridge; status?: BridgeStatus; loading: boolean; loadError: unknown; canWrite: boolean }>()
 const emit = defineEmits<{ reload: [] }>()
 
-const POLL_MS = 3000
 // 开始网页登录没等到答复时，最多再查多久的登录进度（管理器启动登录服务最多 40 秒、申请网址最多 60 秒）
 const RECOVER_MS = 120_000
 // 网页登录进行中多久查一次进度（T-0276：一边等“开始登录”的答复，一边显示管理器报告的每一步）
 const WEB_POLL_MS = 1500
 // 网页登录：和设备码一样，拿到网址后等人在自己的浏览器里完成
 const WEB_METHODS: LoginMethod[] = ['web_cn', 'web_intl']
+// 显示逐步进度的登录方式：网页登录（CodeBuddy，T-0276）和设备码登录（ChatGPT / Codex，T-0279）
+const PROGRESS_METHODS: LoginMethod[] = [...WEB_METHODS, 'device_code']
 // 平台连通性（T-0240）：这个管理器所在的服务器到各平台能不能用、延迟多少；管理器连得上才测
 const bridgeId = toRef(() => (props.status?.reachable ? props.bridge.id : null))
 const net = props.api.useConnectivity(bridgeId)
@@ -34,14 +35,12 @@ async function recheckNet() {
 const netFailed = computed(() => netError.value || (net.error.value ? bridgeError(net.error.value) : ''))
 const error = ref(''), notice = ref(''), busy = ref('')
 const login = reactive({ slot: null as Slot | null, method: 'api_key' as LoginMethod, secret: '' })
-// 设备码登录（OpenAI）：网址和验证码；网页登录（CodeBuddy）用下面的逐步进度
-const device = ref<{ slot: Slot; label: string; url: string; code: string } | null>(null)
+// 设备码登录（ChatGPT / Codex）和网页登录（CodeBuddy）：逐步进度，网址和验证码显示在进度卡片里
 const job = ref<LoginJob | null>(null)
 let recoverUntil = 0, webTimer: ReturnType<typeof setInterval> | null = null, webPolling = false, webRun = 0
 // 开始前管理器那边上一次登录的 started_at：查进度时只认这一次的，不把上一次的结果当成这一次的
 let baseline: string | null = null
 const ackBusy = ref(false)
-let timer: ReturnType<typeof setInterval> | null = null, polling = false
 
 // 控制的平台：保存失败时重画勾选框，回到服务器上的状态
 const controlled = computed(() => (props.status?.reachable ? props.status.platforms : []))
@@ -91,13 +90,14 @@ async function askQuota() {
   asking.value = true; askError.value = ''
   try { await props.api.refreshQuota(props.bridge.id) } catch (e) { askError.value = bridgeError(e) } finally { asking.value = false }
 }
-// 连通性的一句话：可用（最快的那个地址的延迟）/ 被平台拒绝 / 连不上
+// 连通性的一句话：可用（最快的那个地址的延迟）/ 被平台拒绝 / 连不上；域名解析慢时补一句（T-0278）
 function netSummary(slot: string) {
   const info = net.data.value?.slots[slot]
   if (!info) return null
   const ok = info.targets.filter((t: ConnectivityTarget) => t.ok && t.latency_ms != null).map((t: ConnectivityTarget) => t.latency_ms!)
-  if (info.ok) return { tone: 'ok', text: `可用${ok.length ? ` · ${Math.min(...ok)} ms` : ''}` }
-  return { tone: 'bad', text: info.targets.some((t: ConnectivityTarget) => t.state === 'blocked') ? '被平台拒绝' : '连不上' }
+  const dns = info.targets.some((t: ConnectivityTarget) => (t.timings?.dns_ms ?? 0) >= DNS_SLOW_MS) ? ' · 域名解析慢' : ''
+  if (info.ok) return { tone: 'ok', text: `可用${ok.length ? ` · ${Math.min(...ok)} ms` : ''}${dns}` }
+  return { tone: 'bad', text: `${info.targets.some((t: ConnectivityTarget) => t.state === 'blocked') ? '被平台拒绝' : '连不上'}${dns}` }
 }
 // 运行概览：展开看每个平台同时在跑几个会话、上限多少
 const showLoad = ref(false)
@@ -109,9 +109,8 @@ const stateOf = (account: Account) => ACCOUNT_STATE[account.state] ?? { text: ac
 const secretLabel = computed(() => (login.method === 'api_key' ? 'API 密钥' : '订阅令牌'))
 const needsSecret = computed(() => login.method === 'api_key' || login.method === 'oauth_token')
 
-function stopPolling() { if (timer) clearInterval(timer); timer = null }
 function stopWeb() { if (webTimer) clearInterval(webTimer); webTimer = null }
-onUnmounted(() => { stopPolling(); stopWeb() })
+onUnmounted(stopWeb)
 
 function openLogin(account: Account) {
   const methods = methodsOf(account)
@@ -143,7 +142,7 @@ function submitLogin(account: Account) {
   if (needsAck(slot, method)) { error.value = 'Claude 用订阅登录前，要先勾选下面的风险确认。'; return }
   if (needsSecret.value && !login.secret.trim()) { error.value = `请填写${secretLabel.value}。`; return }
   const body: LoginBody = { method, ...(method === 'api_key' ? { api_key: login.secret.trim() } : {}), ...(method === 'oauth_token' ? { oauth_token: login.secret.trim() } : {}) }
-  if (WEB_METHODS.includes(method)) return startWebLogin(account, body)
+  if (PROGRESS_METHODS.includes(method)) return startWebLogin(account, body)
   return act(`${slot}:login`, async () => {
     let out
     try { out = await props.api.login(props.bridge.id, slot, body) } catch (e) {
@@ -153,19 +152,15 @@ function submitLogin(account: Account) {
     }
     login.secret = ''
     if (out.state === 'failed') throw new ApiError(409, 'CONFLICT', out.detail || '登录没有成功，请重试。')
-    if (out.state === 'pending' && method === 'device_code') {
-      device.value = { slot, label: account.label, url: out.verification_url ?? '', code: out.user_code ?? '' }
-      closeLogin(); startPolling(slot, account.label)
-      return ''
-    }
     closeLogin(); emit('reload')
     return `「${account.label}」已登录。`
   })
 }
 
-// ---- 网页登录（CodeBuddy）的逐步进度（T-0276） ----
-// 点“获取登录网址”后一边等“开始登录”的答复（最多 95 秒，管理器要先启动登录服务再申请网址），一边每 1.5 秒查一次进度，
-// 把管理器报告的每一步、运行信息显示出来；拿到网址后接着等你在浏览器里登录完。
+// ---- 网页登录（CodeBuddy，T-0276）与设备码登录（ChatGPT / Codex，T-0279）的逐步进度 ----
+// 点“获取登录网址 / 获取验证码”后一边等“开始登录”的答复（最多 95 秒：CodeBuddy 要先启动登录服务再申请网址，
+// Codex 申请设备码最多 60 秒），一边每 1.5 秒查一次进度，把管理器报告的每一步、运行信息显示出来；
+// 拿到网址（和验证码）后接着等你在浏览器里登录完。
 // “开始登录”没有完整答复（连接中断、超时、网关超时）时不重新发起（会重启管理器里的登录服务），只查进度，最多 2 分钟。
 const nowIso = () => new Date().toISOString()
 function finishJob(status: 'succeeded' | 'failed', reason = '') {
@@ -185,7 +180,7 @@ function isCurrent(state: LoginState) {
 function applyProgress(state: LoginState) {
   const j = job.value
   if (!j || j.status !== 'running' || !isCurrent(state)) return
-  job.value = { ...j, answered: true, progress: state.steps?.length ? state : j.progress, url: state.verification_url || j.url }
+  job.value = { ...j, answered: true, progress: state.steps?.length ? state : j.progress, url: state.verification_url || j.url, code: state.user_code || j.code }
   if (state.state === 'done') finishJob('succeeded')
   else if (state.state === 'failed' && !j.requesting) finishJob('failed', state.detail || '登录没有完成，请重新登录。')
 }
@@ -199,7 +194,8 @@ async function pollWeb(run: number) {
     applyProgress(state)
     const now = job.value
     if (now?.status === 'running' && now.recovering && !now.url && Date.now() > recoverUntil) {
-      finishJob('failed', `没有拿到「${now.label}」的登录网址：管理器可能还在启动登录服务，或者已经失败。看上面每一步的情况；一直不行时看 MCP 管理器的日志，或改用 API 密钥登录。`)
+      const what = now.method === 'device_code' ? '验证码：管理器可能还在向 OpenAI 申请' : '登录网址：管理器可能还在启动登录服务'
+      finishJob('failed', `没有拿到「${now.label}」的${what}，或者已经失败。看上面每一步的情况；一直不行时看 MCP 管理器的日志，或改用 API 密钥登录。`)
     }
   } catch (e) {
     // “开始登录”还在等：查不到进度先不算失败，以它的结果为准
@@ -210,7 +206,7 @@ async function startWebLogin(account: Account, body: LoginBody) {
   const slot = account.slot as Slot, run = ++webRun
   stopWeb(); closeLogin()
   error.value = notice.value = ''
-  job.value = { slot, label: account.label, method: body.method, startedAt: nowIso(), requesting: true, answered: false, recovering: false, status: 'running', url: '', progress: null, error: '', finishedAt: null }
+  job.value = { slot, label: account.label, method: body.method, startedAt: nowIso(), requesting: true, answered: false, recovering: false, status: 'running', url: '', code: '', progress: null, error: '', finishedAt: null }
   baseline = null
   try { baseline = (await props.api.loginState(props.bridge.id, slot)).started_at ?? null } catch { /* 查不到也照样开始：“开始登录”会给出原因 */ }
   if (run !== webRun) return
@@ -219,7 +215,7 @@ async function startWebLogin(account: Account, body: LoginBody) {
     const out = await props.api.login(props.bridge.id, slot, body)
     const j = job.value
     if (run !== webRun || !j) return
-    job.value = { ...j, requesting: false, answered: true, progress: out.steps?.length ? out : j.progress, url: out.verification_url || j.url }
+    job.value = { ...j, requesting: false, answered: true, progress: out.steps?.length ? out : j.progress, url: out.verification_url || j.url, code: out.user_code || j.code }
     if (out.state === 'failed') finishJob('failed', out.detail || '登录没有成功，请重试。')
     else if (out.state === 'done') finishJob('succeeded')
   } catch (e) {
@@ -235,30 +231,17 @@ async function startWebLogin(account: Account, body: LoginBody) {
     finishJob('failed', mine?.detail || bridgeError(e))
   }
 }
-function cancelWeb() { webRun++; stopWeb(); job.value = null; notice.value = '已不再等待：MCP 管理器那边的登录服务没人登录时会在 10 分钟后自动关掉。'; emit('reload') }
+function cancelWeb() {
+  const device = job.value?.method === 'device_code'
+  webRun++; stopWeb(); job.value = null
+  notice.value = device ? '已不再等待：之后如果你在浏览器里完成了登录，点这个平台的“重新检查”就能看到。' : '已不再等待：MCP 管理器那边的登录服务没人登录时会在 10 分钟后自动关掉。'
+  emit('reload')
+}
 function retryWeb() {
   const j = job.value, account = j && accounts.value.find(a => a.slot === j.slot)
   if (j && account) void startWebLogin(account, { method: j.method })
 }
 
-function startPolling(slot: Slot, label: string) {
-  stopPolling()
-  timer = setInterval(async () => {
-    if (polling) return
-    polling = true
-    try {
-      const state = await props.api.loginState(props.bridge.id, slot)
-      if (!timer || state.state === 'pending') return
-      stopPolling(); device.value = null
-      if (state.state === 'done') { notice.value = `「${label}」已登录。`; error.value = '' }
-      else error.value = state.detail || '登录没有完成，请重新登录。'
-      emit('reload')
-    } catch (e) {
-      if (timer) { stopPolling(); device.value = null; error.value = `查不到登录进度：${bridgeError(e)}` }
-    } finally { polling = false }
-  }, POLL_MS)
-}
-function cancelDevice() { stopPolling(); device.value = null; emit('reload') }
 
 function recheck(account: Account) {
   return act(`${account.slot}:refresh`, async () => { await props.api.refreshAccount(props.bridge.id, account.slot as Slot); return `已重新检查「${account.label}」。` })
@@ -310,13 +293,6 @@ function reset(account: Account) {
       </ul>
 
       <LoginProgress v-if="job" :job="job" :bridge-name="bridge.name" @cancel="cancelWeb" @retry="retryWeb" @close="job = null" />
-      <div v-if="device" class="lb-code" role="region" aria-label="设备码登录">
-        <p>正在登录「{{ device.label }}」：在你自己的浏览器里打开下面的网址，输入验证码。完成后这里会自动更新。</p>
-        <p>网址：<a v-if="device.url.startsWith('https://')" class="asv-link lb-login-url" :href="device.url" target="_blank" rel="noopener noreferrer">{{ device.url }}</a><span v-else class="asv-code">{{ device.url || '没有给出网址' }}</span></p>
-        <p v-if="device.code">验证码：<strong>{{ device.code }}</strong></p>
-        <p role="status" class="form-help">正在等待你完成登录…</p>
-        <div><button type="button" class="secondary-button" @click="cancelDevice">不等了</button></div>
-      </div>
       <p v-if="askError" class="lb-warn is-red" role="alert">{{ askError }}</p>
 
       <div class="lb-accounts">
@@ -343,7 +319,7 @@ function reset(account: Account) {
           <p v-if="a.enabled && a.state !== 'logged_in' && a.state !== 'mismatch' && netSummary(a.slot)?.tone !== 'ok'" class="lb-hint-amber">登录前请确认这台服务器能访问这个平台（看上面的连通性）。</p>
 
           <div class="lb-inline lb-account-actions">
-            <button v-if="canWrite && a.enabled && a.state !== 'mismatch' && methodsOf(a).length && login.slot !== a.slot" type="button" class="primary-button" :disabled="!!busy || !!device || job?.status === 'running'" :aria-label="`登录${a.label}`" @click="openLogin(a)">{{ a.state === 'logged_in' ? '重新登录' : '登录账号' }}</button>
+            <button v-if="canWrite && a.enabled && a.state !== 'mismatch' && methodsOf(a).length && login.slot !== a.slot" type="button" class="primary-button" :disabled="!!busy || job?.status === 'running'" :aria-label="`登录${a.label}`" @click="openLogin(a)">{{ a.state === 'logged_in' ? '重新登录' : '登录账号' }}</button>
             <button v-if="canAsk && quotaOf(a.slot).some(q => q.quota.can_refresh)" type="button" class="secondary-button" :disabled="asking" @click="askQuota">{{ asking ? '正在查…' : '向平台查一次' }}</button>
             <button type="button" class="secondary-button" :disabled="!!busy" :aria-label="`重新检查${a.label}`" @click="recheck(a)"><RefreshCw aria-hidden="true" />{{ busy === `${a.slot}:refresh` ? '正在检查…' : '重新检查' }}</button>
             <button v-if="canWrite && a.state === 'logged_in'" type="button" class="secondary-button" :disabled="!!busy" :aria-label="`退出登录${a.label}`" @click="logout(a)">退出登录</button>

@@ -148,14 +148,15 @@ describe('大模型客户端管理', () => {
     expect(writes(requests)).toEqual([])
   })
 
-  it('shows the device code, polls the login state and refreshes the status when it is done', { timeout: 20000 }, async () => {
+  it('shows the ChatGPT device code in the login progress, polls the state and refreshes the status when it is done', { timeout: 20000 }, async () => {
+    // 旧版本的 MCP 管理器：不报告每一步、没有 started_at；“开始登录”直接给网址和验证码（T-0279 起也用逐步进度的样式）
     let polls = 0, loggedIn = false
     const requests = setup('owner', r => {
       if (path(r) === `${base}/status`) return Response.json(status({ accounts: [account({ state: loggedIn ? 'logged_in' : 'logged_out', identity: loggedIn ? 'n***@example.com' : null })] }))
       if (path(r) !== `${base}/accounts/openai/login`) return undefined
       if (r.method === 'POST') return Response.json({ state: 'pending', verification_url: 'https://auth.example.com/device', user_code: 'ABCD-1234', detail: '' })
       polls += 1
-      if (polls >= 2) loggedIn = true
+      if (polls >= 3) loggedIn = true
       return Response.json({ state: loggedIn ? 'done' : 'pending', detail: '' })
     })
     const view = await openApp('/llm_bridge?view=manage')
@@ -165,20 +166,99 @@ describe('大模型客户端管理', () => {
     await fireEvent.click(within(form).getByLabelText('设备码登录'))
     await fireEvent.click(within(form).getByRole('button', { name: '获取验证码' }))
 
-    const device = await screen.findByRole('region', { name: '设备码登录' })
-    expect(within(device).getByText('https://auth.example.com/device')).toBeVisible()
-    expect(within(device).getByText('ABCD-1234')).toBeVisible()
+    const progress = await screen.findByRole('region', { name: '登录「OpenAI（ChatGPT / Codex）」的进度' })
+    expect(progress).toHaveTextContent('MCP 管理器「主账号」 · 设备码登录')
+    const open = await within(progress).findByRole('group', { name: '打开网址并输入验证码' })
+    expect(within(open).getByRole('link', { name: 'https://auth.example.com/device' })).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(within(open).getByText('ABCD-1234')).toBeVisible()
+    const steps = within(progress).getAllByRole('listitem')
+    expect(steps.map(li => li.getAttribute('data-status'))).toEqual(['done', 'done', 'done', 'running', 'pending'])
+    expect(steps[1]).toHaveTextContent('启动 Codex 的本机程序（codex app-server）')
+    expect(steps[2]).toHaveTextContent('向 OpenAI 申请设备码')
+    expect(steps[3]).toHaveTextContent('等你在自己的浏览器里打开网址、输入验证码并登录')
+    expect(within(progress).getByText('这个 MCP 管理器的版本不报告每一步，重新部署（升级）后就能看到。')).toBeVisible()
     expect(await writes(requests)[0]!.clone().json()).toEqual({ method: 'device_code' })
 
-    expect(await screen.findByText('「OpenAI（ChatGPT / Codex）」已登录。', {}, { timeout: 10000 })).toBeVisible()
-    expect(polls).toBe(2)
-    expect(screen.queryByRole('region', { name: '设备码登录' })).not.toBeInTheDocument()
+    expect(await screen.findByText('「OpenAI（ChatGPT / Codex）」已登录。', { selector: '[role="status"]:not(strong)' }, { timeout: 10000 })).toBeVisible()
+    expect(progress).toHaveAttribute('data-status', 'succeeded')
+    expect(within(progress).queryByRole('group', { name: '打开网址并输入验证码' })).not.toBeInTheDocument()
     expect(await screen.findByText('n***@example.com')).toBeVisible()
 
     // 登录完成后不再轮询；离开页面时也不会留下定时器
+    const done = polls
     view.unmount()
     await new Promise(resolve => setTimeout(resolve, 3200))
-    expect(polls).toBe(2)
+    expect(polls).toBe(done)
+  })
+
+  it('shows each step of the ChatGPT device login the MCP manager reports, with its output, then the code and the result', { timeout: 30000 }, async () => {
+    const step = (key: string, status: string, detail = '') => ({ key, status, detail, started_at: null, finished_at: null })
+    let progress: Record<string, unknown> = { state: 'done', started_at: '2026-11-17T02:00:00+00:00', detail: '', steps: [step('start', 'done')], log: [] }
+    let answer: (r: Response) => void = () => {}
+    const requests = setup('owner', r => {
+      if (path(r) !== `${base}/accounts/openai/login`) return undefined
+      if (r.method === 'POST') return new Promise<Response>(resolve => { answer = resolve })
+      return Response.json(progress)
+    })
+    await openApp('/llm_bridge?view=manage')
+    const card = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' }))
+    const form = within(card).getByRole('form', { name: '登录OpenAI（ChatGPT / Codex）' })
+    await fireEvent.click(within(form).getByLabelText('设备码登录'))
+    await fireEvent.click(within(form).getByRole('button', { name: '获取验证码' }))
+
+    const panel = await screen.findByRole('region', { name: '登录「OpenAI（ChatGPT / Codex）」的进度' })
+    expect(panel).toHaveAttribute('data-status', 'running')
+    // 管理器接手、正在向 OpenAI 申请设备码：这一步进行中，下面是这边做了什么
+    progress = { state: 'pending', started_at: '2026-11-17T03:00:00.120+00:00', detail: '', verification_url: null, user_code: null, steps: [step('start', 'done', '已在运行'), step('request_code', 'running'), step('wait_user', 'pending'), step('finish', 'pending')], log: ['03:00:00 Codex 的本机程序（codex app-server）已在运行', '03:00:00 向 OpenAI 申请设备码（account/login/start，最多等 60 秒；要访问 auth.openai.com）'] }
+    await waitFor(() => expect(within(panel).getAllByRole('listitem').map(li => li.getAttribute('data-status'))).toEqual(['done', 'done', 'running', 'pending', 'pending']), { timeout: 5000 })
+    expect(within(panel).getByText('已在运行')).toBeVisible()
+    expect(within(panel).getByLabelText('最新输出')).toHaveTextContent('向 OpenAI 申请设备码（account/login/start')
+    expect(panel).toHaveTextContent('正在执行第 3 / 5 步')
+    expect(panel).toHaveTextContent('验证码只显示在上面，不记在这里')
+
+    // 拿到设备码：等你去输入
+    const got = { state: 'pending', started_at: '2026-11-17T03:00:00.120+00:00', detail: '', verification_url: 'https://auth.openai.com/codex/device', user_code: 'WXYZ-9876', steps: [step('start', 'done', '已在运行'), step('request_code', 'done', '用时 4.3 秒'), step('wait_user', 'running', 'Codex 会自己向 OpenAI 查登录结果，完成后自动进入下一步'), step('finish', 'pending')], log: [] }
+    answer(Response.json(got))
+    progress = got
+    const open = await within(panel).findByRole('group', { name: '打开网址并输入验证码' })
+    expect(within(open).getByRole('link', { name: 'https://auth.openai.com/codex/device' })).toBeVisible()
+    expect(within(open).getByText('WXYZ-9876')).toBeVisible()
+    expect(within(panel).getByText('用时 4.3 秒')).toBeVisible()
+    // 在浏览器里登录完
+    progress = { ...got, state: 'done', finished_at: '2026-11-17T03:01:00+00:00', steps: [step('start', 'done'), step('request_code', 'done'), step('wait_user', 'done', '已在浏览器里完成登录'), step('finish', 'done', 'OpenAI 确认登录成功')] }
+    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'succeeded'), { timeout: 5000 })
+    // 成功后每一步收起来，说明照样在
+    expect(panel).toHaveTextContent('OpenAI 确认登录成功')
+    expect(within(panel).getByText('「OpenAI（ChatGPT / Codex）」已登录。')).toBeVisible()
+    expect(writes(requests).filter(r => path(r).endsWith('/accounts/openai/login'))).toHaveLength(1)
+  })
+
+  it('puts the reason under the failed device-code step and offers a new code', { timeout: 30000 }, async () => {
+    const step = (key: string, status: string, detail = '') => ({ key, status, detail, started_at: null, finished_at: null })
+    const reason = '向 OpenAI 申请设备码没有成功：error sending request for url。常见原因：这个 MCP 管理器所在的服务器访问不了 OpenAI'
+    let started = false
+    const requests = setup('owner', r => {
+      if (path(r) !== `${base}/accounts/openai/login`) return undefined
+      if (r.method === 'POST') { started = true; return Response.json({ error: { code: 'UNAVAILABLE', message: reason, request_id: 'r', details: {} } }, { status: 503 }) }
+      return Response.json(!started ? { state: 'none', detail: '' } : { state: 'failed', started_at: '2026-11-17T03:00:00+00:00', finished_at: '2026-11-17T03:00:09+00:00', detail: reason, steps: [step('start', 'done', '已在运行'), step('request_code', 'failed', reason), step('wait_user', 'pending'), step('finish', 'pending')], log: ['03:00:09 申请设备码出错（8.7 秒）：error sending request for url', `03:00:09 失败：${reason}`] })
+    })
+    await openApp('/llm_bridge?view=manage')
+    const card = await screen.findByRole('article', { name: '账号：OpenAI（ChatGPT / Codex）' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' }))
+    const form = within(card).getByRole('form', { name: '登录OpenAI（ChatGPT / Codex）' })
+    await fireEvent.click(within(form).getByLabelText('设备码登录'))
+    await fireEvent.click(within(form).getByRole('button', { name: '获取验证码' }))
+
+    const panel = await screen.findByRole('region', { name: '登录「OpenAI（ChatGPT / Codex）」的进度' })
+    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'failed'))
+    const items = within(panel).getAllByRole('listitem')
+    expect(items.map(li => li.getAttribute('data-status'))).toEqual(['done', 'done', 'failed', 'pending', 'pending'])
+    expect(within(items[2]!).getByRole('alert')).toHaveTextContent(`失败原因${reason}`)
+    await fireEvent.click(within(items[2]!).getByRole('button', { name: '查看命令输出' }))
+    expect(panel.querySelector('details')!.textContent).toContain('申请设备码出错（8.7 秒）')
+    await fireEvent.click(within(panel).getByRole('button', { name: '重新获取验证码' }))
+    await waitFor(() => expect(writes(requests).filter(r => path(r).endsWith('/accounts/openai/login'))).toHaveLength(2))
   })
 
   it('logs CodeBuddy in through a web page: a link to open, no code, no container login', { timeout: 20000 }, async () => {
@@ -384,11 +464,12 @@ describe('大模型客户端管理', () => {
     await fireEvent.click(within(card).getByRole('button', { name: '登录OpenAI（ChatGPT / Codex）' }))
     await fireEvent.click(within(card).getByLabelText('设备码登录'))
     await fireEvent.click(within(card).getByRole('button', { name: '获取验证码' }))
-    await screen.findByRole('region', { name: '设备码登录' })
-    await waitFor(() => expect(polls).toBe(1), { timeout: 5000 })
+    await screen.findByRole('region', { name: '登录「OpenAI（ChatGPT / Codex）」的进度' })
+    await waitFor(() => expect(polls).toBeGreaterThanOrEqual(2), { timeout: 5000 })
+    const seen = polls
     view.unmount()
     await new Promise(resolve => setTimeout(resolve, 3200))
-    expect(polls).toBe(1)
+    expect(polls).toBe(seen)
   })
 
   it('blocks Claude subscription logins until the risk is acknowledged, then sends the token once and clears it', async () => {
@@ -904,12 +985,65 @@ describe('大模型客户端管理', () => {
     expect(within(claude).getByText('1800 ms')).toBeVisible()
     expect(within(claude).getByText('延迟比较高：能用，但登录和回答会慢一些。')).toBeVisible()
     expect(within(claude).queryByRole('alert')).not.toBeInTheDocument()
+    // 旧版本的管理器没有分步用时：说明这个数是总耗时，不是网络延迟（T-0278）
+    expect(within(claude).getByText(/这个 MCP 管理器是旧版本：毫秒数是完整访问一次的总耗时/)).toBeVisible()
+    expect(within(claude).queryByLabelText(/^每一步的用时/)).not.toBeInTheDocument()
 
     await fireEvent.click(screen.getByRole('button', { name: '重新检测连通性' }))
     await waitFor(() => expect(within(openai).queryByRole('alert')).not.toBeInTheDocument())
     expect(within(openai).getAllByText('40 ms')).toHaveLength(3)
     expect(requests.some(r => path(r) === `${base}/connectivity` && new URL(r.url).searchParams.get('refresh') === 'true')).toBe(true)
     expect(writes(requests)).toEqual([])
+  })
+
+  it('shows the connect time as latency, times each step and points at slow name resolution', async () => {
+    type Target = Schema['LlmBridgeConnectivityTargetOut']
+    const timings = (dns_ms: number | null, connect_ms: number | null, tls_ms: number | null, response_ms: number | null) => ({ dns_ms, connect_ms, tls_ms, response_ms })
+    const ok = (host: string, label: string, t: Target['timings'], extra: Partial<Target> = {}): Target => ({ host, label, ok: true, state: 'ok', latency_ms: t!.connect_ms ?? null, http_status: 401, error: null, timings: t, stage: null, address: '162.159.140.245', via_proxy: false, ...extra })
+    const data: Schema['LlmBridgeConnectivityOut'] = { supported: true, slots: {
+      openai: { ok: false, need: 'all', checked_at: 1794528000, targets: [
+        ok('chatgpt.com', 'ChatGPT（订阅登录、对话）', timings(4012, 2, 9, 380)),
+        ok('auth.openai.com', 'OpenAI 登录（设备码）', timings(4102, 2, 11, 3500)),
+        { host: 'api.openai.com', label: 'OpenAI API（API 密钥）', ok: false, state: 'unreachable', latency_ms: null, http_status: null, error: '域名解析超时：没有解析出平台的地址（共等了 12 秒）', timings: timings(null, null, null, null), stage: 'dns', address: null, via_proxy: false },
+      ] },
+      claude: { ok: true, need: 'all', checked_at: 1794528000, targets: [
+        ok('api.anthropic.com', 'Anthropic API', timings(null, 120, 30, 200), { address: null, via_proxy: true }),
+        ok('claude.ai', 'Claude（订阅登录）', timings(null, 110, 28, 150), { address: null, via_proxy: true }),
+      ] },
+    } }
+    setup('owner', r => (path(r) === `${base}/connectivity` ? Response.json(data) : undefined))
+    await openApp('/llm_bridge?view=manage')
+    const openai = await screen.findByRole('group', { name: '平台连通性：OpenAI（ChatGPT / Codex）' })
+    const rows = await within(openai).findAllByRole('listitem')
+    // 延迟是建立连接的时间（和 ping 可比），每一步分开列出，慢的那一步标出来
+    expect(within(rows[0]!).getByText('2 ms')).toBeVisible()
+    const steps = within(openai).getByLabelText('每一步的用时：chatgpt.com')
+    expect(steps).toHaveTextContent('解析 4012 ms')
+    expect(steps).toHaveTextContent('连接 2 ms')
+    expect(steps).toHaveTextContent('加密握手 9 ms')
+    expect(steps).toHaveTextContent('平台应答 380 ms')
+    expect(steps).toHaveTextContent('IP 162.159.140.245')
+    expect(within(steps).getByText('解析 4012 ms')).toHaveClass('is-slow')
+    expect(within(steps).getByText('连接 2 ms')).not.toHaveClass('is-slow')
+    // 卡在哪一步写清楚
+    expect(within(openai).getByLabelText('每一步的用时：api.openai.com')).toHaveTextContent('解析没有完成')
+    expect(rows[2]).toHaveTextContent('域名解析超时：没有解析出平台的地址（共等了 12 秒）')
+    // 用不了的原因是解析慢，不让人去换服务器
+    const alert = within(openai).getByRole('alert')
+    expect(alert).toHaveTextContent('卡在域名解析上（见下面），不一定是这台服务器访问不了平台。')
+    expect(alert).not.toHaveTextContent('部署到能访问这个平台的服务器上')
+    expect(within(openai).getByText(/域名解析慢（最慢 4\.1 秒）：MCP 管理器的容器每查一次域名都要等好几秒/)).toHaveTextContent('建立连接最多只用了 2 ms，网络本身不慢。')
+    expect(within(openai).getByText('平台应答慢（最慢 3.5 秒）：网络本身没问题，是平台那边回得慢。')).toBeVisible()
+    expect(within(openai).getByText(/延迟是建立连接用的时间（一次网络往返），可以和服务器上 ping 的结果对照。/)).toBeVisible()
+    expect(within(openai).queryByText(/这个 MCP 管理器是旧版本/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('连不上 · 域名解析慢').length).toBeGreaterThan(0)
+    // 经 HTTPS 代理：域名由代理解析，没有解析这一步
+    const claude = screen.getByRole('group', { name: '平台连通性：Claude' })
+    const viaProxy = within(claude).getByLabelText('每一步的用时：api.anthropic.com')
+    expect(viaProxy).toHaveTextContent('经 HTTPS 代理（域名由代理解析）')
+    expect(viaProxy).not.toHaveTextContent('解析 ')
+    expect(within(claude).queryByText(/域名解析慢/)).not.toBeInTheDocument()
+    expect(screen.getAllByText('可用 · 110 ms').length).toBeGreaterThan(0)
   })
 
   it('lists sessions, syncs on request and shows the turns of a session', async () => {

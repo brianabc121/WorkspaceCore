@@ -17,6 +17,8 @@ export type BridgeSettings = Schema['LlmBridgeSettings']
 export type Quota = Schema['LlmBridgeQuotaOut']
 export type Connectivity = Schema['LlmBridgeConnectivityOut']
 export type ConnectivityTarget = Schema['LlmBridgeConnectivityTargetOut']
+// 域名解析超过这么多毫秒就算慢（T-0278）：正常是几十毫秒，等某个 DNS 服务器超时会到好几秒
+export const DNS_SLOW_MS = 1000
 export type QuotaWindow = Schema['LlmBridgeQuotaWindowOut']
 export type SettingsPatch = Schema['LlmBridgeSettingsPatch']
 export type LoginBody = Schema['LlmBridgeLoginIn']

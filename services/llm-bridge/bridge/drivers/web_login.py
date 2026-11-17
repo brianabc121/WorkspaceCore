@@ -28,38 +28,24 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import re
 import secrets
 import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from typing import Any
 
+from bridge.drivers import progress
 from bridge.drivers.base import DriverError, LoginChallenge
+from bridge.drivers.progress import iso as _iso
+from bridge.drivers.progress import now as _now
 
 START_SECONDS = 40.0  # 本机服务启动最多等多久
 REQUEST_SECONDS = 60.0  # 申请登录网址最多等多久
 LOGIN_SECONDS = 600.0  # 人去网页上登录最多等多久
 POLL_SECONDS = 2.0
-# 逐步进度的四步（顺序即显示顺序）；运行信息最多留多少行、每行多长
+# 逐步进度的四步（顺序即显示顺序）；记步骤和脱敏见 bridge/drivers/progress.py
 STEPS = ("start", "request_url", "wait_user", "finish")
-LOG_LINES = 120
-LINE_CHARS = 300
-# 脱敏：“口令 / 令牌 / 密钥”后面跟着的值，以及 32 个字符以上像密钥的一串
-_LABELLED = re.compile(
-    r"(?i)\b(password|passwd|token|secret|api[_-]?key|authorization|bearer|cookie)\b(\s*[:=]?\s*)(\S+)"
-)
-_LONG = re.compile(r"[A-Za-z0-9_\-+=]{32,}")
-
-
-def _now() -> datetime:
-    return datetime.now(UTC)
-
-
-def _iso(at: datetime) -> str:
-    return at.isoformat(timespec="seconds")
 
 
 @dataclass
@@ -112,31 +98,11 @@ class WebLogin:
         self._secrets: list[str] = []
 
     # ---- 逐步进度与运行信息 ----
-    def _clean(self, text: str) -> str:
-        for secret in self._secrets:
-            text = text.replace(secret, "***")
-        text = _LABELLED.sub(lambda m: f"{m[1]}{m[2]}***", text)
-        text = _LONG.sub("***", text)
-        return " ".join(text.split())[:LINE_CHARS]
-
     def _note(self, text: str) -> None:
-        line = self._clean(text)
-        if line:
-            self._log.append(f"{_now():%H:%M:%S} {line}")
-            del self._log[:-LOG_LINES]
+        progress.note(self._log, text, self._secrets)
 
     def _mark(self, key: str, status: str, detail: str | None = None) -> None:
-        for step in self._steps:
-            if step["key"] != key:
-                continue
-            step["status"] = status
-            if status == "running" and not step["started_at"]:
-                step["started_at"] = _iso(_now())
-            if status in ("done", "failed", "skipped"):
-                step["started_at"] = step["started_at"] or _iso(_now())
-                step["finished_at"] = _iso(_now())
-            if detail is not None:
-                step["detail"] = self._clean(detail)
+        progress.mark(self._steps, key, status, detail, self._secrets)
 
     def _fail(self, key: str, message: str) -> None:
         """这一步失败：记下原因，后面没轮到的步骤保持“等待”（页面显示为未执行）。"""
@@ -223,10 +189,7 @@ class WebLogin:
         """开始一次登录：返回要人打开的网址。done(账号名) 在登录成功时调用一次。"""
         await self.stop()
         self.account = None
-        self._steps = [
-            {"key": key, "status": "pending", "detail": "", "started_at": None, "finished_at": None}
-            for key in STEPS
-        ]
+        self._steps = progress.new_steps(STEPS)
         self._log = []
         self.challenge = LoginChallenge(
             state="pending", steps=self._steps, log=self._log, started_at=_iso(_now())

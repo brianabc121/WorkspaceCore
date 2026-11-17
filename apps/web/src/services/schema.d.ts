@@ -11798,6 +11798,11 @@ export interface components {
         /** LlmBridgeConnectivityTargetOut */
         LlmBridgeConnectivityTargetOut: {
             /**
+             * Address
+             * @description 连上的是平台的哪个 IP；经代理时为空
+             */
+            address?: string | null;
+            /**
              * Error
              * @description 不可用时的说明
              */
@@ -11819,7 +11824,7 @@ export interface components {
             label: string;
             /**
              * Latency Ms
-             * @description 从发起到收到应答的毫秒数；连不上时为空
+             * @description 延迟：建立连接用的毫秒数（一次网络往返，和 ping 可比）；连不上时为空。旧版本的管理器（没有 timings）给的是一次完整访问的总耗时
              */
             latency_ms: number | null;
             /**
@@ -11828,10 +11833,48 @@ export interface components {
              */
             ok: boolean;
             /**
+             * Stage
+             * @description 连不上时卡在哪一步：dns 域名解析 / connect 建立连接 / tls 加密握手 / response 等平台应答
+             */
+            stage?: string | null;
+            /**
              * State
              * @description ok 可用；blocked 连得上但被平台拒绝（这台服务器的 IP 或地区不被允许）；unreachable 连不上
              */
             state: string;
+            /** @description 每一步的用时；旧版本的管理器没有 */
+            timings?: components["schemas"]["LlmBridgeConnectivityTimingsOut"] | null;
+            /**
+             * Via Proxy
+             * @description 是否经容器设置的 HTTPS 代理访问
+             */
+            via_proxy?: boolean | null;
+        };
+        /**
+         * LlmBridgeConnectivityTimingsOut
+         * @description 一次访问每一步用的毫秒数（T-0278）；没做到的那一步为空。
+         */
+        LlmBridgeConnectivityTimingsOut: {
+            /**
+             * Connect Ms
+             * @description 建立连接（TCP 握手，一次网络往返，和 ping 可比）；经代理时含代理连上平台
+             */
+            connect_ms?: number | null;
+            /**
+             * Dns Ms
+             * @description 域名解析；经 HTTPS 代理时由代理解析，为空
+             */
+            dns_ms?: number | null;
+            /**
+             * Response Ms
+             * @description 平台应答：发出请求到收到应答头（含平台自己处理的时间）
+             */
+            response_ms?: number | null;
+            /**
+             * Tls Ms
+             * @description 加密握手（TLS）
+             */
+            tls_ms?: number | null;
         };
         /** LlmBridgeDeployIn */
         LlmBridgeDeployIn: {

@@ -1138,6 +1138,7 @@ async def test_connectivity_reports_each_platform_with_latency(bridge: Bridge) -
     # 真的去连一个本机没人听的端口：报连不上，不抛异常
     real = await connectivity.probe(connectivity.Target("localhost", "本机"))
     assert real["state"] == "unreachable" and real["latency_ms"] is None and real["error"]
+    assert real["stage"] in ("dns", "connect") and real["timings"]["response_ms"] is None
 
 
 def test_connectivity_tells_a_block_page_from_a_normal_answer() -> None:

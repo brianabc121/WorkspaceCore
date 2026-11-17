@@ -192,11 +192,17 @@ def main():
                     "email": "user@example.com",
                     "planType": "plus",
                 }
+                if (HOME / "login-denied").exists():
+                    # 人在浏览器里拒绝了授权：登录没有完成
+                    done["params"] = {"loginId": "l1", "success": False, "error": "access_denied"}
+                    state["account"] = None
                 if (HOME / "complete-login-at-once").exists():
                     # 应答和“登录完成”在同一次写入里到达：调用方还没拿到应答，通知就已经到了
                     save(state)
                     sys.stdout.write(json.dumps(reply) + "\n" + json.dumps(done) + "\n")
                     sys.stdout.flush()
+                elif (HOME / "login-hold").exists():
+                    out(reply)  # 人一直没去登录：不发“登录完成”
                 else:
                     out(reply)
                     time.sleep(0.1)  # 用户去浏览器里输入验证码
