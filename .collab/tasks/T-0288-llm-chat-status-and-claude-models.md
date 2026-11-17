@@ -2,7 +2,7 @@
 id: T-0288
 title: 大模型客户端“对话”页：会话列表的状态标签与详情状态改正；Claude 可选具体模型和推理强度
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: wip/llm-client
 paths: apps/web/src/modules/llm_bridge/chat,apps/web/src/modules/llm_bridge/llm_bridge.css,apps/web/tests/llm_chat.test.ts,services/llm-bridge/bridge/drivers/cli_stream.py,services/llm-bridge/bridge/drivers/fake.py,services/llm-bridge/bridge/engine.py,services/llm-bridge/tests,tests/e2e/llm_chat_browser.cjs,docs/v2/LLM_CHAT_PLAN.md,docs/decisions/2026-11-13-llm-bridge-verification.md
@@ -37,3 +37,5 @@ updated: 2026-11-17
 - 2026-11-17 18:01 UTC · claude · 创建任务（owner: unassigned；编号 T-0288 由集成会话在 #235 预留）
 - 2026-11-17 18:01 UTC · human · owner unassigned → claude：人类在对话中指派：大模型客户端六项改动（会话状态标签、Claude 模型与推理强度）
 - 2026-11-17 18:01 UTC · claude · 开始任务
+- 2026-11-17 18:02 UTC · claude · 做完：会话列表的状态标签（进行中 / 已完成 / 已归档），会话详情的状态改正，“回到进行中的会话”改为“回到未归档的会话”；Claude 模型取自锁定版本 2.1.323 的模型菜单（四个最新别名 + 具体版本，各带推理强度），驱动按 --effort 传，管理器校验强度；推理强度写中文名，同问里同一模型不同强度可以各开一栏。管理器 ruff、mypy、pytest 107 passed / 4 skipped（含 test_live 的 --help 核对，用下载的 2.1.323 二进制本地跑过）；前端 lint、typecheck、vitest 84 个文件 924 个测试、build、check:api 通过。T-0224 的 paths 宽，collab check 报交叠；它的分支 claude/cool-wright-99qbbg 不改这些文件。
+- 2026-11-17 18:02 UTC · claude · status in_progress → done：对话页状态标签与 Claude 模型、推理强度完成，验收标准全部勾选
