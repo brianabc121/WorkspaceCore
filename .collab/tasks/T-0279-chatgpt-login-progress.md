@@ -44,10 +44,11 @@ updated: 2026-11-17
 - Codex 设备码登录的接口（`account/login/start` 的 `chatgptDeviceCode`、`account/login/completed` 通知）在 codex-cli 0.169.0 上只核验过 schema（`docs/decisions/2026-11-13-llm-bridge-verification.md` 第 2 节）。人类 2026-11-17 已在菲律宾服务器上用它登录成功。这次只是在现有调用前后记步骤，没有改调用方式。
 - 交叠：T-0234（claude，进行中）不碰部署代码；T-0224（codex，handoff）不改这些文件。
 - 编号由集成会话在 #235 预留（https://github.com/brianabc121/WorkspaceCore/issues/235#issuecomment-6940849851）。
-- PR #245（T-0278）验证期间它的 head 保持不动：这次的提交接在同一分支的后面，#245 合并后再推送、另开 PR。
+- 和 T-0278 放在同一个 PR #245：原计划等 #245 合并后另开 PR，但会话结束前必须推送（否则提交只在容器里），所以并进 #245 一起验证，做法和 #243（T-0275 + T-0276）一样。
 
 ## 进度日志
 <!-- 只追加不改写；scripts/collab.py 会自动写入。格式：- 时间 · 身份 · 内容 -->
 - 2026-11-17 06:42 UTC · claude · 创建任务（编号在 #235 预留，owner claude；人类在对话中直接派活）
 - 2026-11-17 07:03 UTC · claude · 管理器、页面与测试完成；等 PR #245 合并后推送并开 PR
 - 2026-11-17 07:03 UTC · claude · status in_progress → done：实现与测试完成，随 PR 合并；已部署的管理器要重新部署（升级）后才有每一步
+- 2026-11-17 07:04 UTC · claude · 并进 PR #245 和 T-0278 一起验证（会话结束前必须推送）；#235 已更新固定 head
