@@ -2,7 +2,7 @@
 id: T-0281
 title: 大模型客户端“对话”页按效果图重排：管理器、会话、对话三栏，会话详情浮层
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/amazing-faraday-6ey29e
 paths: apps/web/src/modules/llm_bridge/chat,apps/web/src/services/schema.d.ts,apps/web/tests/llm_chat.test.ts,services/llm-bridge/bridge/app.py,services/llm-bridge/bridge/engine.py,services/llm-bridge/bridge/store.py,services/llm-bridge/tests/test_bridge.py,services/llm-bridge/tests/test_content.py,services/api/app/modules/llm_bridge/api.py,services/api/app/modules/llm_bridge/chat.py,services/api/app/modules/llm_bridge/chat_schemas.py,services/api/app/modules/llm_bridge/schemas.py,services/api/app/modules/llm_bridge/service.py,services/api/openapi.json,services/api/tests/test_module_llm_bridge.py,tests/e2e/llm_chat_browser.cjs,docs/v2/LLM_CHAT_PLAN.md
@@ -25,15 +25,15 @@ updated: 2026-11-17
    - 依次是：会话卡片、开发环境、上下文（比例、用量、压缩上下文 / 带摘要新建）、账号额度（每个窗口的已用比例与重置时间、管理器近 5 小时用量）、会话纪要（开关、立即整理）、基本信息、更多信息。
 
 ## 验收标准
-- [ ] 1440px 起三栏：左栏是 MCP 管理器卡片（名字、进行中的会话数、已连接 / 未连接 / 已停用），能搜索；“+”只给 owner；“管理器设置”带上选中的管理器
-- [ ] 901 ~ 1439px 两栏，管理器在会话列表顶上用下拉选；900px 以下列表和对话分屏（和原来一样）
-- [ ] 会话列表：标题旁写数量，“新建”在右上；多模型同问、同步官方会话、看已归档的会话在“更多”菜单里；平台筛选改成下拉（没登录的标出来）；正在看已归档时有提示
-- [ ] 每个会话第二行是最近一次提问（MCP 管理器 `/admin/sessions` 新增 `preview`：脱敏、压成一行、最多 120 字，不算压缩 / 交接这类内部回合，清掉内容的会话没有）；旧版本的管理器没有时写平台 · 用法 · 谁建的
-- [ ] 管理器的会话数来自工作台的会话索引（`LlmBridgeOut.session_count`，只数没归档的；还没同步过为空、不写），不另外连管理器
-- [ ] 平台用图标区分（Claude 星芒、CodeBuddy 机器人、ChatGPT / Codex 对话六边形、开发会话代码符号；不是商标），列表、头像、会话详情、同问各栏共用
-- [ ] 对话头部只留“平台 · 用法”标签（能换模型的会话再加模型下拉）；回答下面的复制 / 存进知识库 / 重新生成改成图标按钮（读屏名字不变）；输入框附件、知识库、发送是图标按钮，提示文字放在悬停提示里
-- [ ] 会话详情按效果图排；默认收起，开关状态记在浏览器里；对话这一栏不够宽时浮在右边，1000px 以上排在旁边
-- [ ] 后端：管理器 ruff / mypy / pytest；工作台 ruff / mypy / llm_bridge 相关测试 / `export_openapi --check`；前端 lint / typecheck / vitest / build / check:api 全部通过；`llm_chat_browser.cjs` 跟着新结构更新；1680 / 1440 / 1180 / 390 宽度没有横向滚动
+- [x] 1440px 起三栏：左栏是 MCP 管理器卡片（名字、进行中的会话数、已连接 / 未连接 / 已停用），能搜索；“+”只给 owner；“管理器设置”带上选中的管理器
+- [x] 901 ~ 1439px 两栏，管理器在会话列表顶上用下拉选；900px 以下列表和对话分屏（和原来一样）
+- [x] 会话列表：标题旁写数量，“新建”在右上；多模型同问、同步官方会话、看已归档的会话在“更多”菜单里；平台筛选改成下拉（没登录的标出来）；正在看已归档时有提示
+- [x] 每个会话第二行是最近一次提问（MCP 管理器 `/admin/sessions` 新增 `preview`：脱敏、压成一行、最多 120 字，不算压缩 / 交接这类内部回合，清掉内容的会话没有）；旧版本的管理器没有时写平台 · 用法 · 谁建的
+- [x] 管理器的会话数来自工作台的会话索引（`LlmBridgeOut.session_count`，只数没归档的；还没同步过为空、不写），不另外连管理器
+- [x] 平台用图标区分（Claude 星芒、CodeBuddy 机器人、ChatGPT / Codex 对话六边形、开发会话代码符号；不是商标），列表、头像、会话详情、同问各栏共用
+- [x] 对话头部只留“平台 · 用法”标签（能换模型的会话再加模型下拉）；回答下面的复制 / 存进知识库 / 重新生成改成图标按钮（读屏名字不变）；输入框附件、知识库、发送是图标按钮，提示文字放在悬停提示里
+- [x] 会话详情按效果图排；默认收起，开关状态记在浏览器里；对话这一栏不够宽时浮在右边，1000px 以上排在旁边
+- [x] 后端：管理器 ruff / mypy / pytest；工作台 ruff / mypy / llm_bridge 相关测试 / `export_openapi --check`；前端 lint / typecheck / vitest / build / check:api 全部通过；`llm_chat_browser.cjs` 跟着新结构更新；1680 / 1440 / 1180 / 390 宽度没有横向滚动
 
 ## 背景 / 约束 / 参考
 - 编号由登记的集成会话在 #235 预留：https://github.com/brianabc121/WorkspaceCore/issues/235#issuecomment-6942505735
@@ -49,3 +49,5 @@ updated: 2026-11-17
 - 2026-11-17 08:38 UTC · claude · 创建任务（owner: unassigned；编号 T-0281 由集成会话在 #235 预留）
 - 2026-11-17 08:38 UTC · human · owner unassigned → claude：人类在对话中指派：按两张效果图重新优化大模型客户端页面的“对话”子页面
 - 2026-11-17 08:38 UTC · claude · 开始任务
+- 2026-11-17 09:09 UTC · claude · 做完：三栏（MCP 管理器卡片 / 会话列表 / 对话）、会话详情按效果图（默认收起，对话栏 1000px 以上排在旁边）；MCP 管理器 /admin/sessions 新增 preview（脱敏、压成一行、最多 120 字、不算内部回合），工作台 LlmChatSessionOut.preview、LlmBridgeOut.session_count（会话索引，没同步过为空）；平台图标组件；测试与 llm_chat_browser.cjs、LLM_CHAT_PLAN 跟着更新。在 main 64bf9ed（含 #244、#245）上：前端 lint、typecheck、vitest 84 个文件 922 个测试、build、check:api 通过；管理器 ruff、mypy、pytest 100 passed / 3 skipped；工作台 ruff、mypy、export_openapi --check、llm_bridge 四个测试文件 45 passed。Vite + Playwright（模拟接口）截图核对 1680 / 1440 / 1180 / 390 与暗色，没有横向滚动。没做点赞 / 点踩（没有反馈接口）。真实浏览器验收以 CI 为准。
+- 2026-11-17 09:09 UTC · claude · status in_progress → done：对话页按效果图重排，验收标准全部勾选（ci-llm-bridge 的浏览器验收合并前确认）
