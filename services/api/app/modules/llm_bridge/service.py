@@ -136,6 +136,7 @@ def login_out(data: Any) -> LlmBridgeLoginOut:
         log=[str(line)[:LOGIN_LINE_CHARS] for line in (data.get("log") or [])][-LOGIN_LOG_LINES:],
         started_at=_short(data.get("started_at"), 40),
         finished_at=_short(data.get("finished_at"), 40),
+        needs_code=data.get("needs_code") is True,
     )
 
 

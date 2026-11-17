@@ -472,6 +472,68 @@ describe('大模型客户端管理', () => {
     expect(polls).toBe(seen)
   })
 
+  it('logs Claude in through web authorization: a link, each step, then the code pasted back', { timeout: 30000 }, async () => {
+    // T-0287：管理器替人运行官方程序的 auth login；拿到网址后等人把授权页显示的授权码粘贴回来
+    const cl = account({ slot: 'claude', label: 'Claude', login_methods: ['web', 'api_key', 'oauth_token', 'existing'] })
+    const url = 'https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=s1'
+    const step = (key: string, status: string, detail = '') => ({ key, status, detail, started_at: null, finished_at: null })
+    const started = '2026-11-17T03:00:00.000+00:00'
+    const waiting = { state: 'pending', started_at: started, detail: '', verification_url: url, needs_code: true, steps: [step('start', 'done', '官方程序已启动'), step('request_url', 'done', '已取得登录网址'), step('wait_user', 'running', '在浏览器里登录并授权'), step('submit_code', 'pending'), step('finish', 'pending')], log: ['03:00:01 启动 Claude 官方程序：auth login --claudeai'] }
+    let progress: Record<string, unknown> = { state: 'none' }
+    let loggedIn = false
+    const requests = setup('owner', async r => {
+      if (path(r) === `${base}/status`) return Response.json(status({ settings: { ...settings, claude_subscription_ack: true }, accounts: [cl.state === 'logged_in' || loggedIn ? { ...cl, state: 'logged_in', identity: 's***@example.com', method: 'web' } : cl] }))
+      if (path(r) === `${base}/accounts/claude/login/code`) {
+        progress = { ...waiting, needs_code: false, steps: [step('start', 'done'), step('request_url', 'done'), step('wait_user', 'done', '已收到授权码'), step('submit_code', 'running', '官方程序用授权码换取登录'), step('finish', 'pending')] }
+        return Response.json(progress)
+      }
+      if (path(r) !== `${base}/accounts/claude/login`) return undefined
+      if (r.method === 'POST') { progress = waiting; return Response.json(waiting) }
+      return Response.json(progress)
+    })
+    await openApp('/llm_bridge?view=manage')
+    const card = await screen.findByRole('article', { name: '账号：Claude' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录Claude' }))
+    const form = within(card).getByRole('form', { name: '登录Claude' })
+    // 默认就是网页授权登录，不用填任何东西
+    expect(within(form).getByLabelText('网页授权登录（推荐）')).toBeChecked()
+    expect(within(form).queryByRole('textbox')).not.toBeInTheDocument()
+    await fireEvent.click(within(form).getByRole('button', { name: '获取登录网址' }))
+
+    const panel = await screen.findByRole('region', { name: '登录「Claude」的进度' })
+    expect(panel).toHaveTextContent('MCP 管理器「主账号」 · 网页授权登录')
+    const open = await within(panel).findByRole('group', { name: '登录 Claude 并交回授权码' })
+    expect(within(open).getByRole('link', { name: url })).toHaveAttribute('href', url)
+    expect(open).toHaveTextContent('授权后页面会显示一段授权码（中间有一个 #）')
+    const items = within(panel).getAllByRole('listitem').filter(li => li.hasAttribute('data-status'))
+    expect(items.map(li => li.getAttribute('data-status'))).toEqual(['done', 'done', 'done', 'running', 'pending', 'pending'])
+    expect(items[3]).toHaveTextContent('等你在自己的浏览器里登录并授权，再把授权码粘贴到下面')
+    expect(items[4]).toHaveTextContent('官方程序用授权码完成登录')
+    expect(items[5]).toHaveTextContent('确认登录结果（官方程序报告的账号）')
+
+    // 不完整的授权码：页面先拦下，不发给管理器
+    const box = within(open).getByLabelText('授权码')
+    await fireEvent.update(box, 'abc')
+    await fireEvent.click(within(open).getByRole('button', { name: '提交授权码' }))
+    expect(await within(open).findByText(/授权码不完整/)).toBeVisible()
+    expect(writes(requests).filter(r => path(r).endsWith('/login/code'))).toHaveLength(0)
+
+    await fireEvent.update(box, '  abc#def  ')
+    await fireEvent.click(within(open).getByRole('button', { name: '提交授权码' }))
+    expect(await within(panel).findByText('已把授权码交给官方程序，正在完成登录…')).toBeVisible()
+    const sent = writes(requests).filter(r => path(r).endsWith('/login/code'))
+    expect(await sent[0]!.clone().json()).toEqual({ code: 'abc#def' })
+    expect(within(panel).queryByLabelText('授权码')).not.toBeInTheDocument()
+
+    // 官方程序完成登录
+    loggedIn = true
+    progress = { ...waiting, state: 'done', needs_code: false, finished_at: '2026-11-17T03:01:00.000+00:00', steps: [step('start', 'done'), step('request_url', 'done'), step('wait_user', 'done'), step('submit_code', 'done', '官方程序报告登录成功'), step('finish', 'done', '已登录：s***@example.com')] }
+    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'succeeded'), { timeout: 5000 })
+    expect(within(panel).getByText('「Claude」已登录。')).toBeVisible()
+    expect(document.body.innerHTML).not.toContain('abc#def')
+    expect(await within(card).findByText('s***@example.com')).toBeVisible()
+  })
+
   it('blocks Claude subscription logins until the risk is acknowledged, then sends the token once and clears it', async () => {
     let ack = false, rejectOnce = true
     const requests = setup('owner', async r => {
@@ -493,6 +555,11 @@ describe('大模型客户端管理', () => {
     expect(within(form).queryByRole('group', { name: 'Claude 订阅登录的风险确认' })).not.toBeInTheDocument()
 
     await fireEvent.click(within(form).getByLabelText('订阅令牌', { selector: 'input[type="radio"]' }))
+    // 订阅令牌怎么拿：分步写清楚（T-0287）
+    const guide = within(form).getByRole('list', { name: '订阅令牌怎么拿' })
+    expect(guide).toHaveTextContent('claude setup-token')
+    expect(within(guide).getByRole('link', { name: 'Claude 官方说明' })).toHaveAttribute('href', 'https://code.claude.com/docs/en/cli-reference')
+    expect(within(guide).getAllByRole('listitem')).toHaveLength(4)
     const risk = within(form).getByRole('group', { name: 'Claude 订阅登录的风险确认' })
     expect(within(risk).getByText(/Anthropic 要求开发者用 API 密钥接入；把订阅账号的登录用于自动化处在灰区，账号可能被限制。详见方案第 6\.3 节/)).toBeVisible()
     expect(within(form).getByRole('button', { name: '登录' })).toBeDisabled()

@@ -35,6 +35,8 @@ class FakeDriver(Driver):
         self.identity: str | None = "fake@example.com"
         # True：已登录但平台不报告是哪个账号（模拟用密钥登录）
         self.anonymous = False
+        # 网页授权登录（T-0287）：这一次的进度
+        self.code_login: LoginChallenge | None = None
         self.history: dict[str, list[Message]] = {}
         self.external: list[NativeSession] = []
         self.running = 0
@@ -251,8 +253,36 @@ class FakeDriver(Driver):
     async def login(self, method: str, payload: dict[str, str]) -> LoginChallenge:
         if self.login_error:
             raise DriverError("platform_error", self.login_error)
+        if method == "web":
+            # 网页授权登录（T-0287）：给出网址，等人交回授权码（“good#s” 算对）
+            self.code_login = LoginChallenge(
+                state="pending",
+                verification_url="https://claude.example/oauth/authorize?code=true",
+                needs_code=True,
+                started_at=f"fake-{time.time()}",
+            )
+            return self.code_login
         self.identity = payload.get("api_key") or "fake@example.com"
         return LoginChallenge(state="done")
+
+    async def login_state(self) -> LoginChallenge | None:
+        return self.code_login
+
+    async def submit_code(self, code: str) -> LoginChallenge:
+        login = self.code_login
+        if login is None or not login.needs_code:
+            raise DriverError("conflict", "没有在等授权码的登录")
+        if "#" not in code:
+            raise DriverError("invalid", "授权码不完整")
+        ok = code == "good#s"
+        self.code_login = LoginChallenge(
+            state="done" if ok else "failed",
+            detail="" if ok else "授权码没有被接受",
+            started_at=login.started_at,
+        )
+        if ok:
+            self.identity = "web@example.com"
+        return self.code_login
 
     async def logout(self) -> None:
         self.identity = None

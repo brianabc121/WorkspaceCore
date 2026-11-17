@@ -21,15 +21,50 @@ def emit(event):
 
 
 if args[:2] == ["auth", "status"]:
-    print(
-        json.dumps(
-            {
-                "loggedIn": bool(KEY) or (CONFIG / "logged-in").exists(),
-                "authMethod": "api_key" if KEY else "claude.ai",
-            }
-        )
-    )
+    status = {
+        "loggedIn": bool(KEY) or (CONFIG / "logged-in").exists(),
+        "authMethod": "api_key" if KEY else "claude.ai",
+    }
+    # 用 /login（或网页授权登录，T-0287）存下的登录：2.1.323 报告邮箱
+    if not KEY and (CONFIG / "email").exists():
+        status["email"] = (CONFIG / "email").read_text().strip()
+    print(json.dumps(status))
     sys.exit(0)
+if args[:3] == ["auth", "login", "--claudeai"]:
+    # 2.1.323 没有终端时的样子（T-0287 核实）：给出网址，从标准输入一行一行读授权码
+    import time
+
+    if (CONFIG / "exit-early").exists():
+        sys.stderr.write("Login failed: Couldn't start the local listener\n")
+        sys.exit(1)
+    if (CONFIG / "no-url").exists():
+        time.sleep(30)
+        sys.exit(1)
+    sys.stdout.write("Opening browser to sign in\u2026\n")
+    sys.stdout.write(
+        "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true"
+        "&client_id=fake&state=s1\n"
+    )
+    sys.stdout.write("Paste code here if prompted > ")
+    sys.stdout.flush()
+    for raw in sys.stdin:
+        code, _, state = raw.strip().partition("#")
+        if not code or not state:
+            sys.stderr.write("Invalid code. Please make sure the full code was copied.\n")
+            sys.stderr.flush()
+            continue
+        if code != "good":
+            sys.stderr.write(
+                "Login failed: That code wasn't accepted. It may be incomplete, expired, already "
+                "used, or from an earlier sign-in attempt. Sign in again to get a new code.\n"
+            )
+            sys.exit(1)
+        CONFIG.mkdir(parents=True, exist_ok=True)
+        (CONFIG / "logged-in").write_text("1")
+        (CONFIG / "email").write_text("sub@example.com")
+        sys.stdout.write("\nLogin successful.\n")
+        sys.exit(0)
+    sys.exit(130)
 if args[:2] == ["auth", "logout"]:
     (CONFIG / "logged-in").unlink(missing_ok=True)
     sys.exit(0)

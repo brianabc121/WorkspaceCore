@@ -149,6 +149,7 @@ _ERROR_CODES = {
     "not_logged_in": "NOT_LOGGED_IN",
     "rate_limited": "RATE_LIMITED",
     "invalid": "VALIDATION_FAILED",
+    "conflict": "CONFLICT",
     "not_supported": "NOT_SUPPORTED",
     "platform_error": "UNAVAILABLE",
     "timeout": "UNAVAILABLE",
@@ -188,6 +189,7 @@ def _challenge_row(challenge: LoginChallenge) -> Row:
         "log": list(challenge.log),
         "started_at": challenge.started_at,
         "finished_at": challenge.finished_at,
+        "needs_code": challenge.needs_code,
     }
 
 
@@ -482,6 +484,14 @@ class Engine:
         except DriverError as error:
             raise from_driver(error) from error
         self._accounts.pop(slot, None)
+        return _challenge_row(challenge)
+
+    async def submit_login_code(self, slot: str, code: str) -> Row:
+        """网页授权登录（Claude，T-0287）：把授权码交给正在等它的官方程序。授权码不记日志。"""
+        try:
+            challenge = await self._driver(slot).submit_code(code)
+        except DriverError as error:
+            raise from_driver(error) from error
         return _challenge_row(challenge)
 
     async def login_state(self, slot: str) -> Row | None:
