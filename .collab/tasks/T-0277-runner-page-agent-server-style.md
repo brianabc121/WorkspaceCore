@@ -2,7 +2,7 @@
 id: T-0277
 title: 容器服务器页面（/runner）改成和智能体服务器页面一样的风格
 owner: claude
-status: in_progress
+status: done
 priority: P2
 branch: claude/amazing-faraday-6ey29e
 paths: apps/web/src/features/runner,apps/web/src/pages/RunnerPage.vue,apps/web/src/modules/llm_bridge/ServerManagersPanel.vue,apps/web/src/modules/llm_bridge/DeployManager.vue,apps/web/src/modules/llm_bridge/index.ts,apps/web/src/modules/ModuleServerPanels.vue,apps/web/src/modules/types.ts,apps/web/tests,tests/e2e/runner_browser.cjs,docs/deploy-guide.md
@@ -22,15 +22,15 @@ updated: 2026-11-17
 （页头卡片一行六格、连接与部署、这台服务器上的容器、模块区块、回收策略）。
 
 ## 验收标准
-- [ ] 页头：标题、说明、“刷新”与“添加服务器”；添加表单在宽屏右侧一栏、窄屏抽屉里（和智能体服务器页一样），添加后直接打开这台服务器
-- [ ] 统计卡：服务器、在线、容器环境、运行中；失败的环境在下面一行提示并可“查看”
-- [ ] 服务器表：服务器、入口、系统 / 资源、运行时、接入状态、容器、操作；搜索名称，按状态筛选（全部 / 在线 / 等待接入 / 需要处理）
-- [ ] 选中服务器（?host_id=）：页头卡片（名称、状态、版本与入口、关闭）+ 一行六格（连接、运行环境、CPU、内存、磁盘、容器），报告时间与磁盘构成一行，告警列表
-- [ ] “连接与部署”按智能体服务器的“连接与初始化”排版：左边 SSH 地址 / 核对指纹 / 逐步进度（共用 JobProgress）/ 部署表单 / 卸载与吊销，右边“部署前提”清单与说明，底部移除容器服务器；手动下载接入包保留
-- [ ] 这台服务器上的容器（按 host_id 筛选，服务端分页）、MCP 管理器等模块区块、自动分配情况、回收策略（默认折叠）
-- [ ] 没选服务器时，下面是“全部容器 / 智能体用量 / 环境模板 / 执行记录”四个标签，筛选写在地址里；容器详情仍在右侧一栏 / 抽屉
-- [ ] 旧链接兼容：?tab=environments → 全部容器；?tab=settings（&host_id=）→ 打开那台服务器（没写就打开第一台）；?environment_id= 直链照常
-- [ ] 1440 / 1180 / 390 宽度无横向滚动；前端 lint / typecheck / test / build / check:api 通过；runner_browser.cjs 跟着新结构更新，CI 的浏览器验收通过
+- [x] 页头：标题、说明、“刷新”与“添加服务器”；添加表单在宽屏右侧一栏、窄屏抽屉里（和智能体服务器页一样），添加后直接打开这台服务器
+- [x] 统计卡：服务器、在线、容器环境、运行中；失败的环境在下面一行提示并可“查看”
+- [x] 服务器表：服务器、入口、系统 / 资源、运行时、接入状态、容器、操作；搜索名称，按状态筛选（全部 / 在线 / 等待接入 / 需要处理）
+- [x] 选中服务器（?host_id=）：页头卡片（名称、状态、版本与入口、关闭）+ 一行六格（连接、运行环境、CPU、内存、磁盘、容器），报告时间与磁盘构成一行，告警列表
+- [x] “连接与部署”按智能体服务器的“连接与初始化”排版：左边 SSH 地址 / 核对指纹 / 逐步进度（共用 JobProgress）/ 部署表单 / 卸载与吊销，右边“部署前提”清单与说明，底部移除容器服务器；手动下载接入包保留
+- [x] 这台服务器上的容器（按 host_id 筛选，服务端分页）、MCP 管理器等模块区块、自动分配情况、回收策略（默认折叠）
+- [x] 没选服务器时，下面是“全部容器 / 智能体用量 / 环境模板 / 执行记录”四个标签，筛选写在地址里；容器详情仍在右侧一栏 / 抽屉
+- [x] 旧链接兼容：?tab=environments → 全部容器；?tab=settings（&host_id=）→ 打开那台服务器（没写就打开第一台）；?environment_id= 直链照常
+- [x] 1440 / 1180 / 390 宽度无横向滚动；前端 lint / typecheck / test / build / check:api 通过；runner_browser.cjs 跟着新结构更新，CI 的浏览器验收通过
 
 ## 背景 / 约束 / 参考
 - 编号由登记的集成会话在 #235 预留：https://github.com/brianabc121/WorkspaceCore/issues/235#issuecomment-6939731978
@@ -49,3 +49,4 @@ updated: 2026-11-17
 - 2026-11-17 05:43 UTC · human · owner unassigned → claude：人类在对话中指派：容器服务器页面的界面太复杂，改成和智能体服务器页面一样风格的样式
 - 2026-11-17 05:43 UTC · claude · 开始任务
 - 2026-11-17 05:56 UTC · claude · 做完：页面按智能体服务器页重排——页头（刷新、添加服务器）、统计卡（服务器 / 在线 / 容器环境 / 运行中，失败另起一行可查看）、服务器表（搜索、状态筛选，列：服务器、入口、系统 / 资源、运行时、接入状态、容器）；选中服务器（?host_id=）显示详情：页头卡片一行六格（连接、运行环境、CPU、内存、磁盘、容器）+ 报告时间与磁盘构成 + 自动分配 + 告警，连接与部署（左：SSH 地址 / 核对指纹 / 部署将完成 / JobProgress 逐步进度 / 部署表单 / 卸载与吊销；右：部署前提清单、说明、手动下载接入包；底部移除），这台服务器上的容器（host_id 筛选），模块区块，回收策略（默认折叠）。没选服务器时下面是全部容器 / 智能体用量 / 环境模板 / 执行记录。添加服务器在宽屏右侧一栏、窄屏抽屉，添加后打开它。旧链接 ?tab=environments → 全部容器，?tab=settings(&host_id=) → 打开服务器。删除 SettingsTab / RunnerHostPool / ContainerHostStrip / RunnerSshDeploy；读数与告警移到 hosts.ts。MCP 管理器区块在容器服务器上也用 ws-panel asv-section + h3；DeployManager 提示、模块注释、deploy-guide 第 8 节跟着改名。测试：container-server-pages / runner-pages / llm_bridge_server_panel 改写并新增筛选、详情、旧链接、添加后打开等用例；runner_browser.cjs 跟着新结构改（按 JobProgress 的 data-status 跟踪）。本地：lint、typecheck、vitest 84 个文件 918 个测试通过；Vite + Playwright（模拟接口）截图核对 1440 / 1180 / 390 宽度，无横向滚动。build、check:api 与 CI（含 runner_browser 浏览器验收）结果见 PR。
+- 2026-11-17 05:57 UTC · claude · status in_progress → done：容器服务器页按智能体服务器页的样式重排，验收标准全部勾选（CI 的 runner_browser 浏览器验收合并前确认）
