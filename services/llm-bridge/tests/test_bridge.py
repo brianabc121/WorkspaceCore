@@ -107,8 +107,10 @@ async def test_limit_is_per_platform_and_starts_are_spaced(bridge: Bridge) -> No
     load = defaults["load"]["fake"]
     assert load == {"running": 0, "waiting": 0, "limit": 3}
     sessions = [await _session(bridge, "c1") for _ in range(5)]
+    # 每个回合跑 2 秒：慢的 CI 机器上依次发出五条也要将近半秒，回合太短的话
+    # 查看时前几个已经跑完、后面的顶上来，看不到“两个在等”
     started = [
-        await _send(bridge, "c1", s, "sleep:0.4", f"p{i}", wait=0) for i, s in enumerate(sessions)
+        await _send(bridge, "c1", s, "sleep:2", f"p{i}", wait=0) for i, s in enumerate(sessions)
     ]
     await asyncio.sleep(0.15)
     load = (await bridge.admin("GET", "/admin/status")).json()["load"]["fake"]
