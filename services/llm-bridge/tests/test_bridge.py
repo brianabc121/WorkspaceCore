@@ -917,6 +917,8 @@ async def test_chat_page_admin_views(bridge: Bridge) -> None:
     assert none["sessions"] == []
     paged = (await bridge.admin("GET", "/admin/sessions", params={"limit": 1})).json()
     assert len(paged["sessions"]) == 1 and paged["next_offset"] == 1
+    # 每个会话最近一次提问的开头一段（列表里的一行摘要）
+    assert by_id[mine]["preview"] == "work:0" and by_id[theirs]["preview"] == "你好"
 
     # 会话内容：谁发的、回答、过程（最后一段就是结果，不重复出现）
     view = (await bridge.admin("GET", f"/admin/sessions/{mine}")).json()

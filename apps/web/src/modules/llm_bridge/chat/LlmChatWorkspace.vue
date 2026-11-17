@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../../../stores/auth'
 import DataState from '../../../components/DataState.vue'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { isModuleDisabled } from '../../../services/api'
 import { bridgeError, isBridgeDown, useLlmBridge } from '../api'
 import { chatError, platformChoices, useLlmChat, type SessionFilter } from './chatApi'
+import ChatManagerList from './ChatManagerList.vue'
 import ChatSessionList from './ChatSessionList.vue'
 import ChatConversation from './ChatConversation.vue'
 import ChatNewSession from './ChatNewSession.vue'
@@ -14,12 +16,12 @@ import ChatCompareNew from './ChatCompareNew.vue'
 import '../llm_bridge.css'
 import './llm_chat.css'
 
-// 大模型聚合聊天（docs/v2/LLM_CHAT_PLAN.md）：左边会话列表，中间对话，右边会话信息。
+// 大模型聚合聊天（docs/v2/LLM_CHAT_PLAN.md；T-0281 按效果图重排）：左边 MCP 管理器，中间会话列表，右边对话（会话详情从对话头部打开）。
 // 选中的管理器和会话放在地址的查询参数里（?m=<管理器>&s=<会话>，新建是 ?m=…&new=1）：能收藏、能后退。
 // 多模型同问：一组是 ?g=<分组>，新建是 ?compare=1（docs/v2/LLM_CHAT_PLAN.md 第 3.4 节）。
-// 窄屏时列表和对话分成两屏。owner 和 admin 都能用（后端同样校验）。
+// 宽屏三栏；不够宽时没有管理器那一栏，在会话列表顶上选管理器；窄屏时列表和对话分成两屏。owner 和 admin 都能用（后端同样校验）。
 const props = defineProps<{ scope: string }>()
-const route = useRoute(), router = useRouter()
+const route = useRoute(), router = useRouter(), auth = useAuthStore()
 const api = useLlmBridge(props.scope), chat = useLlmChat(props.scope)
 const bridges = api.useBridges()
 const list = computed(() => bridges.data.value ?? [])
@@ -61,6 +63,9 @@ const groups = chat.useGroups(computed(() => filter.value.status), computed(() =
 // jsdom 里没有 matchMedia，按宽屏处理
 const wide = useMediaQuery('(min-width: 901px)')
 const narrow = computed(() => !wide.value)
+// 够宽时管理器单独一栏
+const roomy = useMediaQuery('(min-width: 1440px)')
+const managerColumn = computed(() => wide.value && roomy.value)
 const opened = computed(() => !!sessionId.value || !!groupId.value || creating.value || comparing.value)
 const showList = computed(() => wide.value || !opened.value)
 const showMain = computed(() => wide.value || opened.value)
@@ -111,13 +116,14 @@ async function sync() {
       <p>先添加一个 MCP 管理器并登录平台账号，然后就能在这里和 ChatGPT / Codex / Claude / CodeBuddy 对话，也能看到智能体开的会话。</p>
       <p><RouterLink class="primary-button" :to="{ path: '/llm_bridge', query: { view: 'manage' } }">去添加 MCP 管理器</RouterLink></p>
     </div>
-    <div v-else class="lc-app" :class="{ 'is-narrow': narrow }">
+    <div v-else class="lc-app" :class="{ 'is-narrow': narrow, 'has-managers': managerColumn }">
+      <ChatManagerList v-if="managerColumn" :bridges="list" :manager-id="managerId" :api="api" :can-add="auth.isOwner" @select="pickManager($event)" />
       <ChatSessionList
         v-if="showList" :bridges="list" :manager-id="managerId" :choices="choices" :sessions="sessions.data.value?.sessions ?? []"
         :loading="sessions.isPending.value" :error="sessions.data.value ? null : sessions.error.value" :filter="filter" :selected="sessionId"
         :can-create="!!manager?.enabled" :syncing="syncing" :sync-notice="syncNotice" :sync-error="syncError"
         :groups="groups.data.value ?? []" :selected-group="groupId" :can-compare="list.some(b => b.enabled)"
-        :more="sessions.data.value?.next_offset == null ? null : pageSize < 200 ? 'load' : 'records'" :connection="connection" @more="pageSize = 200"
+        :more="sessions.data.value?.next_offset == null ? null : pageSize < 200 ? 'load' : 'records'" :connection="connection" :pick-manager="!managerColumn" @more="pageSize = 200"
         @update:manager-id="pickManager($event)" @update:filter="filter = $event" @select="open" @create="router.push(here({ new: '1' }))" @sync="sync" @retry="sessions.refetch()"
         @compare="router.push(here({ compare: '1' }))" @open-group="openGroup($event)"
       />
@@ -145,7 +151,7 @@ async function sync() {
           <p v-if="statusProblem" role="alert">{{ statusProblem }}</p>
           <template v-else-if="status.data.value">
             <p v-if="!choices.some(c => c.loggedIn)">这个管理器上还没有登录任何平台。<RouterLink class="asv-link" :to="{ path: '/llm_bridge', query: { view: 'manage' } }">去登录</RouterLink></p>
-            <p v-else>在左边选一个会话接着聊，或者点“新建会话”；想同时问几个模型就点“多模型同问”。智能体经这个管理器开的会话也在列表里。</p>
+            <p v-else>在左边选一个会话接着聊，或者点“新建”；想同时问几个模型，在会话列表的“更多”里点“多模型同问”。智能体经这个管理器开的会话也在列表里。</p>
           </template>
           <p v-if="manager && !manager.enabled">这个管理器已停用：可以查看会话，不能新建和发送。</p>
         </div>

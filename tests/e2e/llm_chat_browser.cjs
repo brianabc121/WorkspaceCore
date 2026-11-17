@@ -112,6 +112,14 @@ async function sessionAction(page, name) {
   if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click()
   await page.getByRole('group', { name: '会话操作' }).getByRole('button', { name, exact: true }).click()
 }
+// 会话列表的“更多”菜单（T-0281）：多模型同问、同步官方会话、看已归档的会话 / 回到进行中的会话
+async function listAction(page, name) {
+  const more = side(page).getByRole('button', { name: '会话列表的更多操作' })
+  if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click()
+  await side(page).getByRole('group', { name: '会话列表的操作' }).getByRole('button', { name, exact: true }).click()
+}
+// 宽屏（1440 起）左边是 MCP 管理器那一栏：每个管理器一张卡片
+const managerCard = (page, name) => page.getByRole('complementary', { name: 'MCP 管理器' }).getByRole('button').filter({ hasText: name })
 const requestId = () => `e2e-${randomBytes(8).toString('hex')}`
 
 async function main() {
@@ -153,12 +161,13 @@ async function main() {
 
     await page.getByRole('navigation', { name: '大模型客户端的视图' }).getByRole('link', { name: '对话', exact: true }).click()
     await side(page).waitFor()
-    check((await side(page).getByLabel('MCP 管理器').locator('option:checked').innerText()) === MANAGER, '左栏应选中验收用的管理器')
-    const filters = side(page).getByRole('group', { name: '按平台筛选' })
-    await filters.getByRole('button', { name: 'Claude', exact: true }).waitFor()
-    check(/未登录/.test(await filters.getByRole('button', { name: /CodeBuddy/ }).innerText()), '没登录的平台要在筛选里标出来')
-    check((await filters.getByRole('button').count()) === 3, '筛选里只列这个管理器控制的平台（全部 / Claude / CodeBuddy）')
-    step('添加管理器并登录后，聊天页列出它控制的平台，没登录的标出来')
+    check((await managerCard(page, MANAGER).getAttribute('aria-current')) === 'true', '管理器那一栏应选中验收用的管理器')
+    await managerCard(page, MANAGER).getByText('已连接').waitFor({ timeout: 30000 })
+    const filters = side(page).getByRole('combobox', { name: '按平台筛选' })
+    await filters.locator('option', { hasText: 'Claude' }).waitFor({ state: 'attached' })
+    check(/未登录/.test(await filters.locator('option', { hasText: 'CodeBuddy' }).innerText()), '没登录的平台要在筛选里标出来')
+    check((await filters.locator('option').count()) === 3, '筛选里只列这个管理器控制的平台（全部 / Claude / CodeBuddy）')
+    step('添加管理器并登录后，聊天页左边的管理器卡片写着已连接；会话列表的筛选列出它控制的平台，没登录的标出来')
 
     // ---------------------------------------------------------------- 新建会话并发第一条
     await side(page).getByRole('button', { name: '新建会话' }).click()
@@ -253,10 +262,12 @@ async function main() {
     check((await thread(page).getByText(':: 中断后再发').count()) === 0, '平台暂停期间，新发的消息应排队等着')
     // 聊天页的“会话信息”里也有这个平台的额度：用了多少、什么时候重置、暂停到什么时候（T-0242）
     if (!(await page.getByRole('complementary', { name: '会话信息' }).count())) await page.getByRole('button', { name: '会话信息' }).click()
-    const quotaBox = page.getByRole('region', { name: '额度：Claude' })
-    await quotaBox.getByText('已用 100%，剩余 0%').waitFor({ timeout: 60000 })
-    await quotaBox.getByText('重置时间').waitFor()
+    const quotaBox = page.getByRole('region', { name: '账号额度：Claude' })
+    await quotaBox.getByText('已用 100%').first().waitFor({ timeout: 60000 })
+    await quotaBox.getByText(/重置/).first().waitFor()
     check(/额度用完，这个平台暂停到 /.test(await quotaBox.getByRole('note').innerText()), '会话信息里应说明平台暂停到什么时候')
+    // 会话详情浮在对话上面（不够宽时）：看完收起，免得挡住后面要点的消息
+    await page.getByRole('button', { name: '收起会话信息' }).click()
     // 管理页的“额度”：窗口、重置时间、暂停
     const manage = await page.context().newPage()
     await manage.goto(`${base}/llm_bridge?view=manage`)
@@ -369,9 +380,13 @@ async function main() {
     await thread(page).getByText(':: 第二问').waitFor()
     // 三问三答，加上队列那一步的：停掉的一条、取消的一条、处理完的一条；额度那一步的：中断的一条、系统续的一条、排队的一条；附件那一步的两条，粘贴和拖入图片的那一条；插入那一步的两条
     check((await countMessages(page)) === 28, `刷新后十四问十四答都还在：${await countMessages(page)}`)
+    // 会话详情默认收起（开着还是关着记在浏览器里）：打开看回合数和管理器
     const info = page.getByRole('complementary', { name: '会话信息' })
-    await info.getByText('执行记录（14）').waitFor()
-    await info.getByText(MANAGER).waitFor()
+    if (!(await info.count())) await page.getByRole('button', { name: '会话信息' }).click()
+    await info.waitFor()
+    const turnsTab = info.getByRole('tab', { name: '执行记录' })
+    await turnsTab.getByText('14').waitFor()
+    await info.getByRole('region', { name: '基本信息' }).getByText(MANAGER).waitFor()
     step('改标题后列表跟着变；按标题搜索；刷新后从地址回到同一个会话，右栏有会话信息和回合')
 
     // ---------------------------------------------------------------- 别的管理员建的会话：接着发要确认一次
@@ -460,9 +475,9 @@ async function main() {
     await page.getByText('这个会话已归档，不能再发送。').waitFor()
     check((await composer(page).count()) === 0, '归档后没有输入框')
     await side(page).getByRole('button', { name: new RegExp(TITLE) }).waitFor({ state: 'detached' })
-    await side(page).getByRole('button', { name: '已归档', exact: true }).click()
+    await listAction(page, '看已归档的会话')
     await side(page).getByRole('button', { name: new RegExp(TITLE) }).waitFor()
-    await side(page).getByRole('button', { name: '已归档', exact: true }).click()
+    await listAction(page, '回到进行中的会话')
     const archivedSend = await api(page, workspace, 'POST', `${chat}/sessions/${firstId}/messages`, { text: 'x', request_id: requestId() })
     check(archivedSend.status === 409, `归档后接口也应拒绝发送：${JSON.stringify(archivedSend)}`)
     step('归档后不能再发（页面和接口都拒绝），在“已归档”里能找到')
@@ -488,7 +503,7 @@ async function main() {
     const tooFew = await api(page, workspace, 'POST', groupsApi, { text: 'x', request_id: requestId(), targets: [{ bridge_id: bridgeId, platform: 'claude', mode: 'chat' }] })
     check(tooFew.status === 422, `只有一个目标应被拒绝：${tooFew.status}`)
     await page.goto(`${base}/llm_bridge?m=${bridgeId}`)
-    await side(page).getByRole('button', { name: '多模型同问' }).click()
+    await listAction(page, '多模型同问')
     const compare = page.getByRole('form', { name: '多模型同问' })
     // 当前管理器上已登录、能对话的平台先加进来
     const chosen = compare.getByRole('list', { name: '发给（2 个）' })
@@ -569,7 +584,7 @@ async function main() {
     check((await side(phone.page).count()) === 0, '进入对话后不再显示列表')
     check(await noHorizontalScroll(phone.page), '手机宽度下对话不应横向滚动')
     await phone.page.getByRole('button', { name: '会话信息' }).click()
-    await phone.page.getByRole('complementary', { name: '会话信息' }).getByText(MANAGER).waitFor()
+    await phone.page.getByRole('complementary', { name: '会话信息' }).getByRole('region', { name: '基本信息' }).getByText(MANAGER).waitFor()
     await phone.page.getByRole('button', { name: '收起会话信息' }).click()
     await phone.page.getByRole('button', { name: '返回会话列表' }).click()
     await side(phone.page).waitFor()

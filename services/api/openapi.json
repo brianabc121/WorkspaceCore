@@ -14374,6 +14374,18 @@
             "title": "Name",
             "type": "string"
           },
+          "session_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这个管理器上进行中（没归档）的会话数，来自工作台每分钟同步的会话索引；还没同步过为空",
+            "title": "Session Count"
+          },
           "updated_at": {
             "format": "date-time",
             "title": "Updated At",
@@ -17522,6 +17534,12 @@
           },
           "platform": {
             "title": "Platform",
+            "type": "string"
+          },
+          "preview": {
+            "default": "",
+            "description": "最近一次提问的开头一段（脱敏、压成一行）；只在列表里给出，旧版本的管理器没有",
+            "title": "Preview",
             "type": "string"
           },
           "purged_at": {

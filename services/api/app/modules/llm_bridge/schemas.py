@@ -67,6 +67,11 @@ class LlmBridgeOut(BaseModel):
         default=None,
         description="工作台一键部署的管理器：部署在哪台智能体服务器上；手动添加的为空",
     )
+    session_count: int | None = Field(
+        default=None,
+        description="这个管理器上进行中（没归档）的会话数，来自工作台每分钟同步的会话索引；"
+        "还没同步过为空",
+    )
     created_at: datetime
     updated_at: datetime
 

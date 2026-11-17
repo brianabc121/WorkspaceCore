@@ -726,6 +726,23 @@ class Store:
         sql += " ORDER BY updated_at DESC, id LIMIT ? OFFSET ?"
         return self._all(sql, (*params, limit, offset))
 
+    def previews(self, session_ids: list[str]) -> dict[str, str]:
+        """每个会话最近一次提问的原文（聊天页的会话列表显示一行摘要）。
+
+        不算压缩、要交接摘要、交接这几种内部回合的提问；内容按保留期清掉的会话没有。"""
+        if not session_ids:
+            return {}
+        marks = ",".join("?" * len(session_ids))
+        rows = self._all(
+            "SELECT s.id AS session_id, (SELECT m.text FROM messages m "  # noqa: S608
+            "LEFT JOIN turns t ON t.id = m.turn_id WHERE m.session_id = s.id "
+            "AND m.role = 'user' AND m.kind = 'text' AND m.text != '' "
+            "AND (t.kind IS NULL OR t.kind NOT IN ('summary', 'handoff', 'compact')) "
+            f"ORDER BY m.seq DESC LIMIT 1) AS text FROM sessions s WHERE s.id IN ({marks})",
+            tuple(session_ids),
+        )
+        return {str(row["session_id"]): str(row["text"]) for row in rows if row["text"]}
+
     def busy_sessions(self) -> set[str]:
         """有排队中或进行中回合的会话。"""
         rows = self._all(

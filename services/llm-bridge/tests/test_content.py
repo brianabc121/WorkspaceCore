@@ -12,6 +12,7 @@ import pytest
 
 from bridge import attachments
 from bridge.drivers.base import Message, NativeSession
+from bridge.engine import PREVIEW_CHARS, preview
 from bridge.store import Store
 from tests.conftest import Bridge
 
@@ -151,6 +152,33 @@ def test_existing_turns_and_events_are_backfilled(tmp_path: Path) -> None:
     ]
     upgraded.close()
     assert len(Store(path).list_messages(session["id"])) == 4
+
+
+def test_session_previews_show_the_latest_real_question(tmp_path: Path) -> None:
+    """会话列表的一行摘要：最近一次提问（不算压缩、交接这类内部回合），脱敏、压成一行、截短；清掉内容的会话没有。"""
+    store = Store(tmp_path / "p.sqlite3")
+    made = lambda n: store.create_session(  # noqa: E731
+        platform="fake", mode="chat", slot="fake", native_id=n, model="m", workdir="/w"
+    )["id"]
+    a, b, c = made("n1"), made("n2"), made("n3")
+    store.create_turn(a, "c1", "r1", "第一个问题")
+    store.create_turn(a, "c1", "r2", "  第二个\n\n  问题  ")
+    store.create_turn(a, "c1", "r3", "请把之前的内容压成摘要", kind="compact")
+    store.create_turn(a, "c1", "r4", "写一份交接摘要", kind="summary")
+    secret = "token=sk-abcdefghijklmnopqrstuvwxyz0123456789 "
+    store.create_turn(b, "c1", "r5", secret + "很长" * 100)
+    store.create_turn(c, "c1", "r6", "会被清掉")
+    store.purge_session(c)
+
+    found = store.previews([a, b, c, "bs_none"])
+    assert found[a] == "  第二个\n\n  问题  "  # 原文；压成一行在 preview() 里做
+    assert c not in found and "bs_none" not in found
+    assert preview(found[a]) == "第二个 问题"
+    long = preview(found[b])
+    assert "sk-abcdefghijklmnopqrstuvwxyz" not in long
+    assert len(long) == PREVIEW_CHARS and long.endswith("…")
+    assert store.previews([]) == {}
+    store.close()
 
 
 async def test_external_sessions_are_imported_once_and_can_be_reimported(bridge: Bridge) -> None:

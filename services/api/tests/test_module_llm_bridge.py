@@ -737,7 +737,10 @@ async def test_provenance_and_session_index(rig: Rig) -> None:
 
     # 索引：后台任务还没跑时是空的；同步之后两个会话都在，按最后活动倒序
     assert (await rig.api("GET", "/sessions")).json()["sessions"] == []
+    # 聊天页左栏的会话数也来自索引：还没同步过时不知道（空），不当成 0
+    assert (await rig.api("GET", "/bridges")).json()["bridges"][0]["session_count"] is None
     listed = (await rig.api("GET", "/sessions", params={"sync": True})).json()
+    assert (await rig.api("GET", "/bridges")).json()["bridges"][0]["session_count"] == 2
     assert listed["sync_failed"] == [] and listed["next_offset"] is None
     by_owner = {s["owner_kind"]: s for s in listed["sessions"]}
     assert set(by_owner) == {"agent", "user"}
@@ -772,6 +775,10 @@ async def test_provenance_and_session_index(rig: Rig) -> None:
     assert await jobs.index_tick({"sync": env.sync}) == 1
     again = (await rig.api("GET", "/sessions", params={"owner_kind": "agent"})).json()["sessions"]
     assert (again[0]["turns_total"], again[0]["turns_failed"]) == (2, 1)
+    # 聊天页的会话列表：每个会话带最近一次提问的开头一段（索引里没有内容）
+    chats = (await rig.api("GET", f"/bridges/{rig.bridge_id}/chat/sessions")).json()["sessions"]
+    assert {c["session_id"]: c["preview"] for c in chats}[session] == "fail:invalid"
+    assert "fail:invalid" not in str(again)
     assert (await rig.api("GET", "/bridges")).json()["bridges"][0]["updated_at"] == before
     # 没有变化时什么都不同步
     assert await jobs.index_tick({"sync": env.sync}) == 0

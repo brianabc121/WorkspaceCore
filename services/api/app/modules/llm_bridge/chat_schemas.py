@@ -73,6 +73,10 @@ class LlmChatSessionOut(BaseModel):
     context: LlmChatContextOut | None = Field(
         default=None, description="上下文用了多少、压缩过几次；旧版本的管理器没有"
     )
+    preview: str = Field(
+        default="",
+        description="最近一次提问的开头一段（脱敏、压成一行）；只在列表里给出，旧版本的管理器没有",
+    )
     pinned: list[LlmChatPinnedOut] = Field(
         default=[], description="固定带着的参考资料（只有标题）；只在会话内容里给出"
     )
