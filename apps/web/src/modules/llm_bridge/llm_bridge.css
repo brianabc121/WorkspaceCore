@@ -34,8 +34,7 @@
 .lb-warn.is-red { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); background: color-mix(in srgb, var(--danger) 8%, var(--surface)); }
 .lb-warn p { margin: 0 0 6px; }
 .lb-warn .check-field { margin: 6px 0 0; align-items: flex-start; }
-.lb-code { display: grid; gap: 6px; padding: 12px; border-radius: 10px; background: var(--accent-soft); overflow-wrap: anywhere; }
-.lb-code strong { font-size: 1.3rem; letter-spacing: .12em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.lb-login-code { font-size: 1.3rem; letter-spacing: .12em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .lb-counters { display: flex; flex-wrap: wrap; gap: 8px; }
 .lb-checks { display: flex; flex-wrap: wrap; gap: 4px 14px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .lb-checks .check-field { margin: 4px 0; }
