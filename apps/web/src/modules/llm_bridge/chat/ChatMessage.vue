@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
-import { BookmarkPlus, CheckCircle2, ChevronDown, CircleAlert, Copy, LoaderCircle, RefreshCw, RotateCcw } from '@lucide/vue'
+import { BookmarkPlus, CheckCircle2, ChevronDown, CircleAlert, Copy, LoaderCircle, RefreshCw, RotateCcw, User } from '@lucide/vue'
 import { CHAT_NO_TOOLS, credits, duration, seconds } from '../api'
-import { PLATFORM_MARK, TURN_KIND, TURN_STATUS, listTime, splitText, tokens, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
+import { TURN_KIND, TURN_STATUS, listTime, splitText, tokens, type ChatMessage, type ChatStep, type LlmChatApi } from './chatApi'
 import ChatAttachments from './ChatAttachments.vue'
+import ChatPlatformIcon from './ChatPlatformIcon.vue'
 import { answerHtml } from './markdown'
 import '../../../features/kb/kb.css'
 
@@ -13,7 +14,7 @@ import '../../../features/kb/kb.css'
 // 被额度打断的回合（T-0237）显示什么时候自动继续，可以“现在就试”或“不要自动继续”。
 // source：从哪个管理器的哪个会话取附件的内容；不给就不显示附件。
 // noTools：对话模式的会话。模型有时把“调用工具”当成文字写出来，这里标明它并没有执行。
-const props = defineProps<{ message: ChatMessage; platform: string; platformId?: string; noTools?: boolean; target?: boolean; last?: boolean; busyAction?: boolean; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
+const props = defineProps<{ message: ChatMessage; platform: string; platformId?: string; mode?: string; noTools?: boolean; target?: boolean; last?: boolean; busyAction?: boolean; resuming?: string; source?: { chat: LlmChatApi; bridgeId: string; sessionId: string } }>()
 const emit = defineEmits<{ resume: [turn: string, now: boolean]; again: [turn: string]; save: [message: ChatMessage] }>()
 
 const STEP: Record<string, string> = { message: '说明', command: '命令', files: '改动的文件', notice: '提示', tool: '工具', tool_result: '结果', image: '图片', file: '文件', compaction: '压缩' }
@@ -27,11 +28,8 @@ const fakeCall = computed(() => !!props.noTools && props.message.role === 'assis
 const reply = computed(() => props.message.role === 'assistant')
 const status = computed(() => (reply.value ? props.message.status ?? 'completed' : ''))
 const pending = computed(() => status.value === 'queued' || status.value === 'running')
-// 头像：回答用平台的标记，提问用发消息的人名字的第一个字
-const avatar = computed(() => {
-  if (reply.value) return (props.platformId && PLATFORM_MARK[props.platformId]) || props.platform.slice(0, 1).toUpperCase() || '?'
-  return (props.message.by || '我').trim().slice(0, 1).toUpperCase() || '我'
-})
+// 头像：回答用平台的图标；自己的提问是一个人形，别人发的写名字的第一个字
+const initial = computed(() => (props.message.by || '我').trim().slice(0, 1).toUpperCase() || '我')
 // 过程那一栏的状态：图标和一句话
 const stepIcon = computed(() => (pending.value ? LoaderCircle : ['failed', 'unknown', 'cancelled', 'interrupted'].includes(status.value) ? CircleAlert : CheckCircle2))
 const ACTION_ICON = { copy: Copy, save: BookmarkPlus, again: RefreshCw, retry: RotateCcw } as const
@@ -143,7 +141,8 @@ const clearedText = computed(() => {
   <li v-if="compacted" class="lc-compacted" role="separator" :aria-label="compactedText"><span>{{ compactedText }}</span></li>
   <li v-else-if="cleared" class="lc-cleared" role="separator" :aria-label="clearedText"><span>{{ clearedText }}</span></li>
   <li v-else class="lc-msg" :class="[reply ? 'is-reply' : 'is-ask', { 'is-mine': message.mine, 'is-target': target }]" :data-status="status || undefined" :data-turn="message.turn_id || undefined">
-    <span class="lc-avatar" :class="reply ? 'lc-mark' : 'is-person'" :data-platform="reply ? platformId : undefined" aria-hidden="true">{{ avatar }}</span>
+    <ChatPlatformIcon v-if="reply" class="lc-avatar" :platform="platformId" :mode="mode" />
+    <span v-else class="lc-avatar is-person" aria-hidden="true"><User v-if="message.mine" /><template v-else>{{ initial }}</template></span>
     <div class="lc-msg-body">
       <div class="lc-msg-head">
         <strong>{{ who }}</strong>
@@ -191,7 +190,8 @@ const clearedText = computed(() => {
       </p>
       <ChatAttachments v-if="source && message.attachments?.length" :chat="source.chat" :bridge-id="source.bridgeId" :session-id="source.sessionId" :items="message.attachments" />
       <div v-if="meta || actions.length" class="lc-meta">
-        <button v-for="a in actions" :key="a.key" type="button" class="lc-act" :title="a.title" :disabled="a.key !== 'copy' && busyAction" @click="act(a.key)"><component :is="ACTION_ICON[a.key === 'again' && a.label === '重试' ? 'retry' : a.key]" aria-hidden="true" />{{ a.key === 'copy' && copied === 'all' ? '已复制' : a.label }}</button>
+        <button v-for="a in actions" :key="a.key" type="button" class="lc-act is-icon" :title="a.title || a.label" :disabled="a.key !== 'copy' && busyAction" @click="act(a.key)"><component :is="ACTION_ICON[a.key === 'again' && a.label === '重试' ? 'retry' : a.key]" aria-hidden="true" /><span class="sr-only">{{ a.label }}</span></button>
+        <span v-if="copied === 'all'" class="lc-copied" role="status">已复制</span>
         <span v-if="meta" class="lc-meta-text">{{ meta }}</span>
       </div>
       <p v-if="fakeCall" class="lc-note" role="note">上面像“调用工具”的内容只是模型写出来的文字，并没有执行。{{ CHAT_NO_TOOLS }}</p>

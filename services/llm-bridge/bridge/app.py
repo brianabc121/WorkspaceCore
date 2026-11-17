@@ -35,7 +35,7 @@ from bridge.drivers.base import Driver
 from bridge.drivers.cli_stream import CliStreamDriver, claude_profile, codebuddy_profile
 from bridge.drivers.codex import CodexDriver
 from bridge.drivers.fake import FakeDriver
-from bridge.engine import BridgeError, Caller, Engine, env_view
+from bridge.engine import BridgeError, Caller, Engine, env_view, preview
 from bridge.mcp_server import CALLER_STATE_KEY, McpRunner
 from bridge.store import Store
 
@@ -446,8 +446,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         size = min(max(limit, 1), 200)
         busy = engine.store.busy_sessions()
+        # 每个会话最近一次提问的开头一段：聊天页的列表里显示一行摘要（脱敏、压成一行）
+        previews = engine.store.previews([r["id"] for r in rows[:size]])
         return {
-            "sessions": [engine.admin_session_view(r, busy) for r in rows[:size]],
+            "sessions": [
+                engine.admin_session_view(r, busy) | {"preview": preview(previews.get(r["id"], ""))}
+                for r in rows[:size]
+            ],
             "next_offset": max(offset, 0) + size if len(rows) > size else None,
             "sync_failed": note,
         }

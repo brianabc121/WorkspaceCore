@@ -3,9 +3,10 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import DataState from '../../../components/DataState.vue'
 import { platformName } from '../api'
-import { PLATFORM_MARK, TURN_STATUS, chatError, type ChatGroupMember, type ColumnSend, type LlmChatApi } from './chatApi'
+import { TURN_STATUS, chatError, type ChatGroupMember, type ColumnSend, type LlmChatApi } from './chatApi'
 import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
+import ChatPlatformIcon from './ChatPlatformIcon.vue'
 
 // 多模型同问里的一栏：一个模型的会话。它就是一个普通会话，内容和进度和单会话一样读。
 // latest：整组刚发出的那一条在这一栏的结果（回合，或者没发出去的原因）。
@@ -56,7 +57,7 @@ async function copy() {
 <template>
   <section class="lc-col" :aria-label="`${name}（${member.bridge_name}）`">
     <header class="lc-col-head">
-      <span class="lc-mark" :data-platform="member.platform" aria-hidden="true">{{ PLATFORM_MARK[member.platform] ?? '?' }}</span>
+      <ChatPlatformIcon :platform="member.platform" :mode="member.mode" />
       <div class="lc-col-title"><strong>{{ name }}</strong><span>{{ member.model || '平台默认模型' }} · {{ member.bridge_name }}</span></div>
       <span v-if="state && sessionId" class="lc-tag" :data-status="activeTurn ? 'running' : undefined">{{ state }}</span>
     </header>

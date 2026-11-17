@@ -12605,6 +12605,11 @@ export interface components {
             /** Name */
             name: string;
             /**
+             * Session Count
+             * @description 这个管理器上进行中（没归档）的会话数，来自工作台每分钟同步的会话索引；还没同步过为空
+             */
+            session_count?: number | null;
+            /**
              * Updated At
              * Format: date-time
              */
@@ -13997,6 +14002,12 @@ export interface components {
             pinned: components["schemas"]["LlmChatPinnedOut"][];
             /** Platform */
             platform: string;
+            /**
+             * Preview
+             * @description 最近一次提问的开头一段（脱敏、压成一行）；只在列表里给出，旧版本的管理器没有
+             * @default
+             */
+            preview: string;
             /**
              * Purged At
              * @description 对话内容按保留期清掉的时间；没清过为空

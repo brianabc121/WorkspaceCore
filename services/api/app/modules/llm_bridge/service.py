@@ -221,7 +221,11 @@ class LlmBridgeService:
 
     # ---- 会话桥登记 ----
     @staticmethod
-    def bridge_out(row: LlmBridge, deployment: LlmBridgeInstallOut | None = None) -> LlmBridgeOut:
+    def bridge_out(
+        row: LlmBridge,
+        deployment: LlmBridgeInstallOut | None = None,
+        session_count: int | None = None,
+    ) -> LlmBridgeOut:
         return LlmBridgeOut(
             id=row.id,
             name=row.name,
@@ -229,9 +233,32 @@ class LlmBridgeService:
             enabled=row.enabled,
             has_token=bool(row.token_ref),
             deployment=deployment,
+            session_count=session_count,
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
+
+    async def session_counts(self, rows: list[LlmBridge]) -> dict[uuid.UUID, int | None]:
+        """每个管理器上进行中的会话数（会话索引，每分钟同步一次）。
+
+        还没同步过的管理器给空：不知道，不当成 0。同步过的标志是有了同步进度（index_rev），
+        或者带回过纪要设置（一个会话都没有的管理器同步后进度还是 0）。"""
+        if not rows:
+            return {}
+        counted = (
+            await self.db.execute(
+                select(LlmBridgeSession.bridge_id, func.count())
+                .where(
+                    LlmBridgeSession.workspace_id == rows[0].workspace_id,
+                    LlmBridgeSession.bridge_id.in_([r.id for r in rows]),
+                    LlmBridgeSession.status == "active",
+                )
+                .group_by(LlmBridgeSession.bridge_id)
+            )
+        ).all()
+        found = {bridge_id: int(n) for bridge_id, n in counted}
+        synced = {r.id for r in rows if r.index_rev > 0 or r.digest_settings}
+        return {r.id: found.get(r.id, 0) if r.id in synced else None for r in rows}
 
     async def installs(self, workspace_id: uuid.UUID) -> dict[uuid.UUID, LlmBridgeInstallOut]:
         """工作台部署出去的那些桥（T-0234）：桥的 id → 部署在哪台服务器上。"""

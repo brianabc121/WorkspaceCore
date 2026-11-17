@@ -3034,6 +3034,15 @@ def session_view(session: Row, *, full: bool = False) -> Row:
     return view
 
 
+PREVIEW_CHARS = 120
+
+
+def preview(text: str) -> str:
+    """会话列表里的一行摘要：脱敏，空白压成一个空格，最多 PREVIEW_CHARS 个字。"""
+    flat = " ".join(redact(text or "").split())
+    return flat if len(flat) <= PREVIEW_CHARS else flat[: PREVIEW_CHARS - 1] + "…"
+
+
 def context_view(session: Row) -> Row:
     """会话的上下文：用了多少、窗口多大、已用比例、压缩过几次、最近一次什么时候、怎么触发的。
 

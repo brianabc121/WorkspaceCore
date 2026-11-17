@@ -60,7 +60,10 @@ _write_errors = error_responses(401, 403, 404, 409, 422, 503)
 async def llm_bridge_list_bridges(access: Admin, service: Service) -> LlmBridgeList:
     rows = await service.bridges(access.workspace.id)
     installs = await service.installs(access.workspace.id)
-    return LlmBridgeList(bridges=[service.bridge_out(r, installs.get(r.id)) for r in rows])
+    counts = await service.session_counts(rows)
+    return LlmBridgeList(
+        bridges=[service.bridge_out(r, installs.get(r.id), counts.get(r.id)) for r in rows]
+    )
 
 
 @router.post(

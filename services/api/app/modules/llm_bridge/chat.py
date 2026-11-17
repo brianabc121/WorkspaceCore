@@ -102,6 +102,7 @@ def session_out(session: dict[str, Any], me: str) -> LlmChatSessionOut:
         purged_at=session.get("purged_at"),
         context=_context_out(session.get("context")),
         pinned=_pinned_out(session.get("pinned")),
+        preview=str(session.get("preview") or "")[:200],
     )
 
 
