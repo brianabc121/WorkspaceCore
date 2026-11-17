@@ -100,7 +100,8 @@ class _Client:
     """记下发出的新建请求；按名字决定回答还是报错。"""
 
     def __init__(self, refuse: set[str]) -> None:
-        self.refuse, self.calls = refuse, []
+        self.refuse = refuse
+        self.calls: list[str] = []
 
     async def tool(self, caller: BridgeCaller, name: str, arguments: dict[str, Any]) -> Any:
         self.calls.append(arguments["platform"])

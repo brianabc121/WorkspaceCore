@@ -1195,11 +1195,11 @@ async def test_chat_only_grant_stays_away_from_codex_dev_sessions(rig: Rig) -> N
     )
     assert (mine["platform"], mine["mode"]) == ("codex", "chat")
     # 聊天页按 Codex 筛选：codex 和旧名字 chatgpt 各查一次再合并（新版本两次一样），不重复
-    listed = await rig.api(
+    page = await rig.api(
         "GET", f"/bridges/{rig.bridge_id}/chat/sessions", params={"platform": "codex"}
     )
-    assert listed.status_code == 200, listed.text
-    ids = [s["session_id"] for s in listed.json()["sessions"]]
+    assert page.status_code == 200, page.text
+    ids = [s["session_id"] for s in page.json()["sessions"]]
     assert sorted(ids) == sorted({dev, chat, mine["session_id"]}) and len(ids) == len(set(ids))
     paged = await rig.api(
         "GET",
