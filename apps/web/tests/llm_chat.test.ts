@@ -143,7 +143,8 @@ describe('大模型聊天', () => {
     expect(within(today).getByRole('button', { name: /周报怎么写/ })).toHaveTextContent('Claude · 对话 · 我')
     const yesterday = within(side).getByRole('region', { name: '昨天' })
     const theirs = within(yesterday).getByRole('button', { name: /修登录的测试/ })
-    expect(theirs).toHaveTextContent('登录页点了没反应，帮我看看')
+    // 别人建的：第二行前面写上是谁的（接着发之前要确认）；自己的只写提问
+    expect(theirs).toHaveTextContent('研究员 · 登录页点了没反应，帮我看看')
     expect(theirs).not.toHaveTextContent('Codex · 开发')
     expect(theirs).toHaveAttribute('title', 'Codex · 开发 · 研究员建的')
     expect(within(yesterday).getByText('回答中')).toBeVisible()

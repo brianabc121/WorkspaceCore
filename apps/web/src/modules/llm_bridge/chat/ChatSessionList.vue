@@ -55,8 +55,12 @@ const emptyText = computed(() => {
   if (archived.value) return '没有已归档的会话。'
   return props.filter.platform ? `「${platformName(props.filter.platform)}」上还没有会话。` : '这个 MCP 管理器上还没有会话：点“新建”开始。'
 })
-// 第二行：最近一次提问；旧版本的管理器没有，写平台、用法和谁建的
-const second = (s: ChatSession) => s.preview || `${platformName(s.platform)} · ${MODES[s.mode] ?? s.mode} · ${ownerText(s)}`
+// 第二行：最近一次提问；别人建的（别的管理员、智能体、官方程序里已有的）前面写上是谁的——接着发之前要确认，列表上就要看得出来。
+// 旧版本的管理器没有提问，写平台、用法和谁建的
+function second(s: ChatSession) {
+  if (!s.preview) return `${platformName(s.platform)} · ${MODES[s.mode] ?? s.mode} · ${ownerText(s)}`
+  return s.owner_kind === 'me' ? s.preview : `${ownerText(s)} · ${s.preview}`
+}
 </script>
 
 <template>
