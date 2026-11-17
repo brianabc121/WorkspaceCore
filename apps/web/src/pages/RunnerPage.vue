@@ -3,8 +3,10 @@ import { useAuthStore } from '../stores/auth'
 import RunnerWorkspace from '../features/runner/RunnerWorkspace.vue'
 import '../features/workspace/workspace-pages.css'
 import '../features/agents/agents-pages.css'
+import '../features/agents/agent-servers.css'
 import '../features/runner/container-server.css'
 // 容器服务器（原“运行服务器”；地址仍是 /runner，T-0186）：页头在 RunnerWorkspace 里。
+// 样式和智能体服务器页一样（T-0277）：服务器详情的页头卡片、连接与部署用 agent-servers.css。
 // 换用户或工作空间时整页重建，上一个空间迟到的响应不会显示在新空间里。
 const auth = useAuthStore()
 </script>

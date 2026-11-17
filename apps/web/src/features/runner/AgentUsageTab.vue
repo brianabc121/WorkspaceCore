@@ -3,8 +3,8 @@ import { Bot } from '@lucide/vue'
 import type { Schema } from '../../services/api'
 
 // 智能体用量（T-0186）：每个打开过“运行环境权限”或还有在用环境的实例——权限、运行中 / 上限、常驻 / 上限、
-// 已分配的内存与 CPU / 上限。这里的内存与 CPU 是运行中环境的“配置额度之和”，不是实测用量（实测在容器总览里看）。
-// 点“查看容器”回到容器总览并只看这个智能体申请的容器。权限开关仍在 OpenClaw 智能体页的实例详情里。
+// 已分配的内存与 CPU / 上限。这里的内存与 CPU 是运行中环境的“配置额度之和”，不是实测用量（实测在“全部容器”里看）。
+// 点“查看容器”回到“全部容器”并只看这个智能体申请的容器。权限开关仍在 OpenClaw 智能体页的实例详情里。
 defineProps<{ instances: Schema['RunnerInstanceUsage'][] }>()
 defineEmits<{ containers: [instanceId: string] }>()
 const limit = (item: Schema['RunnerInstanceUsage'], key: string) => item.limits[key] ?? 0
@@ -12,7 +12,7 @@ const limit = (item: Schema['RunnerInstanceUsage'], key: string) => item.limits[
 
 <template>
   <section class="ws-panel asv-list" aria-label="智能体用量">
-    <p class="form-help cs-help">内存、CPU 是运行中环境的<strong>已分配额度 / 上限</strong>，不是实测用量；实测读数在“容器总览”。上限在 OpenClaw 智能体页的实例详情 → 运行环境权限里改。</p>
+    <p class="form-help cs-help">内存、CPU 是运行中环境的<strong>已分配额度 / 上限</strong>，不是实测用量；实测读数在“全部容器”。上限在 OpenClaw 智能体页的实例详情 → 运行环境权限里改。</p>
     <p v-if="!instances.length" class="ws-state-line">还没有实例打开运行环境权限（在 OpenClaw 智能体页的实例详情里打开）。</p>
     <div v-else class="ws-table-wrap">
       <table class="ws-table asv-table cs-usage">

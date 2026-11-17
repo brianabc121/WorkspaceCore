@@ -88,22 +88,23 @@ describe('服务器页面上的“MCP 管理器”区块', () => {
 
   it('shows only the note and the deploy entry on a container server without managers', async () => {
     const requests = setup()
-    await openApp('/runner?tab=settings')
+    await openApp(`/runner?host_id=${HOST}`)
     const panel = await screen.findByRole('region', { name: 'MCP 管理器' })
-    expect(await within(panel).findByRole('heading', { level: 2, name: 'MCP 管理器 · 0' })).toBeVisible()
-    expect(panel).toHaveClass('panel', 'runner-card')
+    // 和智能体服务器详情里的一样（容器服务器页按智能体服务器页的样式重排，T-0277）
+    expect(await within(panel).findByRole('heading', { level: 3, name: 'MCP 管理器 · 0' })).toBeVisible()
+    expect(panel).toHaveClass('ws-panel', 'asv-section')
     expect(within(panel).queryByRole('table')).not.toBeInTheDocument()
     expect(within(panel).getByText('这台服务器上还没有工作台部署的 MCP 管理器。')).toBeVisible()
     expect(within(panel).getByText(NOTE)).toBeVisible()
     expect(within(panel).getByRole('link', { name: '在这台服务器上部署 MCP 管理器' })).toHaveAttribute('href', `/llm_bridge?view=manage&deploy=runner_host:${HOST}`)
     expect(Object.fromEntries(new URL(installs(requests)[0]!.url).searchParams)).toEqual({ target_kind: 'runner_host', target_id: HOST })
-    // 在这台服务器的设置里：排在“回收策略”前面
-    expect(panel.compareDocumentPosition(screen.getByRole('form', { name: '回收策略' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // 在这台服务器的详情里：排在“回收策略”前面
+    expect(panel.compareDocumentPosition(screen.getByRole('region', { name: '回收策略' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('offers the deploy entry only to the owner, and only when the workbench can deploy', async () => {
     setup({ role: 'admin', managers: [manager({ deployment: install({ target_kind: 'runner_host', target_id: HOST, server_name: '容器一号' }) })] })
-    const view = await openApp('/runner?tab=settings')
+    const view = await openApp(`/runner?host_id=${HOST}`)
     const panel = await screen.findByRole('region', { name: 'MCP 管理器' })
     // admin 能看、能打开聊天和管理页（管理页对 admin 是只读的），不能部署
     expect(await within(panel).findByRole('link', { name: '管理：2 号' })).toHaveAttribute('href', `/llm_bridge?view=manage&m=${ONE}`)
@@ -113,7 +114,7 @@ describe('服务器页面上的“MCP 管理器”区块', () => {
 
     // 这个工作台没有带 MCP 管理器的构建文件：owner 也没有部署入口
     setup({ available: false })
-    await openApp('/runner?tab=settings')
+    await openApp(`/runner?host_id=${HOST}`)
     const second = await screen.findByRole('region', { name: 'MCP 管理器' })
     expect(await within(second).findByText(NOTE)).toBeVisible()
     expect(within(second).queryByRole('link', { name: '在这台服务器上部署 MCP 管理器' })).not.toBeInTheDocument()
@@ -127,8 +128,8 @@ describe('服务器页面上的“MCP 管理器”区块', () => {
     expect(screen.queryByRole('region', { name: 'MCP 管理器' })).not.toBeInTheDocument()
     view.unmount()
 
-    await openApp('/runner?tab=settings')
-    expect(await screen.findByRole('form', { name: '回收策略' })).toBeVisible()
+    await openApp(`/runner?host_id=${HOST}`)
+    expect(await screen.findByRole('region', { name: '回收策略' })).toBeVisible()
     expect(screen.queryByRole('region', { name: 'MCP 管理器' })).not.toBeInTheDocument()
     await waitFor(() => expect(requests.some(r => path(r) === '/api/v1/runner/overview')).toBe(true))
     expect(installs(requests)).toEqual([])

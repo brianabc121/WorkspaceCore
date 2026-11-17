@@ -7,7 +7,7 @@ import { formatTime } from '../../features/time'
 import { bridgeError, networkName, slotNames, useLlmBridge, type ServerManager, type TargetKind } from './api'
 
 // 服务器页面上的“MCP 管理器”区块（docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md 第 7 节；模块定义的 serverPanels）：
-// 智能体服务器的详情和容器服务器“服务器设置”里各显示一个，列出这台服务器上由工作台部署的 MCP 管理器。
+// 智能体服务器的详情和容器服务器的详情里各显示一个，列出这台服务器上由工作台部署的 MCP 管理器。
 // 这里只给入口：打开聊天、去管理页（重新部署、重启、卸载都在那里）、在这台服务器上再部署一个（owner）。
 // 这些容器不归两个服务器页面的管理程序管，所以这里没有任何操作按钮。
 const props = defineProps<{ kind: TargetKind; serverId: string; serverName: string }>()
@@ -17,8 +17,7 @@ const query = api.useServerManagers(props.kind, toRef(() => props.serverId))
 const managers = computed(() => query.data.value?.managers ?? [])
 // 部署入口：只有 owner 能部署，而且这个工作台要带着管理器的构建文件
 const canDeploy = computed(() => api.canWrite.value && !!query.data.value?.available)
-// 外层和所在页面的其他区块一样：智能体服务器详情是 ws-panel + h3，容器服务器的设置是 panel + h2
-const agent = computed(() => props.kind === 'agent_server')
+// 外层和所在页面的其他区块一样：两种服务器的详情都是 ws-panel + h3（容器服务器页按智能体服务器页的样式重排，T-0277）
 function state(m: ServerManager) {
   if (!m.enabled) return { text: '已停用', tone: 'tone-muted' }
   if (m.reachable === null) return { text: '没有检查', tone: 'tone-muted' }
@@ -28,9 +27,9 @@ function state(m: ServerManager) {
 
 <template>
   <!-- 模块在这个工作空间停用了（接口 404 MODULE_DISABLED）：区块不显示，宿主随后也会收起它 -->
-  <section v-if="!isModuleDisabled(query.error.value)" :class="agent ? 'ws-panel asv-section' : 'panel runner-card'" aria-label="MCP 管理器">
+  <section v-if="!isModuleDisabled(query.error.value)" class="ws-panel asv-section" aria-label="MCP 管理器">
     <div class="asv-panel-head">
-      <component :is="agent ? 'h3' : 'h2'">MCP 管理器<template v-if="query.data.value"> · {{ managers.length }}</template></component>
+      <h3>MCP 管理器<template v-if="query.data.value"> · {{ managers.length }}</template></h3>
       <button v-if="query.data.value" type="button" class="asv-link" :disabled="query.isFetching.value" @click="query.refetch()">{{ query.isFetching.value ? '正在检查…' : '重新检查' }}</button>
     </div>
     <p v-if="query.isPending.value" role="status" class="form-help">正在读取这台服务器上的 MCP 管理器…</p>
