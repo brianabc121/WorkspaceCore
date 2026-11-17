@@ -29,10 +29,10 @@ const bridge = (over: Partial<Bridge> = {}): Bridge => ({ id: ONE, name: '主账
 const account = (slot: string, state: string): Schema['LlmBridgeAccountOut'] => ({ slot, label: slot, enabled: true, state, registered: state === 'logged_in', identity: null, method: null, detail: '', first_login_at: null, login_methods: ['existing'], running: 0 })
 const channel = (platform: string, mode: string, slot: string, over: Partial<Schema['LlmBridgeChannelOut']> = {}): Schema['LlmBridgeChannelOut'] => ({ platform, mode, slot, enabled: true, available: true, note: '', ...over })
 const status = (): Schema['LlmBridgeStatusOut'] => ({
-  reachable: true, error: '', version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {}, quota: {},
-  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, digest_enabled: true, digest_follow_retention: true, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['chatgpt', 'codex', 'claude', 'workbuddy'] },
+  reachable: true, error: '', version: '0.1.0', platforms: ['codex', 'claude', 'workbuddy'], queued: 0, running: 0, load: {}, quota: {},
+  settings: { concurrency: 2, min_start_interval_seconds: 2, turn_timeout_seconds: 1800, send_per_hour: 60, max_text_chars: 20000, retention_days: 0, digest_enabled: true, digest_follow_retention: true, claude_subscription_ack: false, auto_resume: true, auto_resume_max: 3, resume_text: '继续意外中断的任务', platforms: ['codex', 'claude', 'workbuddy'] },
   accounts: [account('openai', 'logged_in'), account('claude', 'logged_in'), account('workbuddy', 'logged_out')],
-  channels: [channel('chatgpt', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
+  channels: [channel('codex', 'chat', 'openai'), channel('codex', 'dev', 'openai'), channel('claude', 'chat', 'claude'), channel('claude', 'dev', 'claude'), channel('claude', 'cloud', 'claude', { available: false }), channel('workbuddy', 'chat', 'workbuddy')],
 })
 const session = (over: Partial<Session> = {}): Session => ({ session_id: S1, platform: 'claude', mode: 'chat', model: 'sonnet', title: '周报怎么写', status: 'active', origin: 'bridge', owner: '测试用户', owner_kind: 'me', busy: false, turns: 1, created_at: now() - 600, updated_at: now(), environment: null, pinned: [], preview: '', ...over })
 const asked = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'user', turn_id: turn, text, at: now() - 100, by: '测试用户', mine: true, steps: [], attachments: [], imported: false, references: [], ...over })
@@ -134,7 +134,7 @@ describe('大模型聊天', () => {
     const { requests } = setup('owner', { sessions: [
       session(),
       session({ session_id: S2, platform: 'codex', mode: 'dev', title: '修登录的测试', owner: '研究员', owner_kind: 'agent', busy: true, updated_at: start - 3600, preview: '登录页点了没反应，帮我看看' }),
-      session({ session_id: S3, platform: 'chatgpt', title: '', owner: null, owner_kind: 'external', origin: 'external', updated_at: start - 3 * 86400 }),
+      session({ session_id: S3, platform: 'codex', title: '', owner: null, owner_kind: 'external', origin: 'external', updated_at: start - 3 * 86400 }),
     ] }, (r, _world, url) => (path(r) === `${chat}/sessions` && url.searchParams.get('sync') ? Response.json({ sessions: [], next_offset: null, sync_failed: 'workbuddy' }) : undefined))
     await openApp('/llm_bridge')
     const side = await screen.findByRole('complementary', { name: '会话列表' })
@@ -153,7 +153,7 @@ describe('大模型聊天', () => {
     expect(within(side).getByRole('heading', { level: 2 })).toHaveTextContent('会话3')
     const managers = screen.getByRole('complementary', { name: 'MCP 管理器' })
     expect(await within(managers).findByText('已连接')).toBeVisible()
-    expect(within(within(side).getByRole('region', { name: '更早' })).getByRole('button', { name: /（没有标题）/ })).toHaveTextContent('ChatGPT · 对话 · 官方程序里已有')
+    expect(within(within(side).getByRole('region', { name: '更早' })).getByRole('button', { name: /（没有标题）/ })).toHaveTextContent('Codex · 对话 · 官方程序里已有')
     expect(listRequests(requests)[0]!.headers.get('X-Workspace-Id')).toBe('workspace-a')
     expect(query(listRequests(requests)[0]!).get('status')).toBe('active')
 
@@ -1172,13 +1172,17 @@ describe('大模型聊天', () => {
     await fireEvent.click(await screen.findByRole('button', { name: '新建会话' }))
     const form = await screen.findByRole('form', { name: '新建会话' })
     const platforms = await within(form).findByRole('group', { name: '平台' })
-    expect(within(platforms).getByRole('radio', { name: /ChatGPT/ })).toBeChecked()
+    // 没有单独的 ChatGPT 平台了（T-0280）：Codex 排第一，有对话和开发两种用法
+    expect(within(platforms).getByRole('radio', { name: /Codex/ })).toBeChecked()
+    expect(within(platforms).queryByRole('radio', { name: /ChatGPT/ })).not.toBeInTheDocument()
     expect(within(platforms).getByRole('radio', { name: /CodeBuddy/ })).toBeDisabled()
     expect(within(form).getByRole('link', { name: '去登录' })).toHaveAttribute('href', '/llm_bridge?view=manage')
 
-    // Codex 只有“开发”一种用法：要选开发环境
-    await fireEvent.click(within(platforms).getByRole('radio', { name: /Codex/ }))
-    await waitFor(() => expect(within(within(form).getByRole('group', { name: '用法' })).getByRole('radio', { name: /开发/ })).toBeChecked())
+    // 选“开发”：要选开发环境
+    const usage = within(form).getByRole('group', { name: '用法' })
+    expect(within(usage).getByRole('radio', { name: /对话/ })).toBeChecked()
+    await fireEvent.click(within(usage).getByRole('radio', { name: /开发/ }))
+    await waitFor(() => expect(within(usage).getByRole('radio', { name: /开发/ })).toBeChecked())
     await waitFor(() => expect(requests.some(r => path(r) === `${chat}/options` && query(r).get('platform') === 'codex' && query(r).get('mode') === 'dev')).toBe(true))
     await within(form).findByRole('option', { name: '工作台仓库（可写工作区）' })
     await fireEvent.update(within(form).getByLabelText('第一条消息'), ' 修一下测试 ')
@@ -1232,7 +1236,7 @@ describe('大模型聊天', () => {
     expect(within(pinned).getByRole('list', { name: '固定带着的笔记' })).toHaveTextContent('固定带着：《项目约定》')
     await fireEvent.click(within(form).getByRole('button', { name: '新建会话' }))
     await waitFor(() => expect(bodies).toHaveLength(1))
-    expect(bodies[0]).toMatchObject({ platform: 'chatgpt', mode: 'chat', pinned_notes: [NOTE] })
+    expect(bodies[0]).toMatchObject({ platform: 'codex', mode: 'chat', pinned_notes: [NOTE] })
     vi.useRealTimers()
     const info = await openInfo()
     await fireEvent.click(within(info).getByText('更多信息'))
@@ -1243,7 +1247,7 @@ describe('大模型聊天', () => {
   it('opens the new session with the unsent first message when sending it failed', async () => {
     setup('owner', {}, (r, w) => {
       if (path(r) !== `${chat}/sessions` || r.method !== 'POST') return undefined
-      const made = session({ session_id: S2, platform: 'chatgpt', title: '' })
+      const made = session({ session_id: S2, platform: 'codex', title: '' })
       w.conversations[S2] = { session: made, messages: [], last_event_id: 1 }
       return Response.json({ session: made, turn: null, send_error: '平台还没有登录' }, { status: 201 })
     })
@@ -1264,7 +1268,7 @@ describe('大模型聊天', () => {
       const p = path(r)
       if (p === `${chat}/sessions` && r.method === 'POST') {
         order.push('create'); createBodies.push(await r.json() as Schema['LlmChatCreateIn'])
-        const made = session({ session_id: S2, platform: 'chatgpt', title: '' })
+        const made = session({ session_id: S2, platform: 'codex', title: '' })
         w.conversations[S2] = { session: made, messages: [], last_event_id: 1 }
         return Response.json({ session: made, turn: null, send_error: '' }, { status: 201 })
       }
@@ -1364,7 +1368,7 @@ const groupOf = (over: Partial<Group> = {}): Group => ({
   id: GROUP, title: '解释幂等', status: 'active', owner: '测试用户', owner_kind: 'me', created_at: at, updated_at: at,
   members: [
     member(0),
-    member(1, { bridge_id: TWO, bridge_name: '备用', platform: 'chatgpt', model: null, session_id: S2 }),
+    member(1, { bridge_id: TWO, bridge_name: '备用', platform: 'codex', model: null, session_id: S2 }),
     member(2, { platform: 'workbuddy', model: null, session_id: null, error: '平台还没有登录' }),
   ],
   ...over,
@@ -1372,7 +1376,7 @@ const groupOf = (over: Partial<Group> = {}): Group => ({
 const two = [bridge(), bridge({ id: TWO, name: '备用' })]
 const both = (): Record<string, Conversation> => ({
   [S1]: talk({ title: '解释幂等' }, [asked('解释幂等'), answered('做一次和做多次，结果一样。')]),
-  [S2]: talk({ session_id: S2, platform: 'chatgpt', title: '解释幂等' }, [asked('解释幂等', T2), answered('重复调用没有额外的副作用。', T2)]),
+  [S2]: talk({ session_id: S2, platform: 'codex', title: '解释幂等' }, [asked('解释幂等', T2), answered('重复调用没有额外的副作用。', T2)]),
 })
 
 describe('多模型同问', () => {
@@ -1402,7 +1406,7 @@ describe('多模型同问', () => {
     expect(await within(claude).findByText('做一次和做多次，结果一样。')).toBeVisible()
     expect(within(claude).getByText('sonnet · 主账号')).toBeVisible()
     expect(within(claude).getByRole('link', { name: '在这个会话里继续' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}&s=${S1}`)
-    const gpt = screen.getByRole('region', { name: 'ChatGPT（备用）' })
+    const gpt = screen.getByRole('region', { name: 'Codex（备用）' })
     expect(await within(gpt).findByText('重复调用没有额外的副作用。')).toBeVisible()
     expect(requests.some(r => path(r) === `${chatOf(TWO)}/sessions/${S2}`)).toBe(true)
     const buddy = screen.getByRole('region', { name: 'CodeBuddy（主账号）' })
@@ -1488,7 +1492,7 @@ describe('多模型同问', () => {
 
   it('starts a group with an image: sessions first, uploads next, then the question', async () => {
     const order: string[] = [], created: Schema['LlmChatGroupCreateIn'][] = [], sent: Schema['LlmChatGroupSendIn'][] = []
-    const made = groupOf({ members: [member(0), member(1, { platform: 'chatgpt', model: null, session_id: S2 })] })
+    const made = groupOf({ members: [member(0), member(1, { platform: 'codex', model: null, session_id: S2 })] })
     setup('owner', { conversations: both() }, async (r, w) => {
       const upload = /\/chat\/sessions\/(bs_\w+)\/attachments$/.exec(path(r))
       if (upload && r.method === 'POST') {
@@ -1529,9 +1533,9 @@ describe('多模型同问', () => {
     const form = await screen.findByRole('form', { name: '多模型同问' })
     // 当前管理器上已登录、能对话的平台先加进来（Codex 只有“开发”，CodeBuddy 没登录）
     const chosen = await within(form).findByRole('list', { name: '发给（2 个）' })
-    expect(within(chosen).getAllByRole('listitem').map(li => li.textContent)).toEqual(['ChatGPT · 默认模型 · 主账号', 'Claude · 默认模型 · 主账号'])
+    expect(within(chosen).getAllByRole('listitem').map(li => li.textContent)).toEqual(['Codex · 默认模型 · 主账号', 'Claude · 默认模型 · 主账号'])
 
-    await fireEvent.click(within(chosen).getByRole('button', { name: '移除 ChatGPT · 默认模型 · 主账号' }))
+    await fireEvent.click(within(chosen).getByRole('button', { name: '移除 Codex · 默认模型 · 主账号' }))
     await fireEvent.update(within(form).getByLabelText('问题'), ' 解释幂等 ')
     await fireEvent.click(within(form).getByRole('button', { name: '发给 1 个模型' }))
     expect(await within(form).findByText(/至少选 2 个模型/)).toBeVisible()

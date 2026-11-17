@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import JobProgress from '../../components/JobProgress.vue'
 import type { LoginMethod, LoginState, Slot } from './api'
 
-// 网页登录（CodeBuddy，T-0276）和设备码登录（ChatGPT / Codex，T-0279）的逐步进度：
+// 网页登录（CodeBuddy，T-0276）和设备码登录（Codex，T-0279）的逐步进度：
 // 外观和智能体服务器的初始化一样（共用组件 JobProgress）。步骤来自 MCP 管理器报告的进度——
 // 网页登录：启动登录服务、申请登录网址、等你登录、确认结果；设备码登录：启动 Codex 的本机程序、
 // 向 OpenAI 申请设备码、等你输入验证码并登录、确认结果。第一步“交给 MCP 管理器”由页面自己判断。

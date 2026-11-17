@@ -30,7 +30,7 @@ updated: 2026-11-17
 - [x] 会话列表：标题旁写数量，“新建”在右上；多模型同问、同步官方会话、看已归档的会话在“更多”菜单里；平台筛选改成下拉（没登录的标出来）；正在看已归档时有提示
 - [x] 每个会话第二行是最近一次提问（MCP 管理器 `/admin/sessions` 新增 `preview`：脱敏、压成一行、最多 120 字，不算压缩 / 交接这类内部回合，清掉内容的会话没有）；旧版本的管理器没有时写平台 · 用法 · 谁建的
 - [x] 管理器的会话数来自工作台的会话索引（`LlmBridgeOut.session_count`，只数没归档的；还没同步过为空、不写），不另外连管理器
-- [x] 平台用图标区分（Claude 星芒、CodeBuddy 机器人、ChatGPT / Codex 对话六边形、开发会话代码符号；不是商标），列表、头像、会话详情、同问各栏共用
+- [x] 平台用图标区分（Claude 星芒、CodeBuddy 机器人、Codex 对话六边形、开发会话代码符号；不是商标），列表、头像、会话详情、同问各栏共用
 - [x] 对话头部只留“平台 · 用法”标签（能换模型的会话再加模型下拉）；回答下面的复制 / 存进知识库 / 重新生成改成图标按钮（读屏名字不变）；输入框附件、知识库、发送是图标按钮，提示文字放在悬停提示里
 - [x] 会话详情按效果图排；默认收起，开关状态记在浏览器里；对话这一栏不够宽时浮在右边，1000px 以上排在旁边
 - [x] 后端：管理器 ruff / mypy / pytest；工作台 ruff / mypy / llm_bridge 相关测试 / `export_openapi --check`；前端 lint / typecheck / vitest / build / check:api 全部通过；`llm_chat_browser.cjs` 跟着新结构更新；1680 / 1440 / 1180 / 390 宽度没有横向滚动
@@ -53,3 +53,4 @@ updated: 2026-11-17
 - 2026-11-17 09:09 UTC · claude · status in_progress → done：对话页按效果图重排，验收标准全部勾选（ci-llm-bridge 的浏览器验收合并前确认）
 - 2026-11-17 09:20 UTC · claude · CI 的 ci-llm-bridge workspace（llm_chat_browser.cjs）在“列表里写明是谁建的”失败：有提问摘要时第二行只写摘要，谁建的只在悬停提示里，列表上看不出别人建的会话。改为别人建的（别的管理员、智能体、官方程序里已有的）第二行写“谁建的 · 提问”，自己的只写提问；单元测试跟着改，llm_chat.test.ts 51 passed，lint、typecheck 通过。
 - 2026-11-17 09:28 UTC · claude · CI 的 workspace 又在“清空上下文”失败：改标题那一步之后会话详情一直开着（开关记在浏览器里），1440 宽时它浮在对话上、盖住了头部的“更多操作”。真实使用也会这样，所以浮层改成从对话头部下面开始（量头部高度），头部的搜索、更多操作、详情开关一直点得到；llm_chat_browser.cjs 在打开详情时点一次“更多操作”验证，看完收起。llm_chat.test.ts 51 passed，lint、typecheck 通过；Playwright 模拟接口核对 1440 宽打开详情时“更多操作”能点开。
+- 2026-11-17 10:00 UTC · claude · 合并 main b94f8a7（含 T-0280，去掉单列的 ChatGPT 平台）：冲突只有 llm_chat.test.ts 的样例，按 T-0280 改成 codex；平台图标与样式去掉 chatgpt；chat.py 的 _codex_sessions、create_session 与授权的 codex:chat 都保留。合并后：前端 lint、typecheck、vitest 84 个文件 923 个测试、build、check:api 通过；管理器 ruff、mypy、pytest 102 passed / 3 skipped；工作台 ruff、mypy、export_openapi --check、llm_bridge 四个测试文件 46 passed。

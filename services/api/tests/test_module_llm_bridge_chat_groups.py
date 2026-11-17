@@ -55,7 +55,8 @@ async def test_group_asks_several_models_across_managers(rig: Rig) -> None:  # n
     body = {
         "text": question,
         "request_id": "g1",
-        # 第三个目标：1 号管理器的 ChatGPT 没有登录，会话建不成
+        # 第三个目标：1 号管理器的 Codex 没有登录，会话建不成。
+        # 用的是旧名字 chatgpt：按 codex 处理（T-0280）
         "targets": [target(rig.bridge_id), target(second), target(rig.bridge_id, "chatgpt")],
     }
     made = await rig.api("POST", GROUPS, json=body)
@@ -71,7 +72,7 @@ async def test_group_asks_several_models_across_managers(rig: Rig) -> None:  # n
     assert [(m["position"], m["bridge_name"], m["platform"]) for m in members] == [
         (0, "主桥", "claude"),
         (1, "2 号", "claude"),
-        (2, "主桥", "chatgpt"),
+        (2, "主桥", "codex"),
     ]
     assert members[0]["session_id"] and members[1]["session_id"]
     assert members[0]["bridge_id"] == rig.bridge_id and members[1]["bridge_id"] == second
@@ -215,7 +216,7 @@ async def test_group_input_is_checked_before_anything_is_created(rig: Rig) -> No
         json={
             "text": "你好",
             "request_id": "none",
-            "targets": [target(rig.bridge_id, "chatgpt"), target(rig.bridge_id, "workbuddy")],
+            "targets": [target(rig.bridge_id, "codex"), target(rig.bridge_id, "workbuddy")],
         },
     )
     assert nothing.status_code == 409 and "一个会话都没有建成" in nothing.json()["error"]["message"]

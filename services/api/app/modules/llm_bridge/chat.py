@@ -48,12 +48,19 @@ from app.modules.llm_bridge.chat_schemas import (
     LlmChatTurnOut,
     OwnerKind,
 )
-from app.modules.llm_bridge.client import BridgeCaller, BridgeCallError, BridgeClient
+from app.modules.llm_bridge.client import (
+    BridgeCaller,
+    BridgeCallError,
+    BridgeClient,
+    create_session,
+)
 from app.modules.llm_bridge.models import LlmBridge
 from app.modules.llm_bridge.schemas import LlmBridgeEnvironmentOut
 from app.modules.llm_bridge.service import LlmBridgeService, from_bridge, unavailable
 
 SCOPES = ("write", "account", "takeover")
+# 按 Codex 筛选会话时，两个名字（codex / 旧的 chatgpt）各取前多少条合并（管理器一页最多 200）
+_LEGACY_WINDOW = 200
 # 没有 takeover：发到别人的会话时会话桥按“没有这个会话”回答，据此要求页面先确认
 OWN_SCOPES = ("write", "account")
 USER_PREFIX = "user:"
@@ -210,7 +217,11 @@ class LlmChatService:
         self, client: BridgeClient, caller: BridgeCaller, name: str, arguments: dict[str, Any]
     ) -> dict[str, Any]:
         try:
-            data = await client.tool(caller, name, arguments)
+            if name == "llm_session_create":
+                # 没升级的管理器上 Codex 的对话还叫 chatgpt：见 create_session（T-0280）
+                data = await create_session(client, caller, arguments)
+            else:
+                data = await client.tool(caller, name, arguments)
         except BridgeCallError as error:
             raise from_bridge(error) from error
         except ConnectorError as error:
@@ -245,12 +256,42 @@ class LlmChatService:
             params["platform"] = platform
         if sync:
             params["sync"] = "true"
-        data = await self._admin(client, "GET", f"/sessions?{urlencode(params)}")
+        if platform == "codex" and offset + limit <= _LEGACY_WINDOW:
+            data = await self._codex_sessions(client, params)
+        else:
+            data = await self._admin(client, "GET", f"/sessions?{urlencode(params)}")
         return LlmChatSessionList(
             sessions=[session_out(s, me) for s in data.get("sessions", [])],
             next_offset=data.get("next_offset"),
             sync_failed=str(data.get("sync_failed") or ""),
         )
+
+    async def _codex_sessions(self, client: BridgeClient, params: dict[str, Any]) -> dict[str, Any]:
+        """按 Codex 筛选：没升级的管理器上原来的 ChatGPT 对话还记作 chatgpt（T-0280）。
+
+        两个名字各取前 offset + limit 条，按会话去重、按最后活动时间合起来再分页
+        （新版本的管理器把 chatgpt 当成 codex，两次拿到的一样，去重后不变）。只同步一次。
+        """
+        offset, limit = int(params["offset"]), int(params["limit"])
+        merged: dict[str, dict[str, Any]] = {}
+        more, sync_failed = False, ""
+        for index, name in enumerate(("codex", "chatgpt")):
+            page = {**params, "platform": name, "offset": 0, "limit": offset + limit}
+            if index:
+                page.pop("sync", None)
+            data = await self._admin(client, "GET", f"/sessions?{urlencode(page)}")
+            more = more or data.get("next_offset") is not None
+            sync_failed = sync_failed or str(data.get("sync_failed") or "")
+            for item in data.get("sessions", []):
+                if isinstance(item, dict) and item.get("session_id"):
+                    merged.setdefault(str(item["session_id"]), item)
+        rows = sorted(merged.values(), key=lambda s: float(s.get("updated_at") or 0), reverse=True)
+        has_more = more or len(rows) > offset + limit
+        return {
+            "sessions": rows[offset : offset + limit],
+            "next_offset": offset + limit if has_more else None,
+            "sync_failed": sync_failed,
+        }
 
     async def conversation(
         self, access: WorkspaceAccess, row: LlmBridge, session_id: str

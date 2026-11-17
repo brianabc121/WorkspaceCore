@@ -28,7 +28,7 @@ from typing import Any
 from bridge import attachments as files
 from bridge import connectivity as net
 from bridge import quota
-from bridge.channels import SLOT_LABELS, Channel, find
+from bridge.channels import SLOT_LABELS, Channel, canonical, find
 from bridge.config import Settings
 from bridge.drivers.base import (
     ContextUsage,
@@ -202,12 +202,23 @@ class Caller:
     scopes: frozenset[str]
     # 这个调用方只能用哪些平台；None 是不限（人在聊天页、桥自己的调用方）。
     # 由工作台按管理员给实例选的平台带过来，在这里按会话所属的平台检查（T-0247）。
+    # 一项是平台（不限用法）或“平台:用法”（例如 codex:chat 只能对话，T-0280）
     platforms: frozenset[str] | None = None
     # 出处：谁、因为什么发起的（工作台带过来：实例或人，当时在做的任务）。只记录，不参与权限
     source: Row | None = None
 
-    def may_use(self, platform: str) -> bool:
-        return self.platforms is None or platform in self.platforms
+    def may_use(self, platform: str, mode: str | None = None) -> bool:
+        """能不能用这个平台；给了用法时还要看这种用法（只能对话的调用方碰不到开发会话）。
+
+        不给用法是问“这个平台能不能看到”（概况、额度这些平台一级的信息）。
+        """
+        if self.platforms is None:
+            return True
+        platform = canonical(platform)
+        if platform in self.platforms:
+            return True
+        modes = {t.partition(":")[2] for t in self.platforms if t.startswith(f"{platform}:")}
+        return bool(modes) and (mode is None or mode in modes)
 
     def can(self, scope: str) -> bool:
         return scope in self.scopes
@@ -302,13 +313,16 @@ class Engine:
         """管理员让这座桥控制的平台；没设置过就是全部。"""
         chosen = self.store.get_setting("platforms", None)
         known = self.all_platforms()
-        return known if chosen is None else [p for p in known if p in chosen]
+        if chosen is None:
+            return known
+        picked = {canonical(p) for p in chosen if isinstance(p, str)}
+        return [p for p in known if p in picked]
 
     def platform_enabled(self, platform: str) -> bool:
-        return platform in self.platforms()
+        return canonical(platform) in self.platforms()
 
     def slot_enabled(self, slot: str) -> bool:
-        """这个账号槽位上有没有被勾选的平台（ChatGPT 和 Codex 共用 openai 槽位）。"""
+        """这个账号槽位上有没有被勾选的平台。"""
         enabled = self.platforms()
         return any(c.slot == slot and c.platform in enabled for c in self.channels)
 
@@ -321,6 +335,8 @@ class Engine:
             or len(set(value)) != len(value)
         ):
             raise BridgeError("VALIDATION_FAILED", "platforms 要填至少一个平台，不能重复")
+        # 旧名字 chatgpt 按 codex 处理（T-0280）：没升级的工作台可能同时带着两个
+        value = list(dict.fromkeys(canonical(p) for p in value))
         unknown = [p for p in value if p not in known]
         if unknown:
             raise BridgeError("VALIDATION_FAILED", f"这座桥没有这些平台：{'、'.join(unknown)}")
@@ -497,6 +513,7 @@ class Engine:
 
     # ---- 通道、模型、环境 ----
     def _channel(self, platform: str, mode: str) -> Channel:
+        platform = canonical(platform)
         channel = find(self.channels, platform, mode)
         if channel is None:
             raise BridgeError("VALIDATION_FAILED", f"没有这个通道：{platform}.{mode}")
@@ -533,7 +550,7 @@ class Engine:
         ]
 
     def environments(self, platform: str, mode: str) -> list[Row]:
-        self._channel(platform, mode)
+        platform = self._channel(platform, mode).platform
         return [
             env_view(env) for env in self.store.list_environments(platform, mode) if env["enabled"]
         ]
@@ -624,8 +641,9 @@ class Engine:
         """新建会话。带 request_id 时同一个调用方重试得到的是同一个会话：
         克隆仓库可能比调用方等的时间长，调用方超时后重试不能建出两个。"""
         self._need(caller, "write")
-        if not caller.may_use(platform):
-            raise BridgeError("FORBIDDEN", f"管理员没有给你开 {platform} 这个平台")
+        platform = canonical(platform)
+        if not caller.may_use(platform, mode):
+            raise BridgeError("FORBIDDEN", f"管理员没有给你开 {platform} 这个平台的 {mode} 用法")
         if request_id is None:
             return await self._create_session(
                 caller, platform, mode, model, environment, title, effort, None, pinned
@@ -747,8 +765,8 @@ class Engine:
 
     def _session(self, caller: Caller, session_id: str, *, metadata_only: bool = False) -> Row:
         session = self.store.get_session(session_id)
-        if session is not None and not caller.may_use(session["platform"]):
-            session = None  # 管理员没给这个平台：和“不存在”一样回答
+        if session is not None and not caller.may_use(session["platform"], session["mode"]):
+            session = None  # 管理员没给这个平台（或这种用法）：和“不存在”一样回答
         if session is not None and (
             session["caller_id"] == caller.id
             or caller.can("takeover")
@@ -795,6 +813,7 @@ class Engine:
         limit: int = 20,
         offset: int = 0,
     ) -> Row:
+        platform = canonical(platform) if platform else platform
         note = ""
         if scope == "account":
             self._need(caller, "account")
@@ -823,7 +842,7 @@ class Engine:
         items = [
             {**session_view(row), "mine": row["caller_id"] == caller.id}
             for row in rows[:limit]
-            if caller.may_use(row["platform"])
+            if caller.may_use(row["platform"], row["mode"])
         ]
         return {
             "sessions": items,
@@ -2137,7 +2156,7 @@ class Engine:
         ]
 
     def _save_quota(self, slot: str, windows: list[Row]) -> None:
-        """同一个账号上的平台（ChatGPT 和 Codex）共用一份额度。"""
+        """同一个账号上的平台共用一份额度（一个槽位现在只有一个平台，保留按槽位存的写法）。"""
         clean = [w for w in windows if isinstance(w, dict) and w.get("kind")]
         for platform in self._platforms_of(slot):
             self.store.save_quota(platform, clean)
@@ -2457,9 +2476,7 @@ class Engine:
         if session["origin"] != "bridge":
             raise BridgeError("NOT_SUPPORTED", "官方程序里已有的会话不能在这里换模型")
         if session["slot"] == "openai":
-            raise BridgeError(
-                "NOT_SUPPORTED", "ChatGPT / Codex 的会话不能中途换模型：要换就新建一个会话"
-            )
+            raise BridgeError("NOT_SUPPORTED", "Codex 的会话不能中途换模型：要换就新建一个会话")
         channel = self._channel(session["platform"], session["mode"])
         picked = await self._pick_model(channel, model)
         if picked != session["model"]:
@@ -2772,7 +2789,7 @@ class Engine:
         channels = [
             c
             for c in view["channels"]
-            if c["enabled"] and (caller is None or caller.may_use(c["platform"]))
+            if c["enabled"] and (caller is None or caller.may_use(c["platform"], c["mode"]))
         ]
         slots = {c["slot"] for c in channels}
         out = {

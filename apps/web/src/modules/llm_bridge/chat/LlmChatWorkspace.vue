@@ -113,7 +113,7 @@ async function sync() {
     <DataState v-else-if="bridges.isPending.value || bridges.error.value" :loading="bridges.isPending.value" :error="bridges.error.value" :empty="false" empty-text="" @retry="bridges.refetch()" />
     <div v-else-if="!list.length" class="lb-empty lc-welcome">
       <p><strong>还没有 MCP 管理器。</strong></p>
-      <p>先添加一个 MCP 管理器并登录平台账号，然后就能在这里和 ChatGPT / Codex / Claude / CodeBuddy 对话，也能看到智能体开的会话。</p>
+      <p>先添加一个 MCP 管理器并登录平台账号，然后就能在这里和 Codex / Claude / CodeBuddy 对话，也能看到智能体开的会话。</p>
       <p><RouterLink class="primary-button" :to="{ path: '/llm_bridge', query: { view: 'manage' } }">去添加 MCP 管理器</RouterLink></p>
     </div>
     <div v-else class="lc-app" :class="{ 'is-narrow': narrow, 'has-managers': managerColumn }">

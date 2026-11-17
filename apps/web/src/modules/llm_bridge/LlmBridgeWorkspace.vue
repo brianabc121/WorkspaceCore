@@ -253,7 +253,7 @@ function remove(bridge: Bridge) {
           <legend>控制的平台</legend>
           <label v-for="p in PLATFORMS" :key="p.id" class="check-field"><input v-model="form.platforms" type="checkbox" :value="p.id" />{{ p.name }}</label>
         </fieldset>
-        <p v-if="!form.id" class="form-help">只有勾选的平台能在这个管理器上登录账号、被智能体使用；之后可以在“平台与账号”里改。ChatGPT 和 Codex 用的是同一个 ChatGPT 账号。</p>
+        <p v-if="!form.id" class="form-help">只有勾选的平台能在这个管理器上登录账号、被智能体使用；之后可以在“平台与账号”里改。Codex 用 ChatGPT 账号登录，聊天和开发都走它。</p>
         <div class="lb-actions">
           <button type="button" class="secondary-button" :disabled="busy" @click="closeForm">取消</button>
           <button type="submit" class="primary-button" :disabled="busy">{{ busy ? (form.id ? '正在保存…' : '正在连接…') : form.id ? '保存' : '添加' }}</button>

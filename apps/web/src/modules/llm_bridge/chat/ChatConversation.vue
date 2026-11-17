@@ -327,7 +327,7 @@ function saveTitle() {
   if (!value) { headError.value = '标题不能为空。'; return }
   return act(async () => { await props.chat.rename(props.bridge.id, props.sessionId, value); renaming.value = false })
 }
-// 换模型：Claude / CodeBuddy 每个回合起一次官方程序，模型可以逐回合换；ChatGPT / Codex 的会话换不了
+// 换模型：Claude / CodeBuddy 每个回合起一次官方程序，模型可以逐回合换；Codex 的会话换不了
 const canSwitch = computed(() => !!session.value && ['claude', 'workbuddy'].includes(session.value.platform) && session.value.origin === 'bridge' && session.value.status === 'active' && props.bridge.enabled)
 const optionPlatform = computed(() => (canSwitch.value ? (session.value!.platform as Platform) : null))
 const optionMode = computed<'chat' | 'dev'>(() => (session.value?.mode === 'dev' ? 'dev' : 'chat'))

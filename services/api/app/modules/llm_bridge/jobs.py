@@ -24,6 +24,7 @@ from app.modules import service as modules
 from app.modules.llm_bridge import digests
 from app.modules.llm_bridge.client import BridgeCallError
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeSession
+from app.modules.llm_bridge.schemas import canonical_platform
 from app.modules.llm_bridge.service import LlmBridgeService
 
 logger = logging.getLogger(__name__)
@@ -50,7 +51,7 @@ def _row(bridge: LlmBridge, item: dict[str, Any]) -> dict[str, Any]:
         "workspace_id": bridge.workspace_id,
         "bridge_id": bridge.id,
         "session_id": str(item["session_id"]),
-        "platform": str(item.get("platform") or ""),
+        "platform": canonical_platform(str(item.get("platform") or "")),
         "mode": str(item.get("mode") or ""),
         "model": item.get("model"),
         "title": str(item.get("title") or "")[:200],

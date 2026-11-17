@@ -23,12 +23,13 @@ import json, sys
 data = json.load(sys.stdin)
 assert set(data["accounts"]) == {"openai", "claude", "workbuddy"}, data["accounts"].keys()
 # 没有选过控制的平台时是全部
-assert data["platforms"] == ["chatgpt", "codex", "claude", "workbuddy"], data["platforms"]
+assert data["platforms"] == ["codex", "claude", "workbuddy"], data["platforms"]   # 没有单独的 ChatGPT 平台（T-0280）
 for slot, account in data["accounts"].items():
     assert account["enabled"], (slot, account)
     assert account["state"] == "logged_out", (slot, account)   # 新容器：都还没登录，官方程序都能启动
 channels = {(c["platform"], c["mode"]): c["available"] for c in data["channels"]}
-assert channels[("chatgpt", "chat")] and channels[("codex", "dev")] and channels[("claude", "chat")]
+assert channels[("codex", "chat")] and channels[("codex", "dev")] and channels[("claude", "chat")]
+assert ("chatgpt", "chat") not in channels
 assert not channels[("codex", "cloud")] and not channels[("claude", "cloud")]
 ' || fail "管理接口返回的状态不对：$status"
 

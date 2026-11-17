@@ -320,7 +320,7 @@ async def llm_chat_move_queued(
     f"{prefix}/sessions/{{session_id}}/model",
     summary="聊天：换这个会话之后用的模型（admin）",
     description="从下一回合起生效，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换；"
-    "ChatGPT / Codex 的会话 422 NOT_SUPPORTED（要换就新建会话）。",
+    "Codex 的会话 422 NOT_SUPPORTED（要换就新建会话）。",
     dependencies=write,
     responses=write_errors,
 )

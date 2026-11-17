@@ -258,9 +258,34 @@ class Store:
             """
         )
         self._migrate_memory()
+        self._migrate_platforms()
         self._db.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),)
         )
+
+    def _migrate_platforms(self) -> None:
+        """“ChatGPT 聊天”并入 Codex（T-0280）：旧库里平台 chatgpt 的记录改成 codex。可以重复执行。
+
+        - 会话：平台改成 codex（模式还是聊天），会话号、内容都不变；
+        - 额度、暂停：同一个账号，codex 已有的为准，没有的把 chatgpt 那一行挪过去；
+        - 设置里控制的平台：chatgpt 换成 codex，去重。
+        """
+        db = self._db
+        db.execute("UPDATE sessions SET platform = 'codex' WHERE platform = 'chatgpt'")
+        for table in ("quota_windows", "platform_pauses", "environments"):
+            db.execute(
+                f"UPDATE OR IGNORE {table} SET platform = 'codex' WHERE platform = 'chatgpt'"  # noqa: S608
+            )
+        db.execute("DELETE FROM quota_windows WHERE platform = 'chatgpt'")
+        db.execute("DELETE FROM platform_pauses WHERE platform = 'chatgpt'")
+        row = db.execute("SELECT value FROM settings WHERE key = 'platforms'").fetchone()
+        chosen = json.loads(row["value"]) if row else None
+        if isinstance(chosen, list) and "chatgpt" in chosen:
+            fixed = list(dict.fromkeys("codex" if p == "chatgpt" else p for p in chosen))
+            db.execute(
+                "UPDATE settings SET value = ? WHERE key = 'platforms'",
+                (json.dumps(fixed, ensure_ascii=False),),
+            )
 
     def _migrate_memory(self) -> None:
         """上下文与压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 第 4 节）：

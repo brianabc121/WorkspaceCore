@@ -82,6 +82,51 @@ def _error_of(body: Any) -> BridgeCallError | None:
     return None
 
 
+def platforms_header(platforms: tuple[str, ...]) -> str:
+    """X-Bridge-Platforms 的值：一项是平台，或“平台:用法”（codex:chat 只能对话）。
+
+    没升级的管理器还单列 chatgpt（就是 codex 的纯聊天）：给了 codex 或 codex:chat 就一并带上
+    chatgpt，让它那边旧的 chatgpt 会话照样能用。只能对话的实例在旧管理器上也就只到 chatgpt
+    （它认不出 codex:chat），正好是原来的权限范围。新版本的管理器把头里的 chatgpt 当成
+    codex:chat（T-0280）。
+    """
+    allowed = list(platforms)
+    if any(p in ("codex", "codex:chat") for p in allowed) and "chatgpt" not in allowed:
+        allowed.append("chatgpt")
+    return ",".join(allowed)
+
+
+def _codex_chat_only(caller: BridgeCaller) -> bool:
+    platforms = caller.platforms
+    return platforms is not None and "codex:chat" in platforms and "codex" not in platforms
+
+
+async def create_session(
+    client: BridgeClient, caller: BridgeCaller, arguments: dict[str, Any]
+) -> Any:
+    """新建会话（llm_session_create）；兼顾还没升级、Codex 的对话还叫 chatgpt 的管理器（T-0280）。
+
+    - 只能对话的调用方：Codex 对话直接用旧名字 chatgpt。新版本的管理器把它当成 codex，
+      旧版本按它自己的 chatgpt 平台检查：都正好是“只能对话”；
+    - 其他情况先用 codex；旧版本的管理器回答“没有启用 codex”（只启用了 chatgpt）时，
+      换旧名字再试一次。没建成会话，不会重复。
+    """
+    codex_chat = arguments.get("platform") == "codex" and arguments.get("mode") == "chat"
+    if codex_chat and _codex_chat_only(caller):
+        return await client.tool(caller, "llm_session_create", {**arguments, "platform": "chatgpt"})
+    try:
+        return await client.tool(caller, "llm_session_create", arguments)
+    except BridgeCallError as error:
+        if not (codex_chat and error.code == "NOT_SUPPORTED" and "没有启用" in error.message):
+            raise
+        try:
+            return await client.tool(
+                caller, "llm_session_create", {**arguments, "platform": "chatgpt"}
+            )
+        except BridgeCallError:
+            raise error from None
+
+
 @dataclass(frozen=True)
 class BridgeCaller:
     """代表哪个实例调用，以及它的权限范围（write / account / takeover）。"""
@@ -131,7 +176,7 @@ class BridgeClient:
             "X-Bridge-Scopes": ",".join(caller.scopes),
         }
         if caller.platforms is not None:
-            headers["X-Bridge-Platforms"] = ",".join(caller.platforms)
+            headers["X-Bridge-Platforms"] = platforms_header(caller.platforms)
         if caller.source:
             headers["X-Bridge-Source"] = quote(json.dumps(caller.source, ensure_ascii=False))
         body = {

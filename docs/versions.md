@@ -82,7 +82,7 @@ OpenIM 的官方镜像有越权问题，已换成自建的补丁镜像（`2026-1
 | 组件 | 版本 | 许可证 | 用途 |
 |---|---|---|---|
 | 基础镜像 | `python:3.12.15-slim-trixie`（与 api 相同的 digest）；Node 取自 `node:22.23.4-trixie-slim@sha256:be1e2a3dc2c4fd68cdfadad2a696a280e0d2749098bee509230174d72fb768c6` | PSF / MIT | 会话桥服务与官方命令行的运行时 |
-| Codex CLI | `@openai/codex@0.169.0`（npm） | Apache-2.0 | ChatGPT 聊天、Codex 通道 |
+| Codex CLI | `@openai/codex@0.169.0`（npm） | Apache-2.0 | Codex 的对话、开发通道（原来单列的“ChatGPT 聊天”就是 Codex 的对话） |
 | Claude Code | `@anthropic-ai/claude-code@2.1.323`（npm） | 专有（Anthropic 的条款） | Claude 通道 |
 | CodeBuddy Code | `@tencent-ai/codebuddy-code@2.184.0`（npm） | 专有（腾讯的条款） | WorkBuddy 通道 |
 | Python 依赖 | `services/llm-bridge/uv.lock`：fastapi、pydantic、pydantic-settings、uvicorn、`mcp==2.3.0`（与工作台相同） | MIT / BSD | 会话桥服务 |

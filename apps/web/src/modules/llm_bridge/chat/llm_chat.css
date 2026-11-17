@@ -78,8 +78,8 @@
 .lc-item[aria-current="true"] { background: var(--accent-soft); }
 .lc-mark { flex: none; width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; background: var(--surface-2); color: var(--muted); font-size: .74rem; font-weight: 700; }
 .lc-mark svg { width: 19px; height: 19px; }
-.lc-mark:is([data-platform="chatgpt"], [data-platform="codex"]) { background: color-mix(in srgb, var(--text) 8%, var(--surface)); color: var(--text); }
-.lc-mark:is([data-platform="chatgpt"], [data-platform="codex"])[data-mode="dev"] { background: var(--accent-soft); color: var(--accent); }
+.lc-mark[data-platform="codex"] { background: color-mix(in srgb, var(--text) 8%, var(--surface)); color: var(--text); }
+.lc-mark[data-platform="codex"][data-mode="dev"] { background: var(--accent-soft); color: var(--accent); }
 .lc-mark[data-platform="claude"] { background: color-mix(in srgb, var(--warning) 14%, var(--surface)); color: var(--warning); }
 .lc-mark[data-platform="workbuddy"] { background: var(--accent-soft); color: var(--accent); }
 .lc-item[aria-current="true"] .lc-mark { background: var(--surface); box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 10%, transparent); }

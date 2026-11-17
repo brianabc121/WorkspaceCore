@@ -12774,7 +12774,6 @@
             "description": "它控制的平台",
             "items": {
               "enum": [
-                "chatgpt",
                 "codex",
                 "claude",
                 "workbuddy"
@@ -13389,7 +13388,6 @@
           },
           "platform": {
             "enum": [
-              "chatgpt",
               "codex",
               "claude",
               "workbuddy"
@@ -13568,11 +13566,11 @@
           },
           "platforms": {
             "default": [],
-            "description": "允许的平台；空表示都允许",
+            "description": "允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）",
             "items": {
               "enum": [
-                "chatgpt",
                 "codex",
+                "codex:chat",
                 "claude",
                 "workbuddy"
               ],
@@ -13656,6 +13654,7 @@
             "type": "string"
           },
           "platforms": {
+            "description": "允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）",
             "items": {
               "type": "string"
             },
@@ -13699,7 +13698,6 @@
               {
                 "items": {
                   "enum": [
-                    "chatgpt",
                     "codex",
                     "claude",
                     "workbuddy"
@@ -14108,7 +14106,6 @@
             "description": "这个 MCP 管理器控制的平台",
             "items": {
               "enum": [
-                "chatgpt",
                 "codex",
                 "claude",
                 "workbuddy"
@@ -15093,7 +15090,6 @@
           },
           "platforms": {
             "default": [
-              "chatgpt",
               "codex",
               "claude",
               "workbuddy"
@@ -15297,7 +15293,6 @@
               {
                 "items": {
                   "enum": [
-                    "chatgpt",
                     "codex",
                     "claude",
                     "workbuddy"
@@ -16088,7 +16083,6 @@
           },
           "platform": {
             "enum": [
-              "chatgpt",
               "codex",
               "claude",
               "workbuddy"
@@ -17794,7 +17788,6 @@
           },
           "platform": {
             "enum": [
-              "chatgpt",
               "codex",
               "claude",
               "workbuddy"
@@ -59130,7 +59123,6 @@
             "required": true,
             "schema": {
               "enum": [
-                "chatgpt",
                 "codex",
                 "claude",
                 "workbuddy"
@@ -59414,7 +59406,6 @@
               "anyOf": [
                 {
                   "enum": [
-                    "chatgpt",
                     "codex",
                     "claude",
                     "workbuddy"
@@ -61370,7 +61361,7 @@
     },
     "/api/v1/llm_bridge/bridges/{bridge_id}/chat/sessions/{session_id}/model": {
       "put": {
-        "description": "从下一回合起生效，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换；ChatGPT / Codex 的会话 422 NOT_SUPPORTED（要换就新建会话）。",
+        "description": "从下一回合起生效，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换；Codex 的会话 422 NOT_SUPPORTED（要换就新建会话）。",
         "operationId": "llm_chat_set_model",
         "parameters": [
           {
@@ -66559,7 +66550,6 @@
               "anyOf": [
                 {
                   "enum": [
-                    "chatgpt",
                     "codex",
                     "claude",
                     "workbuddy"

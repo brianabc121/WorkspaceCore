@@ -28,8 +28,14 @@ from app.models import AgentInstance, KnowledgeNote
 from app.models.task import Task
 from app.models.timeline import TaskRun
 from app.modules.llm_bridge import digests, memory, watches
-from app.modules.llm_bridge.client import BridgeCaller, BridgeCallError, BridgeClient
+from app.modules.llm_bridge.client import (
+    BridgeCaller,
+    BridgeCallError,
+    BridgeClient,
+    create_session,
+)
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeDigest, LlmBridgeGrant
+from app.modules.llm_bridge.schemas import canonical_platform, grant_allows, grant_platforms
 from app.modules.llm_bridge.service import LlmBridgeService
 from app.modules.llm_bridge.tool_schemas import BridgeToolOutput
 from app.modules.llm_bridge.tools import SPECS, WRITE_TOOL_NAMES
@@ -277,7 +283,14 @@ async def _forward(
                 + "（它们只在新建会话时用）",
             )
     platform = (create or arguments).get("platform")
-    if platform and grant.platforms and platform not in grant.platforms:
+    mode = (create or arguments).get("mode")
+    if isinstance(platform, str):
+        platform = canonical_platform(platform)
+    if platform and not grant_allows(grant.platforms, platform, mode):
+        if grant_allows(grant.platforms, platform):
+            raise ToolCallError(
+                "FORBIDDEN_CAPABILITY", f"管理员只给你开了和 {platform} 对话，不能用 {mode} 模式"
+            )
         raise ToolCallError("FORBIDDEN_CAPABILITY", f"管理员没有给你开 {platform} 这个平台")
     # 要发给第三方平台的内容先过密钥扫描：像密钥的不发、不存（例外九的“密钥拦截”）
     if any(
@@ -337,7 +350,7 @@ async def _forward(
         str(instance.id),
         instance.name,
         _scopes(grant),
-        tuple(grant.platforms) if grant.platforms else None,
+        tuple(grant_platforms(grant.platforms)) if grant.platforms else None,
         source,
     )
     if tool == "llm_bridge_status" and bridge_name is None and len(bridges) > 1:
@@ -351,7 +364,7 @@ async def _forward(
     continued: dict[str, Any] | None = None
     try:
         if create is not None:
-            made = await client.tool(caller, "llm_session_create", create)
+            made = await create_session(client, caller, create)
             if not isinstance(made, dict) or not isinstance(made.get("session_id"), str):
                 raise ToolCallError("EXTERNAL_UNAVAILABLE", "会话桥返回了无法识别的结果")
             arguments["session_id"] = made["session_id"]
@@ -362,7 +375,10 @@ async def _forward(
                 "llm_session_continue",
                 {"session_id": continue_from, "request_id": f"{arguments['request_id']}.continue"},
             )
-        data = await client.tool(caller, "llm_" + tool.removeprefix(PREFIX), arguments)
+        if tool == "llm_bridge_session_create":
+            data = await create_session(client, caller, arguments)
+        else:
+            data = await client.tool(caller, "llm_" + tool.removeprefix(PREFIX), arguments)
     except (BridgeCallError, ConnectorError) as error:
         failure = _call_error(error, "llm_bridge_session_create" if create is not None else tool)
         if create is not None and "session_id" in arguments:

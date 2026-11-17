@@ -71,6 +71,7 @@ from app.modules.llm_bridge.deploy_schemas import (
     LlmBridgeUninstallIn,
 )
 from app.modules.llm_bridge.models import LlmBridge, LlmBridgeDeployJob, LlmBridgeInstall
+from app.modules.llm_bridge.schemas import canonical_platforms
 from app.modules.llm_bridge.service import (
     LlmBridgeService,
     install_out,
@@ -374,7 +375,7 @@ class LlmBridgeDeployService:
                     enabled=bridge.enabled,
                     reachable=None if data is None else bool(data),
                     version=str(data["version"]) if data and data.get("version") else None,
-                    platforms=[str(p) for p in platforms]
+                    platforms=canonical_platforms(platforms)
                     if isinstance(platforms, list)
                     else list(install.platforms or []),
                     logged_in=sorted(

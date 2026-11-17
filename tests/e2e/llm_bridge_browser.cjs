@@ -33,7 +33,8 @@ const adminEmail = `lb-admin-${run}@browser.example.com`
 const memberEmail = `lb-member-${run}@browser.example.com`
 const ONE = `1 号 ${run}`
 const TWO = `2 号 ${run}`
-const ALL_PLATFORMS = ['chatgpt', 'codex', 'claude', 'workbuddy']
+// 没有单独的 ChatGPT 平台（T-0280）：原来的 ChatGPT 聊天就是 Codex 的对话
+const ALL_PLATFORMS = ['codex', 'claude', 'workbuddy']
 const INSTANCE = `lb-agent-${run}`
 // 假的 API 密钥：只用来验证“保存、显示为已登录、不回显、能退出”，不会发给任何平台
 const FAKE_KEY = `e2e-not-a-real-key-${randomBytes(12).toString('hex')}`
@@ -177,7 +178,7 @@ async function main() {
     await page.getByRole('heading', { name: '管理器与账号', level: 2 }).waitFor()
     await sidebar(page).getByRole('link', { name: '大模型客户端', exact: true }).waitFor()
     await page.getByText('还没有 MCP 管理器。').waitFor()
-    let form = await addManager(page, { name: ONE, url: bridgeUrl, token: 'too-short', uncheck: ['ChatGPT', 'Codex'] })
+    let form = await addManager(page, { name: ONE, url: bridgeUrl, token: 'too-short', uncheck: ['Codex'] })
     await page.getByText('令牌至少 32 个字符').first().waitFor()
     // 令牌不对：添加时就验证，不会留下一个连不上的管理器
     await form.getByLabel('管理令牌').fill('x'.repeat(40))
@@ -202,8 +203,9 @@ async function main() {
     // Claude：容器里有官方程序时是“未登录”；本机验收没有接 Claude 程序时是“不可用”
     const claudeState = await account(page, 'Claude').locator('.asv-state').first().innerText()
     check(['未登录', '不可用'].includes(claudeState.trim()), `Claude 的状态不对：${claudeState}`)
-    check(await account(page, 'ChatGPT / Codex').count() === 0, '1 号不控制 ChatGPT / Codex，不应显示它的账号')
-    for (const [name, on] of [['ChatGPT', false], ['Codex', false], ['Claude', true], ['CodeBuddy', true]]) {
+    check(await account(page, 'Codex').count() === 0, '1 号不控制 Codex，不应显示它的账号')
+    check(await control(page).getByLabel('ChatGPT', { exact: true }).count() === 0, '没有单独的 ChatGPT 平台可勾选')
+    for (const [name, on] of [['Codex', false], ['Claude', true], ['CodeBuddy', true]]) {
       check((await control(page).getByLabel(name, { exact: true }).isChecked()) === on, `1 号“控制的平台”里 ${name} 的勾选不对`)
     }
     const channels = page.getByRole('table', { name: '通道' })
@@ -214,14 +216,14 @@ async function main() {
     check(await channels.getByRole('row').filter({ hasText: 'Codex' }).count() === 0, '通道表不应列出 1 号不控制的平台')
     await page.getByRole('group', { name: '运行概览' }).getByText('排队中 0').waitFor()
     const refusedLogin = await api(page, workspace, 'POST', `/api/v1/llm_bridge/bridges/${oneId}/accounts/openai/login`, { method: 'api_key', api_key: FAKE_KEY })
-    check(refusedLogin.status === 409, `1 号不控制 ChatGPT / Codex，后端也要拒绝在它上面登录：${JSON.stringify(refusedLogin)}`)
+    check(refusedLogin.status === 409, `1 号不控制 Codex，后端也要拒绝在它上面登录：${JSON.stringify(refusedLogin)}`)
     step(`1 号的“平台与账号”：只有 Claude（${claudeState.trim()}）和 CodeBuddy 的账号与通道；不控制的平台后端也拒绝登录`)
 
     // ---------------------------------------------------------------- 添加 2 号：控制 Codex / Claude / CodeBuddy
     let twoId = null
     if (two) {
       // 每个管理器有自己的令牌：1 号的令牌用不到 2 号上
-      form = await addManager(page, { name: TWO, url: secondUrl, token: bridgeToken, uncheck: ['ChatGPT'] })
+      form = await addManager(page, { name: TWO, url: secondUrl, token: bridgeToken, uncheck: [] })
       await page.getByText('MCP 管理器不接受这枚令牌').waitFor()
       check((await bridges()).length === 1, '用 1 号的令牌不应添加 2 号')
       await form.getByLabel('管理令牌').fill(secondToken)
@@ -231,11 +233,11 @@ async function main() {
       const onTwo = await platformsOn(page, TWO)
       check(onTwo.length === 3 && onTwo[0].startsWith('Codex') && onTwo[1].startsWith('Claude') && onTwo[2].startsWith('CodeBuddy'), `2 号卡片上控制的平台不对：${onTwo}`)
       check((await card(page, TWO).getAttribute('aria-current')) === 'true', '添加后应选中新的管理器')
-      await account(page, 'ChatGPT / Codex').getByText('未登录').waitFor({ timeout: 60000 })
-      check(!(await control(page).getByLabel('ChatGPT', { exact: true }).isChecked()), '2 号没有勾 ChatGPT')
+      await account(page, 'Codex').getByText('未登录').waitFor({ timeout: 60000 })
       await channels.getByRole('row').filter({ hasText: 'Codex' }).filter({ hasText: '开发' }).getByText('可用', { exact: true }).waitFor()
-      check(await channels.getByRole('row').filter({ hasText: 'ChatGPT' }).count() === 0, '2 号没有勾 ChatGPT，通道表不应列出它')
-      step('添加 2 号管理器（勾 Codex / Claude / CodeBuddy）：1 号的令牌用不上；卡片列出三个平台，有 ChatGPT / Codex 的账号但没有 ChatGPT 聊天通道')
+      await channels.getByRole('row').filter({ hasText: 'Codex' }).filter({ hasText: '对话' }).getByText('可用', { exact: true }).waitFor()
+      check(await channels.getByRole('rowheader', { name: /ChatGPT/ }).count() === 0, '没有单独的 ChatGPT 通道：纯聊天就是 Codex 的对话')
+      step('添加 2 号管理器（Codex / Claude / CodeBuddy 全勾）：1 号的令牌用不上；卡片列出三个平台，Codex 的账号下有对话和开发两个通道，没有单独的 ChatGPT')
     } else console.log('跳过  添加 2 号管理器（没有设置 LLM_BRIDGE_ADMIN_TOKEN_2）')
 
     // ---------------------------------------------------------------- 各自一套账号：在 1 号登录 CodeBuddy
@@ -385,7 +387,10 @@ async function main() {
     await page.getByText(`已保存「${INSTANCE}」的权限。`).waitFor()
     await grant.getByLabel('新建会话和发送').check()
     await grant.getByText('已启用').waitFor()
-    await grant.getByRole('group', { name: `${INSTANCE}允许的平台` }).getByLabel('Codex').check()
+    const allowed = grant.getByRole('group', { name: `${INSTANCE}允许的平台` })
+    // 没有单独的 ChatGPT；“Codex（只能对话）”和整个 Codex 是两项（T-0280），这里给整个 Codex
+    check(await allowed.getByLabel('ChatGPT').count() === 0 && await allowed.getByLabel('Codex（只能对话）').count() === 1, '允许的平台应是 Codex / Codex（只能对话）/ Claude / CodeBuddy')
+    await allowed.getByLabel('Codex', { exact: true }).check()
     await waitGrant((g) => g.enabled && g.can_write && !g.can_account && g.platforms.join() === 'codex' && g.bridge_ids === null, '启用后的权限不对')
     // 可用的开发环境（T-0247）：默认一个都不能用；这时还没有开发环境可勾
     const devEnvs = grant.getByRole('group', { name: `${INSTANCE}可用的开发环境`, exact: true })
@@ -499,7 +504,7 @@ async function main() {
     await deployForm.getByRole('radio', { name: '本机', exact: true }).waitFor()
     check(await deployForm.getByRole('radio', { name: '本机', exact: true }).isChecked(), '默认应选中“本机”')
     check((await deployForm.getByLabel('部署到哪台服务器').count()) === 0 && (await deployForm.getByLabel('登录密码').count()) === 0, '本机部署不用选服务器、不用填密码')
-    await deployForm.getByRole('checkbox', { name: 'ChatGPT' }).uncheck()
+    check(await deployForm.getByRole('checkbox', { name: 'ChatGPT' }).count() === 0, '部署表单里没有单独的 ChatGPT 平台')
     await deployForm.getByRole('button', { name: '部署在本机' }).click()
     await card(page, '本机').waitFor({ timeout: 30000 })
     const localId = (await api(page, workspace, 'GET', '/api/v1/llm_bridge/local')).body.bridge_id

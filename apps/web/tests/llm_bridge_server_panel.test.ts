@@ -19,7 +19,7 @@ const NOTE = '这些容器不受本页面的重启、清理、回收和卸载影
 const path = (r: Request) => new URL(r.url).pathname
 const lbModule: Schema['ModuleOut'] = { ...newsModule, key: 'llm_bridge', name: '大模型客户端', tools: [], widgets: [] }
 const install = (over: Partial<Install> = {}): Install => ({ target_kind: 'agent_server', target_id: SERVER, server_name: '机房一号', mode: 'tunnel', port: 18787, needs_sudo: false, outdated: false, deployed_at: at, ...over })
-const manager = (over: Partial<Manager> = {}): Manager => ({ bridge_id: ONE, name: '2 号', enabled: true, reachable: true, version: '0.1.0', platforms: ['chatgpt', 'codex', 'claude'], logged_in: ['claude', 'openai'], deployment: install(), ...over })
+const manager = (over: Partial<Manager> = {}): Manager => ({ bridge_id: ONE, name: '2 号', enabled: true, reachable: true, version: '0.1.0', platforms: ['codex', 'claude'], logged_in: ['claude', 'openai'], deployment: install(), ...over })
 
 interface Options { role?: Role; managers?: Manager[]; available?: boolean; lb?: Schema['ModuleOut'] }
 /** 智能体服务器页（一台初始化好的服务器）和容器服务器页（一台服务器）都能打开；installs 按 options 回 */
@@ -66,7 +66,7 @@ describe('服务器页面上的“MCP 管理器”区块', () => {
     const online = within(table).getByRole('row', { name: /^2 号/ })
     expect(within(online).getByText('在线')).toBeVisible()
     expect(online).toHaveTextContent('经 SSH 通道（服务器本机端口 18787）')
-    expect(online).toHaveTextContent('OpenAI、Claude')
+    expect(online).toHaveTextContent('Codex、Claude')
     expect(within(online).getByRole('link', { name: '打开聊天：2 号' })).toHaveAttribute('href', `/llm_bridge?m=${ONE}`)
     expect(within(online).getByRole('link', { name: '管理：2 号' })).toHaveAttribute('href', `/llm_bridge?view=manage&m=${ONE}`)
     const off = within(table).getByRole('row', { name: /^3 号/ })
