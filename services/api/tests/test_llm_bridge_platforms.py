@@ -39,11 +39,14 @@ def test_descriptions_only_list_current_platforms() -> None:
     assert "chatgpt" not in schema["properties"]["platform"]["description"]
 
 
-def test_a_chatgpt_grant_stays_chat_only() -> None:
-    """授权里的 chatgpt 当时只能聊天：换成 codex:chat，不放宽成整个 Codex（开发会话碰不到）。"""
+def test_a_chatgpt_grant_becomes_all_of_codex() -> None:
+    """授权里的旧名字 chatgpt 按整个 Codex 处理（人类 2026-11-17 决定，T-0282）；
+    只能对话的 codex:chat 由管理员在页面上特意选。"""
     grant = LlmBridgeGrantIn.model_validate({"enabled": True, "platforms": ["chatgpt", "claude"]})
-    assert grant.platforms == ["codex:chat", "claude"]
-    assert grant_platforms(["chatgpt", "codex"]) == ["codex"]  # 整个 Codex 已经包括对话
+    assert grant.platforms == ["codex", "claude"]
+    assert grant_allows(["chatgpt"], "codex", "dev")
+    assert grant_platforms(["chatgpt", "codex"]) == ["codex"]
+    assert grant_platforms(["codex:chat", "chatgpt"]) == ["codex"]  # 整个 Codex 已经包括对话
     assert grant_platforms(["codex:chat", "codex:chat"]) == ["codex:chat"]
     only_chat = ["codex:chat"]
     assert grant_allows(only_chat, "codex", "chat")

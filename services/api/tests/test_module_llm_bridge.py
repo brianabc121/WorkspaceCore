@@ -1150,7 +1150,7 @@ async def test_tool_failures_are_explicit(rig: Rig) -> None:
 
 
 async def test_chat_only_grant_stays_away_from_codex_dev_sessions(rig: Rig) -> None:
-    """原来只给了 ChatGPT（只能聊天）的实例按 codex:chat 存（T-0280）：能和 Codex 对话，
+    """管理员只给了 “Codex（只能对话）”（codex:chat，T-0280）：能和 Codex 对话，
     但有接手权限也读不到、发不了别人的 Codex 开发会话，也建不了开发会话。"""
     env = rig.env
     fake_driver = importlib.import_module("bridge.drivers.fake")
@@ -1171,7 +1171,7 @@ async def test_chat_only_grant_stays_away_from_codex_dev_sessions(rig: Rig) -> N
     chat = ok(await call(env, owner, "llm_bridge_session_create", chat_args))["session_id"]
 
     limited = await rig.agent(
-        "chat-only", can_write=True, can_account=True, can_takeover=True, platforms=["chatgpt"]
+        "chat-only", can_write=True, can_account=True, can_takeover=True, platforms=["codex:chat"]
     )
     grants = (await rig.api("GET", "/grants")).json()["grants"]
     assert next(g for g in grants if g["instance_name"] == "chat-only")["platforms"] == [
@@ -1207,3 +1207,17 @@ async def test_chat_only_grant_stays_away_from_codex_dev_sessions(rig: Rig) -> N
         params={"platform": "codex", "limit": 2, "offset": 0},
     )
     assert len(paged.json()["sessions"]) == 2 and paged.json()["next_offset"] == 2
+
+    # 授权里的旧名字 chatgpt 是整个 Codex（人类 2026-11-17 决定，T-0282）：
+    # 给了开发环境就能用开发模式
+    former = await rig.agent(
+        "former-chatgpt", can_write=True, platforms=["chatgpt"], environment_ids=[env_id]
+    )
+    grants = (await rig.api("GET", "/grants")).json()["grants"]
+    assert next(g for g in grants if g["instance_name"] == "former-chatgpt")["platforms"] == [
+        "codex"
+    ]
+    made_dev = ok(
+        await call(env, former, "llm_bridge_session_create", {**dev_args, "request_id": "d3"})
+    )
+    assert (made_dev["platform"], made_dev["mode"]) == ("codex", "dev")
