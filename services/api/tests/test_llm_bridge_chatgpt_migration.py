@@ -1,4 +1,5 @@
-"""迁移 0077（T-0280）：去掉单列的 ChatGPT 平台，库里的 chatgpt 改成 codex。"""
+"""迁移 0077（T-0280）：去掉单列的 ChatGPT 平台，库里的 chatgpt 改成 codex；
+迁移 0078（T-0282）：授权里的 codex:chat 再改成整个 codex。"""
 
 import asyncio
 import json
@@ -149,7 +150,7 @@ def test_chatgpt_becomes_codex_in_every_stored_place(temp_database_url: str) -> 
     grants = asyncio.run(
         _fetch(temp_database_url, "SELECT instance_id, platforms FROM workspace.llm_bridge_grants")
     )
-    # 原来只给了 ChatGPT（只能聊天）：变成只能和 Codex 对话，不放宽成整个 Codex；
+    # 0077 这一步：原来只给了 ChatGPT（只能聊天）的变成只能和 Codex 对话（0078 再改成整个 Codex）；
     # 已经给了 Codex 的，ChatGPT 并进去。去重、保留原来的顺序；空列表（都允许）不动
     assert {r["instance_id"]: json.loads(r["platforms"]) for r in grants} == {
         chat_only: ["codex:chat"],
@@ -168,3 +169,79 @@ def test_chatgpt_becomes_codex_in_every_stored_place(temp_database_url: str) -> 
         _fetch(temp_database_url, "SELECT platform FROM workspace.llm_bridge_sessions")
     )
     assert sorted(r["platform"] for r in again) == ["claude", "codex", "codex"]
+    # 到最新：原来只给了 ChatGPT 的也能用 Codex 的开发模式（0078，人类 2026-11-17 决定）
+    latest = asyncio.run(
+        _fetch(temp_database_url, "SELECT instance_id, platforms FROM workspace.llm_bridge_grants")
+    )
+    assert {r["instance_id"]: json.loads(r["platforms"]) for r in latest} == {
+        chat_only: ["codex"],
+        mixed: ["claude", "codex", "workbuddy"],
+        untouched: [],
+    }
+
+
+def test_codex_chat_grants_become_all_of_codex(temp_database_url: str) -> None:
+    """0078：已经跑过 0077 的库，授权里的 codex:chat 换成 codex，去重、保留顺序，其他不动。"""
+    config = alembic_config(temp_database_url)
+    command.upgrade(config, "0077")
+    user, workspace = uuid4(), uuid4()
+    cases: dict[str, tuple[list[str], list[str]]] = {
+        "只能对话": (["codex:chat"], ["codex"]),
+        "夹在中间": (["claude", "codex:chat", "workbuddy"], ["claude", "codex", "workbuddy"]),
+        "两个都有": (["codex:chat", "claude", "codex"], ["codex", "claude"]),
+        "没有 Codex": (["claude"], ["claude"]),
+        "都允许": ([], []),
+    }
+    instances = {name: uuid4() for name in cases}
+    asyncio.run(
+        _run(
+            temp_database_url,
+            (
+                "INSERT INTO workspace.users(id,email,password_hash,display_name) "
+                "VALUES($1,'llm@example.test','synthetic','LLM')",
+                user,
+            ),
+            (
+                "INSERT INTO workspace.workspaces(id,name,owner_id) VALUES($1,'A',$2)",
+                workspace,
+                user,
+            ),
+            *(
+                (
+                    "INSERT INTO workspace.agent_instances"
+                    "(id,workspace_id,name,network_mode,im_user_id,im_nickname) "
+                    "VALUES($1,$2,$3,'intranet',$4,$3)",
+                    instance,
+                    workspace,
+                    name,
+                    f"agent_{index}",
+                )
+                for index, (name, instance) in enumerate(instances.items())
+            ),
+            *(
+                (
+                    "INSERT INTO workspace.llm_bridge_grants"
+                    "(instance_id,workspace_id,enabled,platforms) VALUES($1,$2,true,$3::jsonb)",
+                    instances[name],
+                    workspace,
+                    json.dumps(before),
+                )
+                for name, (before, _) in cases.items()
+            ),
+        )
+    )
+
+    command.upgrade(config, "0078")
+    rows = asyncio.run(
+        _fetch(temp_database_url, "SELECT instance_id, platforms FROM workspace.llm_bridge_grants")
+    )
+    got = {r["instance_id"]: json.loads(r["platforms"]) for r in rows}
+    assert got == {instances[name]: after for name, (_, after) in cases.items()}
+
+    # downgrade 不改数据；再升级一次也不变
+    command.downgrade(config, "0077")
+    command.upgrade(config, "0078")
+    rows = asyncio.run(
+        _fetch(temp_database_url, "SELECT instance_id, platforms FROM workspace.llm_bridge_grants")
+    )
+    assert {r["instance_id"]: json.loads(r["platforms"]) for r in rows} == got

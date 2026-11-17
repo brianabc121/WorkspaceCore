@@ -22,7 +22,7 @@ const FLAGS = [
 ] as const
 type Flag = (typeof FLAGS)[number]['key']
 
-// 允许的平台：一项是平台，或 codex:chat（只能和 Codex 对话，不能用开发模式；原来只勾了 ChatGPT 的实例是这一项，T-0280）
+// 允许的平台：一项是平台，或 codex:chat（只能和 Codex 对话，不能用开发模式，T-0280）。原来只勾了 ChatGPT 的实例升级后是整个 Codex（T-0282）
 type GrantPlatform = GrantBody['platforms'][number]
 const CODEX_CHAT: GrantPlatform = 'codex:chat'
 const GRANT_IDS: GrantPlatform[] = [...PLATFORMS.map(p => p.id as GrantPlatform), CODEX_CHAT]
@@ -82,7 +82,7 @@ const checked = (event: Event) => (event.target as HTMLInputElement).checked
           <legend>允许的平台{{ g.enabled && !g.platforms.length ? '（现在：全部）' : '' }}</legend>
           <label v-for="p in PLATFORMS" :key="p.id" class="check-field"><input type="checkbox" :checked="g.platforms.includes(p.id)" @change="setPlatform(g, p.id, checked($event))" />{{ p.name }}</label>
           <label class="check-field"><input type="checkbox" :checked="g.platforms.includes(CODEX_CHAT)" @change="setPlatform(g, CODEX_CHAT, checked($event))" />Codex（只能对话）</label>
-          <p class="form-help">“Codex（只能对话）”：能和 Codex 聊天，不能用开发模式，也读不到别人的开发会话。原来只勾了 ChatGPT 的实例升级后是这一项。</p>
+          <p class="form-help">“Codex（只能对话）”：能和 Codex 聊天，不能用开发模式，也读不到别人的开发会话。勾“Codex”就对话、开发都能用（开发还要在下面勾开发环境）。</p>
         </fieldset>
         <fieldset v-if="bridges.length" class="lb-checks" :disabled="!g.enabled" :aria-label="`${g.instance_name}允许的 MCP 管理器`">
           <legend>允许的 MCP 管理器</legend>

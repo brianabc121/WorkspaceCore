@@ -782,7 +782,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `GET` / `POST /api/v1/llm_bridge/bridges/{id}/environments`，`PUT` / `DELETE .../environments/{env_id}` | 开发环境：`platform`、`name`、`repo_url`（只收 https）、`branch`、`sandbox`（`read_only` / `workspace_write` / `exec`）、`network`、`description`、`enabled` |
 | `GET /api/v1/llm_bridge/bridges/{id}/sessions?limit&offset&sync` | 会话桥上的会话；`sync=true` 先登记官方程序里有、桥里没有的会话 |
 | `GET .../sessions/{session_id}/turns` | 一个会话的回合（最新在前）：消息、状态、结果或失败原因 |
-| `GET /api/v1/llm_bridge/grants`，`PUT /api/v1/llm_bridge/grants/{instance_id}` | 每个实例的权限：`enabled`、`can_write`、`can_account`、`can_takeover`、`platforms`（空 = 全部；一项是平台，或 `codex:chat` = 只能和 Codex 对话、不能用开发模式，原来只给了 `chatgpt` 的授权迁移成它，T-0280；收到 `chatgpt` 也按 `codex:chat` 处理）、`bridge_ids`（允许用的 MCP 管理器：`null` = 全部，包括以后添加的；空列表 = 一个都不能用；填了不存在的 id 时 `422`）。`enabled=false` 时三项权限一并收回，`platforms` 与 `bridge_ids` 保留 |
+| `GET /api/v1/llm_bridge/grants`，`PUT /api/v1/llm_bridge/grants/{instance_id}` | 每个实例的权限：`enabled`、`can_write`、`can_account`、`can_takeover`、`platforms`（空 = 全部；一项是平台，或 `codex:chat` = 只能和 Codex 对话、不能用开发模式，T-0280，由管理员选；收到旧名字 `chatgpt` 按整个 `codex` 处理，原来只给了 `chatgpt` 的授权迁移成 `codex`，迁移 0078 / T-0282）、`bridge_ids`（允许用的 MCP 管理器：`null` = 全部，包括以后添加的；空列表 = 一个都不能用；填了不存在的 id 时 `422`）。`enabled=false` 时三项权限一并收回，`platforms` 与 `bridge_ids` 保留 |
 
 状态里的 `platforms` 是这座桥控制的平台；每个账号和通道带 `enabled`（这座桥是否控制它对应的平台），没勾选的通道 `available=false`。
 

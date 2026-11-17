@@ -549,8 +549,8 @@ describe('大模型客户端管理', () => {
     expect(bodies).toEqual([{ enabled: true, can_write: true, can_account: true, can_takeover: false, platforms: ['codex'], bridge_ids: null, environment_ids: [ENV] }])
   })
 
-  it('keeps an instance that only had ChatGPT to chatting with Codex, and lets the owner widen it to all of Codex', async () => {
-    // 原来只勾了 ChatGPT 的实例升级后是“Codex（只能对话）”（T-0280）：不能用开发模式、读不到别人的开发会话
+  it('shows an instance limited to chatting with Codex, and lets the owner widen it to all of Codex', async () => {
+    // 管理员选的“Codex（只能对话）”（T-0280）：不能用开发模式、读不到别人的开发会话
     let current = grant({ platforms: ['codex:chat'] })
     const requests = setup('owner', async r => {
       if (path(r) === '/api/v1/llm_bridge/grants') return Response.json({ grants: [current] })
@@ -563,7 +563,9 @@ describe('大模型客户端管理', () => {
     expect(within(platforms).getByLabelText('Codex（只能对话）')).toBeChecked()
     expect(within(platforms).getByLabelText('Codex')).not.toBeChecked()
     expect(within(platforms).queryByLabelText('ChatGPT')).not.toBeInTheDocument()
-    expect(within(platforms).getByText(/原来只勾了 ChatGPT 的实例升级后是这一项/)).toBeVisible()
+    expect(within(platforms).getByText(/勾“Codex”就对话、开发都能用/)).toBeVisible()
+    // 原来只勾了 ChatGPT 的实例升级后是整个 Codex（T-0282），不再提“升级后是这一项”
+    expect(within(platforms).queryByText(/升级后是这一项/)).not.toBeInTheDocument()
     // 勾上整个 Codex：只能对话那一项一并去掉（二选一）
     await fireEvent.click(within(platforms).getByLabelText('Codex'))
     await screen.findByText('已保存「甲」的权限。')
