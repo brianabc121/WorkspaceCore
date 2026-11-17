@@ -38,7 +38,7 @@ export const OWNER_KIND: Record<string, string> = { agent: '智能体', user: '�
 export type SourceTask = { run_id?: string; task_id?: string; title?: string; project_id?: string }
 export const sourceTasks = (source: Record<string, unknown> | null | undefined): SourceTask[] => (Array.isArray(source?.tasks) ? (source.tasks as SourceTask[]).filter(t => t && typeof t.task_id === 'string') : [])
 export type GrantBody = Schema['LlmBridgeGrantIn']
-export type Platform = GrantBody['platforms'][number]
+export type Platform = Schema['LlmChatCreateIn']['platform']
 export type BridgeSession = Schema['LlmBridgeSessionList']['sessions'][number]
 export type Turn = Schema['LlmBridgeTurnOut']
 export type Slot = 'openai' | 'claude' | 'workbuddy'
@@ -75,18 +75,19 @@ export function networkName(mode: string | null | undefined, port?: number | nul
 export const isSudoJobError = (code: string | null | undefined) => code === 'sudo_password_required' || code === 'sudo_denied'
 /** 重新部署 / 重启 / 卸载被拒绝（409）：这台服务器的登录账号用 Docker 要 sudo 密码，带上密码重发 */
 export const needsSudoPassword = (error: unknown) => error instanceof ApiError && error.code === 'SUDO_PASSWORD_REQUIRED'
-/** 账号（接口里的 slot）的名字：ChatGPT 和 Codex 用的是同一个 OpenAI 账号 */
-const SLOT_NAME: Record<string, string> = { openai: 'OpenAI', claude: 'Claude', workbuddy: 'CodeBuddy' }
-/** 一组账号的名字，按页面上固定的顺序（OpenAI、Claude、CodeBuddy）；不认识的照原样排在后面 */
+/** 账号（接口里的 slot）的名字：Codex 用 ChatGPT（OpenAI）账号登录，槽位叫 openai */
+const SLOT_NAME: Record<string, string> = { openai: 'Codex', claude: 'Claude', workbuddy: 'CodeBuddy' }
+/** 一组账号的名字，按页面上固定的顺序（Codex、Claude、CodeBuddy）；不认识的照原样排在后面 */
 export const slotNames = (slots: readonly string[]) => [...Object.keys(SLOT_NAME).filter(s => slots.includes(s)), ...slots.filter(s => !(s in SLOT_NAME))].map(s => SLOT_NAME[s] ?? s)
 export const newDeployRequestId = () => (typeof crypto.randomUUID === 'function' ? `web-${crypto.randomUUID()}` : `web-${Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, '0')).join('')}`)
 
+// 原来单列的“ChatGPT 聊天”就是 Codex 的纯聊天模式，T-0280 起不再单列（接口收到旧名字 chatgpt 也按 codex 处理）
 export const PLATFORMS: readonly { id: Platform; name: string }[] = [
-  { id: 'chatgpt', name: 'ChatGPT' }, { id: 'codex', name: 'Codex' }, { id: 'claude', name: 'Claude' }, { id: 'workbuddy', name: 'CodeBuddy' },
+  { id: 'codex', name: 'Codex' }, { id: 'claude', name: 'Claude' }, { id: 'workbuddy', name: 'CodeBuddy' },
 ]
 export const platformName = (id: string) => PLATFORMS.find(p => p.id === id)?.name ?? id
-/** 平台用哪个账号登录：ChatGPT 聊天和 Codex 用的是同一个 ChatGPT 账号 */
-export const PLATFORM_SLOT: Record<Platform, Slot> = { chatgpt: 'openai', codex: 'openai', claude: 'claude', workbuddy: 'workbuddy' }
+/** 平台用哪个账号登录：Codex 用 ChatGPT（OpenAI）账号 */
+export const PLATFORM_SLOT: Record<Platform, Slot> = { codex: 'openai', claude: 'claude', workbuddy: 'workbuddy' }
 export const ACCOUNT_STATE: Record<string, { text: string; tone: string }> = {
   logged_in: { text: '已登录', tone: 'tone-green' },
   logged_out: { text: '未登录', tone: 'tone-muted' },

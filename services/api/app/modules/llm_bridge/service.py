@@ -35,6 +35,7 @@ from app.modules.llm_bridge.models import (
 )
 from app.modules.llm_bridge.schemas import (
     ALL_PLATFORMS,
+    PLATFORM_ALIASES,
     LlmBridgeAccountOut,
     LlmBridgeChannelOut,
     LlmBridgeConnectivityOut,
@@ -59,6 +60,9 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeStatusOut,
     LlmBridgeUsageOut,
     LlmBridgeUsageRowOut,
+    canonical_platform,
+    canonical_platforms,
+    grant_platforms,
 )
 
 SLOTS = ("openai", "claude", "workbuddy")
@@ -183,6 +187,30 @@ def _owner_kind(owner_id: Any) -> str:
     if not isinstance(owner_id, str) or not owner_id:
         return "external"
     return "user" if owner_id.startswith("user:") else "agent"
+
+
+def legacy_channels(channels: Any) -> list[dict[str, Any]]:
+    """管理器报告的通道；没升级的管理器还单列 chatgpt.chat（就是 codex.chat，T-0280）。
+
+    把它并进 codex.chat：两个里有一个开着、能用就算开着、能用，页面上照常能和 Codex 对话
+    （新建时工作台按需换回旧名字，见 client.create_session）。测试用的 fake 不列。
+    """
+    items = [dict(c) for c in channels if isinstance(c, dict)] if isinstance(channels, list) else []
+    old = next(
+        (c for c in items if c.get("platform") in PLATFORM_ALIASES and c.get("mode") == "chat"),
+        None,
+    )
+    out = [c for c in items if c.get("platform") not in ("fake", *PLATFORM_ALIASES)]
+    if old is not None:
+        codex = next(
+            (c for c in out if c.get("platform") == "codex" and c.get("mode") == "chat"), None
+        )
+        if codex is None:
+            out.insert(0, {**old, "platform": "codex"})
+        else:
+            for key in ("enabled", "available"):
+                codex[key] = bool(codex.get(key)) or bool(old.get(key))
+    return out
 
 
 class LlmBridgeService:
@@ -495,20 +523,17 @@ class LlmBridgeService:
             for slot in SLOTS
             if slot in data.get("accounts", {})
         ]
-        # 旧版本的会话桥不报告 platforms：按“全部”处理
+        # 旧版本的会话桥不报告 platforms：按“全部”处理；
+        # 没升级的版本还单列 chatgpt，按 codex 算（T-0280）
         platforms = data.get("platforms")
         if not isinstance(platforms, list):
             platforms = list(ALL_PLATFORMS)
         return LlmBridgeStatusOut(
             reachable=True,
             version=str(data.get("version", "")),
-            platforms=[p for p in platforms if p in ALL_PLATFORMS],
+            platforms=[p for p in canonical_platforms(platforms) if p in ALL_PLATFORMS],
             accounts=accounts,
-            channels=[
-                LlmBridgeChannelOut(**c)
-                for c in data.get("channels", [])
-                if c["platform"] != "fake"
-            ],
+            channels=[LlmBridgeChannelOut(**c) for c in legacy_channels(data.get("channels", []))],
             queued=int(data.get("queued", 0)),
             running=int(data.get("running", 0)),
             load={
@@ -555,7 +580,9 @@ class LlmBridgeService:
     def settings_out(data: dict[str, Any]) -> LlmBridgeSettings:
         values = dict(data)
         if isinstance(values.get("platforms"), list):
-            values["platforms"] = [p for p in values["platforms"] if p in ALL_PLATFORMS]
+            values["platforms"] = [
+                p for p in canonical_platforms(values["platforms"]) if p in ALL_PLATFORMS
+            ]
         return LlmBridgeSettings(**values)
 
     # ---- 按实例的权限 ----
@@ -751,7 +778,7 @@ class LlmBridgeService:
                         day=str(item.get("day") or ""),
                         bridge_id=bridge.id,
                         bridge_name=bridge.name,
-                        platform=str(item.get("platform") or ""),
+                        platform=canonical_platform(str(item.get("platform") or "")),
                         owner_kind=kind,
                         owner_id=owner_id,
                         owner=str(item.get("owner") or "")[:80],
@@ -803,7 +830,7 @@ class LlmBridgeService:
             can_write=bool(row and row.can_write),
             can_account=bool(row and row.can_account),
             can_takeover=bool(row and row.can_takeover),
-            platforms=list(row.platforms) if row else [],
+            platforms=grant_platforms(row.platforms) if row else [],
             bridge_ids=(
                 [uuid.UUID(i) for i in row.bridge_ids]
                 if row is not None and row.bridge_ids is not None
@@ -831,7 +858,7 @@ class LlmBridgeService:
         row.can_write = body.enabled and body.can_write
         row.can_account = body.enabled and body.can_account
         row.can_takeover = body.enabled and body.can_takeover
-        row.platforms = sorted(set(body.platforms))
+        row.platforms = sorted(grant_platforms(body.platforms))
         if body.bridge_ids is None:
             row.bridge_ids = None
         else:

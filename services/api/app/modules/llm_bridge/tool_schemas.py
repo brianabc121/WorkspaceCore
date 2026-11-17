@@ -10,7 +10,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-Platform = Literal["chatgpt", "codex", "claude", "workbuddy"]
+from app.modules.llm_bridge.schemas import Platform
+
 ModeName = Literal["chat", "dev", "cloud"]
 
 _BRIDGE = "MCP 管理器（会话桥）的名字；你只能用一个时不用填"
@@ -27,7 +28,7 @@ class StatusInput(_Input):
 
 
 class ChannelInput(_Input):
-    platform: Platform = Field(description="平台：chatgpt / codex / claude / workbuddy")
+    platform: Platform = Field(description="平台：codex / claude / workbuddy")
     mode: ModeName = Field(description="模式：chat（聊天）/ dev（开发）/ cloud（云端）")
 
 
@@ -230,14 +231,14 @@ _CONTEXT = (
 
 DESCRIPTIONS: dict[str, str] = {
     "llm_bridge_status": "查看 MCP 管理器（会话桥）控制哪些平台"
-    "（ChatGPT / Codex / Claude / CodeBuddy），各平台是否可用、是否已登录，以及排队情况。"
+    "（Codex / Claude / CodeBuddy），各平台是否可用、是否已登录，以及排队情况。"
     "data.quota 里是各平台的额度；CodeBuddy 不给剩余积分和重置时间，"
     "只有 credits_5h：最近 5 小时经这个管理器消耗的积分。"
     "每个管理器单独维护一套账号。你能用多个管理器、又没填 bridge 时，"
     "返回 data.bridges：每个管理器的名字（bridge）和它的概况。",
     "llm_bridge_models": "查看某个平台、某种模式下可选的模型。",
     "llm_bridge_environments": "查看某个平台开发模式下可选的环境（管理员预先配置）。",
-    "llm_bridge_session_create": "在 ChatGPT / Codex / Claude / CodeBuddy 上新建一个会话："
+    "llm_bridge_session_create": "在 Codex / Claude / CodeBuddy 上新建一个会话："
     "选平台、模式、模型；开发模式还要选环境。返回 data.session_id，之后用 llm_bridge_send 发消息。"
     "data.similar_sessions 是你以前建过的、标题相近的会话（有的话）：也许不用再问一遍。",
     "llm_bridge_send": "向一个会话发消息并等回答；"

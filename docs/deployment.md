@@ -1036,7 +1036,7 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
 
 ## 25. 大模型客户端：MCP 管理器，也就是会话桥（可选，T-0227 / T-0228 / T-0230 ~ T-0234）
 
-让智能体经工作台向 ChatGPT / Codex / Claude / CodeBuddy 发指令、管理会话。方案见 `docs/v2/LLM_BRIDGE_PLAN.md`，
+让智能体经工作台向 Codex / Claude / CodeBuddy 发指令、管理会话。方案见 `docs/v2/LLM_BRIDGE_PLAN.md`，
 版本与核验见 `docs/decisions/2026-11-13-llm-bridge-verification.md`。
 
 页面叫“大模型客户端管理”。页面上的一个 **MCP 管理器** 就是一座会话桥：一个独立的容器（`infra/llm-bridge/`）。
@@ -1067,7 +1067,7 @@ AI 提示词是上游的文件（GPL-3.0），不放进本仓库：`make trendra
    添加时工作台会连一次这个管理器：地址连不上或令牌不对会直接提示，不会留下一个用不了的管理器。
    控制的平台之后可以在“平台与账号”里改；取消勾选不会退出登录，也不删会话记录，只是智能体不能再经它用这个平台。
 3. 在“平台与账号”里登录它控制的平台：
-   - **ChatGPT / Codex**（同一个 ChatGPT 账号）：点“登录”选设备码，页面显示网址和验证码，在自己的浏览器里完成；也可以填 OpenAI 的 API 密钥。
+   - **Codex**（用 ChatGPT 账号登录；对话和开发都走它）：点“登录”选设备码，页面显示网址和验证码，在自己的浏览器里完成；也可以填 OpenAI 的 API 密钥。
    - **Claude**：填 Anthropic 的 API 密钥。要用订阅账号，先在页面上确认了解合规风险，再填 `claude setup-token` 生成的令牌。
    - **CodeBuddy**：点“登录”选“网页登录（国内站）”或“网页登录（国际站）”，页面给出一个登录网址，在自己的浏览器里打开并登录，
      完成后页面自动更新；也可以填 CodeBuddy 的 API 密钥。不用进容器操作官方程序（T-0241）。
@@ -1116,7 +1116,7 @@ LLM_BRIDGE_ADMIN_TOKEN=<另一枚令牌> LLM_BRIDGE_PORT=8788 \
 
 ### 25.4 要知道的限制
 
-- chatgpt.com 和 claude.ai 网页里的对话没有官方接口，看不到也续不了；ChatGPT 聊天通道用的是同一个 ChatGPT 登录下的 Codex。
+- chatgpt.com 和 claude.ai 网页里的对话没有官方接口，看不到也续不了；和 Codex 的对话就是同一个 ChatGPT 登录下的 Codex 纯聊天（原来单列的“ChatGPT 聊天”，T-0280 起不再单列）。
 - 会话列表只包含这个管理器的容器里的会话，不包含你在自己电脑、手机上开的会话。
 - `codex.cloud`、`claude.cloud` 两个通道还是接口桩。
 - 登录凭据在管理器的数据卷里（`<项目名>-llm-bridge_llm-bridge-data`，第 N 个是 `<项目名>-llm-bridge-<N>_llm-bridge-data`）。`make backup` 不包含这个卷：迁移或重建后重新登录即可；
@@ -1173,8 +1173,8 @@ LLM_BRIDGE_ADMIN_TOKEN=<另一枚令牌> LLM_BRIDGE_PORT=8788 \
 
 ### 25.6 限流与消息队列（T-0236）
 
-- 每个平台同时进行的会话数默认 3（ChatGPT、Codex、Claude、CodeBuddy 各算各的），超过的排队等名额；同一个平台两次开始之间默认至少隔 2 秒。
-  两项都在“管理器与账号 → 设置”里改。担心账号被限制时把会话数调小。注意 ChatGPT 和 Codex 用的是同一个 OpenAI 账号，各算各的意味着这个账号上最多同时 6 个。
+- 每个平台同时进行的会话数默认 3（Codex、Claude、CodeBuddy 各算各的），超过的排队等名额；同一个平台两次开始之间默认至少隔 2 秒。
+  两项都在“管理器与账号 → 设置”里改。担心账号被限制时把会话数调小。Codex 的对话和开发算在同一个平台里，这个账号上最多同时 3 个。
 - 升级到这个版本后，没有改过“同时进行的回合数”的管理器会从 2 变成 3；改过的保留原值（含义从“每个账号”变成“每个平台”）。
 - 会话在处理时再发的消息不会打断它，进这个会话的队列；聊天页上能看到队列，排队中的可以取消、修改、调到最前面。
 - 方案见 `docs/v2/LLM_BRIDGE_QUEUE_PLAN.md`；会话内容落库（含图片与文件）和“插入消息”是后两步。

@@ -3352,7 +3352,7 @@ export interface paths {
         get?: never;
         /**
          * 聊天：换这个会话之后用的模型（admin）
-         * @description 从下一回合起生效，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换；ChatGPT / Codex 的会话 422 NOT_SUPPORTED（要换就新建会话）。
+         * @description 从下一回合起生效，已经在跑的不受影响。只有 Claude / CodeBuddy 的会话能换；Codex 的会话 422 NOT_SUPPORTED（要换就新建会话）。
          */
         put: operations["llm_chat_set_model"];
         post?: never;
@@ -11894,7 +11894,7 @@ export interface components {
              * Platforms
              * @description 它控制的平台
              */
-            platforms: ("chatgpt" | "codex" | "claude" | "workbuddy")[];
+            platforms: ("codex" | "claude" | "workbuddy")[];
             /**
              * Request Id
              * @description 幂等号：用同一个再提交一次，得到的是同一个任务
@@ -12164,7 +12164,7 @@ export interface components {
              * Platform
              * @enum {string}
              */
-            platform: "chatgpt" | "codex" | "claude" | "workbuddy";
+            platform: "codex" | "claude" | "workbuddy";
             /**
              * Repo Url
              * @description 只支持 https://
@@ -12237,10 +12237,10 @@ export interface components {
             environment_ids: string[];
             /**
              * Platforms
-             * @description 允许的平台；空表示都允许
+             * @description 允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）
              * @default []
              */
-            platforms: ("chatgpt" | "codex" | "claude" | "workbuddy")[];
+            platforms: ("codex" | "codex:chat" | "claude" | "workbuddy")[];
         };
         /** LlmBridgeGrantList */
         LlmBridgeGrantList: {
@@ -12274,7 +12274,10 @@ export interface components {
             instance_id: string;
             /** Instance Name */
             instance_name: string;
-            /** Platforms */
+            /**
+             * Platforms
+             * @description 允许的平台；空表示都允许。codex:chat 是只能和 Codex 对话（不能用开发模式）
+             */
             platforms: string[];
         };
         /** LlmBridgeIn */
@@ -12293,7 +12296,7 @@ export interface components {
              * Platforms
              * @description 这个 MCP 管理器控制的平台。填了就在登记时写进会话桥，同时验证地址和令牌：连不上或令牌不对时不登记；不填则不验证，会话桥保持原来的设置
              */
-            platforms?: ("chatgpt" | "codex" | "claude" | "workbuddy")[] | null;
+            platforms?: ("codex" | "claude" | "workbuddy")[] | null;
             /**
              * Token
              * @description 会话桥的管理令牌
@@ -12490,7 +12493,7 @@ export interface components {
              * Platforms
              * @description 这个 MCP 管理器控制的平台
              */
-            platforms: ("chatgpt" | "codex" | "claude" | "workbuddy")[];
+            platforms: ("codex" | "claude" | "workbuddy")[];
         };
         /**
          * LlmBridgeLocalOut
@@ -12927,7 +12930,6 @@ export interface components {
              * Platforms
              * @description 这个 MCP 管理器控制的平台
              * @default [
-             *       "chatgpt",
              *       "codex",
              *       "claude",
              *       "workbuddy"
@@ -12984,7 +12986,7 @@ export interface components {
              * Platforms
              * @description 这个 MCP 管理器控制的平台（至少一个）。取消勾选的平台不能登录、不能新建会话和发送；已有的登录和会话记录保留
              */
-            platforms?: ("chatgpt" | "codex" | "claude" | "workbuddy")[] | null;
+            platforms?: ("codex" | "claude" | "workbuddy")[] | null;
             /** Resume Text */
             resume_text?: string | null;
             /** Retention Days */
@@ -13342,7 +13344,7 @@ export interface components {
              * Platform
              * @enum {string}
              */
-            platform: "chatgpt" | "codex" | "claude" | "workbuddy";
+            platform: "codex" | "claude" | "workbuddy";
             /**
              * Request Id
              * @description 有 text 时必填
@@ -14110,7 +14112,7 @@ export interface components {
              * Platform
              * @enum {string}
              */
-            platform: "chatgpt" | "codex" | "claude" | "workbuddy";
+            platform: "codex" | "claude" | "workbuddy";
         };
         /** LlmChatTurnOut */
         LlmChatTurnOut: {
@@ -35324,7 +35326,7 @@ export interface operations {
     llm_chat_options: {
         parameters: {
             query: {
-                platform: "chatgpt" | "codex" | "claude" | "workbuddy";
+                platform: "codex" | "claude" | "workbuddy";
                 mode?: "chat" | "dev";
             };
             header: {
@@ -35472,7 +35474,7 @@ export interface operations {
         parameters: {
             query?: {
                 q?: string;
-                platform?: ("chatgpt" | "codex" | "claude" | "workbuddy") | null;
+                platform?: ("codex" | "claude" | "workbuddy") | null;
                 status?: "active" | "archived" | "all";
                 limit?: number;
                 offset?: number;
@@ -39776,7 +39778,7 @@ export interface operations {
                 owner_kind?: ("agent" | "user" | "external") | null;
                 /** @description 具体是谁：实例的 id，或 user:<用户 id> */
                 owner_id?: string | null;
-                platform?: ("chatgpt" | "codex" | "claude" | "workbuddy") | null;
+                platform?: ("codex" | "claude" | "workbuddy") | null;
                 /** @description 用法 */
                 mode?: ("chat" | "dev" | "cloud") | null;
                 status?: ("active" | "archived") | null;

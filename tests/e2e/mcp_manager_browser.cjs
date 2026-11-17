@@ -110,7 +110,7 @@ async function main() {
     check(await form.getByRole('radio', { name: kindName }).isChecked(), `表单应已选好服务器类型“${kindName}”`)
     check(await form.getByLabel('部署到哪台服务器').inputValue() === targetId, '表单应已选好这台服务器')
     await form.getByLabel('名字').fill(name)
-    for (const platform of ['ChatGPT', 'Codex']) {
+    for (const platform of ['Codex']) {
       const box = form.getByRole('checkbox', { name: platform, exact: true })
       if (await box.isChecked()) await box.uncheck()
     }

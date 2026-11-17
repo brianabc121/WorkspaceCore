@@ -3,11 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
-Platform = Literal["chatgpt", "codex", "claude", "workbuddy", "fake"]
+from bridge.channels import canonical
+
+
+def _platform(value: Any) -> Any:
+    return canonical(value) if isinstance(value, str) else value
+
+
+# 旧名字 chatgpt（T-0280 起并入 codex）照样收下，按 codex 处理；说明里只列现在的平台
+Platform = Annotated[Literal["codex", "claude", "workbuddy", "fake"], BeforeValidator(_platform)]
 ModeName = Literal["chat", "dev", "cloud"]
 
 
@@ -20,7 +28,7 @@ class StatusInput(_Input):
 
 
 class ChannelInput(_Input):
-    platform: Platform = Field(description="平台：chatgpt / codex / claude / workbuddy")
+    platform: Platform = Field(description="平台：codex / claude / workbuddy")
     mode: ModeName = Field(description="模式：chat（聊天）/ dev（开发）/ cloud（云端）")
 
 
@@ -190,7 +198,7 @@ TOOLS: tuple[ToolDef, ...] = (
     ),
     ToolDef(
         "llm_session_create",
-        "在 ChatGPT / Codex / Claude / CodeBuddy 上新建一个会话：选平台、模式、模型；开发模式还要选环境。"
+        "在 Codex / Claude / CodeBuddy 上新建一个会话：选平台、模式、模型；开发模式还要选环境。"
         "返回 session_id，之后用 llm_send 发消息。",
         SessionCreateInput,
         False,
