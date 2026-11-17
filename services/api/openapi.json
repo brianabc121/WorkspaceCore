@@ -12522,6 +12522,51 @@
         "title": "LlmBridgeChannelOut",
         "type": "object"
       },
+      "LlmBridgeConnectivityAttemptOut": {
+        "description": "试过的一个地址（T-0284）：哪个先连上用哪个，一个地址 0.25 秒没连上就同时试下一个。",
+        "properties": {
+          "address": {
+            "description": "平台的哪个 IP",
+            "title": "Address",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "没连上的原因（没有回应 / 拒绝连接 / 网络不通 ……）；连上的为空",
+            "title": "Error"
+          },
+          "family": {
+            "description": "4：IPv4；6：IPv6",
+            "title": "Family",
+            "type": "integer"
+          },
+          "ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "连上或放弃用了多少毫秒",
+            "title": "Ms"
+          }
+        },
+        "required": [
+          "address",
+          "family"
+        ],
+        "title": "LlmBridgeConnectivityAttemptOut",
+        "type": "object"
+      },
       "LlmBridgeConnectivityOut": {
         "description": "管理器所在的服务器到各平台的连通性与延迟（T-0240）。\n\n键是账号槽位：openai / claude / workbuddy。",
         "properties": {
@@ -12592,6 +12637,21 @@
             ],
             "description": "连上的是平台的哪个 IP；经代理时为空",
             "title": "Address"
+          },
+          "attempts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LlmBridgeConnectivityAttemptOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "试过的地址（T-0284）；经代理时为空列表，旧版本的管理器没有",
+            "title": "Attempts"
           },
           "error": {
             "anyOf": [

@@ -879,6 +879,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 返回 `supported`（旧版本的管理器为 false）和 `slots`（键是账号槽位 `openai` / `claude` / `workbuddy`）：每个槽位 `ok`、`need`（`all` 都要可用 / `any` 有一个就行）、`checked_at`、
 `targets[]`（`host`、`label`、`ok`、`state`：`ok` 可用 / `blocked` 连得上但被平台拒绝 / `unreachable` 连不上；`latency_ms`、`http_status`、`error`）。结果一分钟内复用，`refresh=true` 重新测。
 分步用时（T-0278）：`latency_ms` 是建立连接（TCP 握手，一次网络往返，和 ping 可比）的毫秒数，连不上时为空；`timings`（`dns_ms` 域名解析、`connect_ms` 建立连接、`tls_ms` 加密握手、`response_ms` 发出请求到收到应答头）每一步的用时，没做到的那一步为空；`stage` 连不上时卡在哪一步（`dns` / `connect` / `tls` / `response`）；`address` 连上的 IP；`via_proxy` 是否经容器的 HTTPS 代理（这时域名由代理解析，`dns_ms` 为空）。超时只算到收到应答头（12 秒），读页面正文和关连接不计入。旧版本的管理器没有这几个字段，`latency_ms` 是一次完整访问的总耗时。
+试过的地址（T-0284）：一个域名解析出几个地址时，管理器像官方程序一样，一个地址 0.25 秒没连上（或已经失败）就同时试下一个，IPv6 / IPv4 交替，哪个先连上用哪个；`attempts` 列出每个地址：`address`、`family`（4 / 6）、`ms`（连上或放弃用的毫秒数）、`error`（没有回应 / 拒绝连接 / 网络不通 / 这台服务器没开 IPv6 ……，连上的为空）。这时 `latency_ms` 是连上的那个地址的用时，`timings.connect_ms` 还含等前面地址的时间。域名解析单独限时 15 秒，之后的 12 秒从解析完算起。旧版本的管理器没有 `attempts`。
 
 登录等操作里平台那边没成功时，接口返回 `503 UNAVAILABLE` 并带管理器写的原因（T-0239）；`EXTERNAL_UNAVAILABLE` 只表示管理器本身连不上。
 

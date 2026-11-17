@@ -1,8 +1,8 @@
-"""到平台的连通性怎么测、延迟怎么算（T-0278）。
+"""到平台的连通性怎么测、延迟怎么算（T-0278），一个域名有几个地址时怎么连（T-0284）。
 
 用本机的 TLS 服务扮演平台：应答慢、正文慢慢吐、一直不应答、经 HTTPS 代理。
 要看的是：延迟只算建立连接（和 ping 可比），每一步分开计时，读正文和关连接不计入，
-超时时写明卡在哪一步。
+超时时写明卡在哪一步；第一个地址不应答时像官方程序一样很快换下一个，并列出试过的每个地址。
 """
 
 from __future__ import annotations
@@ -10,11 +10,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import ipaddress
+import socket
 import ssl
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -132,10 +134,14 @@ async def test_latency_is_the_connect_time_and_each_stage_is_timed(platform: Pla
     timings = result["timings"]
     assert set(timings) == {"dns_ms", "connect_ms", "tls_ms", "response_ms"}
     assert all(isinstance(value, int) for value in timings.values())
-    assert result["latency_ms"] == timings["connect_ms"] < 300
+    # 延迟是连上的那个地址建立连接的用时；只试了一个地址，和“建立连接”这一步差不多
+    assert result["latency_ms"] <= timings["connect_ms"] < 300
     assert 350 <= timings["response_ms"] < 1500  # 等平台应答的 0.4 秒算在这里
     assert result["stage"] is None
     assert (result["address"], result["via_proxy"]) == ("127.0.0.1", False)
+    assert result["attempts"] == [
+        {"address": "127.0.0.1", "family": 4, "ms": result["latency_ms"], "error": None}
+    ]
     # 正文吐不完时最多再读 BODY_SECONDS，不会一直等到超时被判成连不上
     assert elapsed < 0.4 + 0.3 + 0.2 + 0.8
 
@@ -153,7 +159,7 @@ async def test_a_block_page_sent_in_pieces_is_still_recognised(platform: Platfor
     result = await connectivity.probe(connectivity.Target("127.0.0.1", "本机", port=port))
     assert (result["state"], result["http_status"]) == ("blocked", 403)
     assert "拦截页" in result["error"]
-    assert result["latency_ms"] == result["timings"]["connect_ms"]
+    assert result["latency_ms"] <= result["timings"]["connect_ms"]
 
 
 async def test_a_timeout_names_the_stage_it_got_stuck_in(platform: Platform) -> None:
@@ -236,3 +242,119 @@ async def test_through_a_proxy_the_proxy_resolves_and_connect_includes_it(
     assert (refused["state"], refused["stage"]) == ("unreachable", "connect")
     assert refused["error"] == "HTTPS 代理拒绝连到这个地址"
     assert seen[-1] == b"CONNECT example.invalid:443 HTTP/1.1"
+
+
+def _info(address: str, port: int, family: int = socket.AF_INET) -> tuple[Any, ...]:
+    return (family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", (address, port))
+
+
+@pytest.fixture
+async def addresses(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """让域名解析出给定的几个地址；hang 里的地址连了也不应答（像不通的 IPv6）。"""
+    loop = asyncio.get_running_loop()
+    connect = loop.sock_connect
+
+    def use(infos: list[tuple[Any, ...]], hang: set[str] = frozenset()) -> None:  # type: ignore[assignment]
+        async def resolve(*_: Any, **__: Any) -> list[tuple[Any, ...]]:
+            return infos
+
+        async def sock_connect(sock: socket.socket, address: Any) -> None:
+            if address[0] in hang:
+                await asyncio.sleep(3600)
+            await connect(sock, address)
+
+        monkeypatch.setattr(loop, "getaddrinfo", resolve)
+        monkeypatch.setattr(loop, "sock_connect", sock_connect)
+
+    return use
+
+
+async def answer_404(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    await reader.readuntil(b"\r\n\r\n")
+    writer.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
+    await writer.drain()
+
+
+async def test_a_silent_first_address_is_not_waited_for(platform: Platform, addresses: Any) -> None:
+    """第一个地址不应答（服务器的 IPv6 不通时就是这样）：0.25 秒后同时试下一个，连上就算可用。
+    以前一直等这一个到超时，报“连不上”，官方程序却照常能用。"""
+    port = await platform.serve(answer_404)
+    addresses([_info("192.0.2.1", port), _info("127.0.0.1", port)], hang={"192.0.2.1"})
+    result = await connectivity.probe(connectivity.Target("127.0.0.1", "本机", port=port))
+    assert (result["state"], result["http_status"], result["address"]) == ("ok", 404, "127.0.0.1")
+    first, second = result["attempts"]
+    assert (first["address"], first["error"]) == ("192.0.2.1", "没有回应")
+    assert (second["address"], second["error"]) == ("127.0.0.1", None)
+    # 延迟只算连上的那个地址；“建立连接”这一步含等第一个地址的 0.25 秒
+    assert result["latency_ms"] == second["ms"] < 200
+    assert result["timings"]["connect_ms"] >= 240
+
+
+async def test_a_refused_address_moves_on_at_once(platform: Platform, addresses: Any) -> None:
+    """第一个地址马上拒绝：不用等 0.25 秒，立刻试下一个。"""
+    port = await platform.serve(answer_404)
+    addresses([_info("127.0.0.2", port), _info("127.0.0.1", port)])
+    result = await connectivity.probe(connectivity.Target("127.0.0.1", "本机", port=port))
+    assert result["state"] == "ok"
+    assert [a["error"] for a in result["attempts"]] == ["拒绝连接", None]
+    assert result["timings"]["connect_ms"] < 200
+
+
+async def test_when_no_address_answers_every_attempt_is_listed(
+    platform: Platform, addresses: Any
+) -> None:
+    """哪个地址都不应答：报建立连接超时，试过的地址都列出来（页面上能看出是不是 IPv6 的问题）。"""
+    addresses(
+        [
+            _info("2001:db8::1", 443, socket.AF_INET6),
+            _info("192.0.2.1", 443),
+            _info("192.0.2.2", 443),
+        ],
+        hang={"2001:db8::1", "192.0.2.1", "192.0.2.2"},
+    )
+    result = await connectivity.probe(connectivity.Target("example.test", "别处"))
+    assert (result["state"], result["stage"]) == ("unreachable", "connect")
+    assert result["error"].startswith("建立连接超时")
+    attempts = result["attempts"]
+    assert [(a["address"], a["family"]) for a in attempts] == [
+        ("2001:db8::1", 6),
+        ("192.0.2.1", 4),
+        ("192.0.2.2", 4),
+    ]
+    # 没开 IPv6 的机器上建不了 IPv6 的连接：记下来，接着试下一个，不会整个失败
+    assert attempts[0]["error"] in ("没有回应", "这台服务器没开 IPv6")
+    assert [a["error"] for a in attempts[1:]] == ["没有回应", "没有回应"]
+    assert all(isinstance(a["ms"], int) for a in attempts)
+
+
+def test_addresses_alternate_between_ipv6_and_ipv4() -> None:
+    """IPv6 / IPv4 交替着试（RFC 8305），解析结果里排第一的那一类在前；重复的地址只试一次。"""
+    infos = [
+        _info("2001:db8::1", 443, socket.AF_INET6),
+        _info("2001:db8::2", 443, socket.AF_INET6),
+        _info("2001:db8::1", 443, socket.AF_INET6),
+        _info("192.0.2.1", 443),
+        _info("192.0.2.2", 443),
+    ]
+    order = [info[4][0] for info in connectivity._interleave(infos)]
+    assert order == ["2001:db8::1", "192.0.2.1", "2001:db8::2", "192.0.2.2"]
+
+
+async def test_slow_name_resolution_has_its_own_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """域名解析单独限时：超时时写的是解析等了多久。"""
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.delenv("https_proxy", raising=False)
+    monkeypatch.setattr(connectivity, "DNS_SECONDS", 1.0)
+    loop = asyncio.get_running_loop()
+
+    async def never(*_: Any, **__: Any) -> list[Any]:
+        await asyncio.sleep(3600)
+        return []
+
+    monkeypatch.setattr(loop, "getaddrinfo", never)
+    result = await connectivity.probe(connectivity.Target("example.test", "别处"))
+    assert (result["state"], result["stage"]) == ("unreachable", "dns")
+    assert result["error"] == "域名解析超时：没有解析出平台的地址（共等了 1 秒）"
+    assert result["attempts"] == []

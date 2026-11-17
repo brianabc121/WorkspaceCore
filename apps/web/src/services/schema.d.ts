@@ -11759,6 +11759,32 @@ export interface components {
             slot: string;
         };
         /**
+         * LlmBridgeConnectivityAttemptOut
+         * @description 试过的一个地址（T-0284）：哪个先连上用哪个，一个地址 0.25 秒没连上就同时试下一个。
+         */
+        LlmBridgeConnectivityAttemptOut: {
+            /**
+             * Address
+             * @description 平台的哪个 IP
+             */
+            address: string;
+            /**
+             * Error
+             * @description 没连上的原因（没有回应 / 拒绝连接 / 网络不通 ……）；连上的为空
+             */
+            error?: string | null;
+            /**
+             * Family
+             * @description 4：IPv4；6：IPv6
+             */
+            family: number;
+            /**
+             * Ms
+             * @description 连上或放弃用了多少毫秒
+             */
+            ms?: number | null;
+        };
+        /**
          * LlmBridgeConnectivityOut
          * @description 管理器所在的服务器到各平台的连通性与延迟（T-0240）。
          *
@@ -11802,6 +11828,11 @@ export interface components {
              * @description 连上的是平台的哪个 IP；经代理时为空
              */
             address?: string | null;
+            /**
+             * Attempts
+             * @description 试过的地址（T-0284）；经代理时为空列表，旧版本的管理器没有
+             */
+            attempts?: components["schemas"]["LlmBridgeConnectivityAttemptOut"][] | null;
             /**
              * Error
              * @description 不可用时的说明
