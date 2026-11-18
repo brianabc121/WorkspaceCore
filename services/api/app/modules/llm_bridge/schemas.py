@@ -501,6 +501,13 @@ class LlmBridgeResetOut(BaseModel):
 
 
 class LlmBridgeEnvironmentIn(_In):
+    request_id: str | None = Field(
+        None,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[\w.\-:]+$",
+        description="幂等号：用同一个再提交一次，得到的是同一个环境（不会再建一个）",
+    )
     platform: Platform
     mode: Literal["dev", "cloud"] = "dev"
     name: str = Field(min_length=1, max_length=60)

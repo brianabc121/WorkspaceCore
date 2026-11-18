@@ -12755,6 +12755,11 @@ export interface components {
              */
             repo_url?: string | null;
             /**
+             * Request Id
+             * @description 幂等号：用同一个再提交一次，得到的是同一个环境（不会再建一个）
+             */
+            request_id?: string | null;
+            /**
              * Sandbox
              * @default read_only
              * @enum {string}
@@ -13599,6 +13604,11 @@ export interface components {
              * @enum {string}
              */
             preset: "small" | "medium" | "large" | "custom";
+            /**
+             * Request Id
+             * @description 幂等号：用同一个再提交一次，得到的是同一个容器
+             */
+            request_id?: string | null;
             /** @description preset 是 custom 时必填 */
             resources?: components["schemas"]["RemoteResources"] | null;
             /**

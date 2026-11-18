@@ -13854,6 +13854,21 @@
             "description": "只支持 https://",
             "title": "Repo Url"
           },
+          "request_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "pattern": "^[\\w.\\-:]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "幂等号：用同一个再提交一次，得到的是同一个环境（不会再建一个）",
+            "title": "Request Id"
+          },
           "sandbox": {
             "default": "read_only",
             "enum": [
@@ -15692,6 +15707,21 @@
             ],
             "title": "Preset",
             "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "minLength": 1,
+                "pattern": "^[\\w.\\-:]+$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "幂等号：用同一个再提交一次，得到的是同一个容器",
+            "title": "Request Id"
           },
           "resources": {
             "anyOf": [

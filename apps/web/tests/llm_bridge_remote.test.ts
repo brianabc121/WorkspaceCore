@@ -102,6 +102,8 @@ describe('新增开发环境：云端远程容器', () => {
     expect(body).toMatchObject({ platform: 'claude', mode: 'dev', name: '远程仓库', sandbox: 'exec', network: false, location: 'remote', repo_url: 'https://github.com/o/r' })
     expect(body.remote_container_id).toBeUndefined()
     expect(body.new_container).toEqual({ name: '远程仓库 容器', host_id: HOST, image_kind: 'builtin', image: null, preset: 'large', runtime: 'gvisor', network: 'all', domains: [], secrets: [], idle_stop_minutes: 120 })
+    // 新增带幂等号：网络断了重试不会多建一个环境或远程容器
+    expect(body.request_id).toMatch(/^web-[\w-]+$/)
   })
 
   it('keeps Codex in the exec tier remotely, checks the image name and shows server-written errors', async () => {

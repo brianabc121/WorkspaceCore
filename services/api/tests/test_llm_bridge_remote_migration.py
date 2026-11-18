@@ -61,6 +61,7 @@ def test_migration_0079_defaults_existing_rows_and_round_trips(temp_database_url
     command.upgrade(config, "0079")
     assert set(ENV_COLUMNS) <= _columns(url, "runner_environments")
     assert set(RUN_COLUMNS) <= _columns(url, "runner_runs")
+    assert "owner_kind" in _columns(url, "runner_templates")  # 模块的模板只有模块能改
     assert set(TABLES) <= _tables(url)
     env_row = run(url, "SELECT * FROM workspace.runner_environments WHERE id=$1", env)[0]
     assert env_row["owner_kind"] == "instance"
@@ -98,6 +99,7 @@ def test_migration_0079_defaults_existing_rows_and_round_trips(temp_database_url
     command.downgrade(config, "0078")
     assert not set(ENV_COLUMNS) & _columns(url, "runner_environments")
     assert not set(RUN_COLUMNS) & _columns(url, "runner_runs")
+    assert "owner_kind" not in _columns(url, "runner_templates")
     assert not set(TABLES) & _tables(url)
     assert (
         dict(run(url, "SELECT * FROM workspace.runner_environments WHERE id=$1", env)[0])

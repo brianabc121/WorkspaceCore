@@ -429,6 +429,7 @@ class LlmBridgeRemoteContainer(Base):
         CheckConstraint("image_kind IN ('builtin', 'template', 'custom')", name="image_kind"),
         UniqueConstraint("bridge_id", "name"),
         UniqueConstraint("runner_environment_id"),
+        UniqueConstraint("workspace_id", "request_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -440,6 +441,8 @@ class LlmBridgeRemoteContainer(Base):
     bridge_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspace.llm_bridge_bridges.id", ondelete="CASCADE")
     )
+    # 新建时的幂等号：用同一个再提交一次，得到的是同一个容器
+    request_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     # 容器服务器上的环境；被删掉（或者从容器服务器页面以外的途径没了）时置空，页面显示“容器已不在”
     runner_environment_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.runner_environments.id", ondelete="SET NULL"), nullable=True

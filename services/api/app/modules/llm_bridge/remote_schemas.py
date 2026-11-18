@@ -34,6 +34,13 @@ class RemoteResources(_In):
 
 
 class LlmBridgeRemoteContainerIn(_In):
+    request_id: str | None = Field(
+        None,
+        min_length=1,
+        max_length=100,
+        pattern=r"^[\w.\-:]+$",
+        description="幂等号：用同一个再提交一次，得到的是同一个容器",
+    )
     name: str = Field(min_length=1, max_length=60)
     host_id: UUID = Field(description="放在哪台容器服务器上（只能是 Docker 类的）")
     image_kind: ImageKind = Field(

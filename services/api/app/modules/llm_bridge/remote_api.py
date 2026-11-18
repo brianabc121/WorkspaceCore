@@ -199,7 +199,7 @@ async def create_container(
     bridge = await service.bridge(access.workspace.id, bridge_id)
     remote = remote_of(service, redis)
     try:
-        row = await remote.create(
+        row, created = await remote.create(
             access.workspace.id,
             bridge,
             name=body.name.strip(),
@@ -215,9 +215,12 @@ async def create_container(
             idle_stop_minutes=body.idle_stop_minutes,
             repo_hosts=repo_hosts or [],
             actor_id=access.user_id,
+            request_id=body.request_id,
         )
     except (RemoteError, RunnerError) as error:
         raise remote_error(error) from None
+    if not created:
+        return row  # 同一个 request_id 再提交：已经建过了，不再记审计
     await service.audit(
         access,
         "remote_container_created",

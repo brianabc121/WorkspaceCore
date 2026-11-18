@@ -139,6 +139,8 @@ class RunnerTemplate(Base):
     name: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     owner_instance_id: Mapped[uuid.UUID | None] = _instance()
+    # instance：实例或管理员建的；模块 key（例如 llm_bridge）：只有模块自己能改（0079）
+    owner_kind: Mapped[str] = mapped_column(Text, server_default=text("'instance'"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )

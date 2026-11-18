@@ -90,6 +90,11 @@ class RunnerError(Exception):
         self.message = message
 
 
+# 模块建的模板（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md）：这个前缀的新名字只有模块能用
+MODULE_TEMPLATE_PREFIX = "mw-"
+MODULE_TEMPLATE_MESSAGE = "这个模板由工作台的模块管理（例如远程开发容器的镜像），不能在这里修改"
+
+
 @dataclass(frozen=True)
 class Viewer:
     """谁在看：实例（工具）或管理员（页面）。"""
@@ -526,8 +531,13 @@ class Runner:
         spec: dict[str, Any],
         version: int | None = None,
         host: RunnerHost | None = None,
+        owner_kind: str = "instance",
     ) -> tuple[RunnerTemplate, bool]:
-        """host：指定在哪台服务器上构建（模块的远程开发容器要求镜像和容器在同一台上）。"""
+        """host：指定在哪台服务器上构建（模块的远程开发容器要求镜像和容器在同一台上）。
+
+        owner_kind：instance 是实例或管理员；模块 key（例如 llm_bridge）只由模块自己传。
+        模块建的模板只有模块自己能改；MODULE_TEMPLATE_PREFIX 开头的新名字留给模块，
+        免得有人抢先用模块要用的名字建模板、再把镜像换掉（T-0295 集成审查）。"""
         try:
             normalized = specs.normalize(spec)
         except specs.SpecError as error:
@@ -542,17 +552,28 @@ class Runner:
         template = await self.template_by_name(viewer.workspace_id, name, lock=True)
         created = template is None
         if template is None:
+            if owner_kind == "instance" and name.startswith(MODULE_TEMPLATE_PREFIX):
+                raise RunnerError(
+                    "VALIDATION_FAILED",
+                    f"{MODULE_TEMPLATE_PREFIX} 开头的模板名留给工作台的模块（例如远程开发容器），"
+                    "换一个名称",
+                )
             template = RunnerTemplate(
                 id=uuid.uuid4(),
                 workspace_id=viewer.workspace_id,
                 name=name,
                 description=description,
                 owner_instance_id=viewer.instance.id if viewer.instance else None,
+                owner_kind=owner_kind,
                 created_by=viewer.user_id,
                 spec=normalized,
             )
             self.db.add(template)
         else:
+            if template.owner_kind != owner_kind:
+                if template.owner_kind != "instance":
+                    raise RunnerError("MANAGED_BY_MODULE", MODULE_TEMPLATE_MESSAGE)
+                raise RunnerError("FORBIDDEN", "这个模板名已经被一个不是模块建的模板占用")
             if viewer.instance is not None and template.owner_instance_id != viewer.instance.id:
                 raise RunnerError("FORBIDDEN", "这个模板是别人建的，换一个名称建你自己的")
             if version is not None and version != template.version:

@@ -19,7 +19,6 @@ import importlib
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import uuid
@@ -199,9 +198,27 @@ class FakeAgent:
 
     async def run_exec(self, command: dict[str, Any]) -> None:
         argv = command["payload"]["cmd"]
+        # 辅助命令在容器里自己带时限，超时也不停共享的容器（集成审查第 2 条）
+        assert argv[:3] == ["timeout", "-s", "KILL"] and int(argv[3]) > 0, argv
+        assert command["payload"]["keep_container"] is True
+        argv = argv[4:]
         output, code = "", 0
-        if argv[:2] == ["rm", "-rf"]:
-            shutil.rmtree(self.local(argv[-1]), ignore_errors=True)
+        if argv[:2] == ["sh", "-c"] and argv[3:4] == ["mw-rm"]:
+            # 真的在本机跑工作台的脚本：先挪进回收目录，再在后台删
+            done = await asyncio.to_thread(
+                subprocess.run,
+                [
+                    "/bin/sh",
+                    "-c",
+                    argv[2],
+                    "mw-rm",
+                    str(self.local(argv[4])),
+                    str(self.local(argv[5])),
+                ],
+                capture_output=True,
+                timeout=30,
+            )
+            code = done.returncode
         elif argv[:2] == ["sh", "-c"] and "--version" in argv[2]:
             output = "codex=codex-cli 0.169.0\nclaude=2.1.323 (Claude Code)\ncodebuddy=2.184.0\n"
         elif argv[:2] == ["sh", "-c"] and argv[3] == "mw-check":
@@ -398,23 +415,33 @@ async def test_remote_environment_end_to_end(rig: Rig) -> None:
     )
     assert refused.status_code == 422
 
-    made = await rig.api(
-        "POST",
-        f"/bridges/{rig.bridge_id}/environments",
-        json={
-            "platform": "claude",
-            "name": "远程开发",
-            "sandbox": "exec",
-            "repo_url": "https://git.example.com/team/app.git",
-            "branch": "main",
-            "location": "remote",
-            "new_container": {"name": "开发机", "host_id": hosts[0]["id"], "network": "models"},
-        },
-    )
+    create_body = {
+        "request_id": "web-env-1",
+        "platform": "claude",
+        "name": "远程开发",
+        "sandbox": "exec",
+        "repo_url": "https://git.example.com/team/app.git",
+        "branch": "main",
+        "location": "remote",
+        "new_container": {"name": "开发机", "host_id": hosts[0]["id"], "network": "models"},
+    }
+    made = await rig.api("POST", f"/bridges/{rig.bridge_id}/environments", json=create_body)
     assert made.status_code == 201, made.text
     environment = made.json()
     assert environment["location"] == "remote" and environment["remote_label"].endswith("开发机")
     container_id = environment["remote_container"]
+    # 同一个幂等号再提交一次（例如网络断了重试）：还是那个环境，不会再建一个环境或容器
+    again = await rig.api("POST", f"/bridges/{rig.bridge_id}/environments", json=create_body)
+    assert again.status_code == 201 and again.json()["id"] == environment["id"]
+    containers = (await rig.api("GET", f"/bridges/{rig.bridge_id}/containers")).json()
+    assert [c["id"] for c in containers["containers"]] == [container_id]
+    container_body = {"request_id": "web-c-1", "name": "第二台", "host_id": hosts[0]["id"]}
+    first = await rig.api("POST", f"/bridges/{rig.bridge_id}/containers", json=container_body)
+    second = await rig.api("POST", f"/bridges/{rig.bridge_id}/containers", json=container_body)
+    assert first.status_code == 201 and second.status_code == 201, (first.text, second.text)
+    assert first.json()["id"] == second.json()["id"]
+    removed = await rig.api("DELETE", f"/bridges/{rig.bridge_id}/containers/{first.json()['id']}")
+    assert removed.status_code == 204, removed.text
 
     # 镜像构建好了以后，定时任务接着建容器（网络放行了仓库所在的主机）
     sync = env.sync

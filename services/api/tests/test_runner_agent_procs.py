@@ -47,6 +47,7 @@ class _Dir:
         self.stdin = b""
         self.inputs: list[str] = []
         self.interactive = False
+        self.alive = "-"  # 进程组在不在：1 / 0，还没有进程号是 -
 
 
 class FakeDocker:
@@ -93,7 +94,7 @@ class FakeDocker:
             offset, most = int(args[1]), int(args[2])
             if found is None:
                 return ExecResult(0, b"-1 -\n", False, False, 0.0)
-            head = f"{len(found.out)} {found.exit or '-'}\n".encode()
+            head = f"{len(found.out)} {found.exit or '-'} {found.alive}\n".encode()
             body = bytes(found.out[offset : offset + most]) if len(found.out) > offset else b""
             assert len(head + body) <= limit
             return ExecResult(0, head + body, False, False, 0.0)
@@ -378,6 +379,93 @@ def test_timeout_sends_term_then_kill_and_reports_timeout(clock: _Clock) -> None
     assert workspace.exits()[-1]["exit_code"] == 137
 
 
+def test_kill_without_an_exit_record_is_reported_after_a_grace_period(clock: _Clock) -> None:
+    """集成审查第 3 条：KILL 之后外壳一直没写结束记录（例如它自己也被杀了），不能永远“正在运行”。"""
+    agent, docker, workspace, folder = _started(clock, timeout=5)
+    clock.now += 6
+    agent.proc_round()
+    clock.now += agent_module.PROC_TERM_GRACE + 1
+    agent.proc_round()
+    assert docker.signals[-1] == (folder, "KILL")
+    clock.now += agent_module.PROC_SLOW + 1
+    agent.proc_round()
+    assert workspace.exits() == []  # 还在宽限期里
+    clock.now += agent_module.PROC_KILL_GRACE
+    agent.proc_round()
+    [body] = workspace.exits()
+    assert body["state"] == "timeout" and body["exit_code"] is None
+    assert "没有留下结束记录" in body["error"] and agent._procs == {}
+
+
+def test_dead_process_group_without_an_exit_record_becomes_lost(clock: _Clock) -> None:
+    """模型在容器里 kill -9 -1：进程组和外壳都没了，没有结束记录。宽限后算丢失。"""
+    agent, docker, workspace, folder = _started(clock)
+    docker.dirs[folder].alive = "1"
+    agent.proc_round()
+    docker.dirs[folder].alive = "0"
+    clock.now += agent_module.PROC_SLOW + 1
+    agent.proc_round()
+    assert workspace.exits() == []
+    docker.dirs[folder].alive = "1"  # 又在了（例如外壳正在收尾）：重新计时
+    clock.now += agent_module.PROC_DEAD_GRACE + 1
+    agent.proc_round()
+    assert workspace.exits() == []
+    docker.dirs[folder].alive = "0"
+    clock.now += agent_module.PROC_SLOW + 1
+    agent.proc_round()
+    assert workspace.exits() == []
+    clock.now += agent_module.PROC_DEAD_GRACE + 1
+    agent.proc_round()
+    [body] = workspace.exits()
+    assert body["state"] == "lost" and body["exit_code"] is None
+
+
+def test_exit_record_written_late_still_wins(clock: _Clock) -> None:
+    agent, docker, workspace, folder = _started(clock)
+    docker.dirs[folder].alive = "0"
+    agent.proc_round()
+    docker.dirs[folder].exit = "0"  # 外壳在宽限期里写了结束记录
+    clock.now += agent_module.PROC_SLOW + 1
+    agent.proc_round()
+    [body] = workspace.exits()
+    assert body["state"] == "exited" and body["exit_code"] == 0
+
+
+def test_helper_exec_timeout_keeps_the_shared_container() -> None:
+    """集成审查第 2 条：模块的辅助命令超时只结束它自己，不停共享的容器。"""
+
+    class SlowDocker:
+        def __init__(self) -> None:
+            self.stopped: list[str] = []
+
+        def exec(self, container: str, cmd: list[str], **_: Any) -> ExecResult:
+            return ExecResult(None, b"", False, True, 60.0)
+
+        def stop(self, container: str, seconds: int = 10) -> None:
+            self.stopped.append(container)
+
+    class Proxy:
+        def __init__(self) -> None:
+            self.closed: list[str] = []
+
+        def close(self, env_id: str) -> None:
+            self.closed.append(env_id)
+
+    docker, proxy = SlowDocker(), Proxy()
+    agent = Agent(
+        config=Config(url="https://example.invalid", token="t", workers=1),  # noqa: S106
+        docker=docker,  # type: ignore[arg-type]
+        workspace=FakeWorkspace(),  # type: ignore[arg-type]
+        proxy=proxy,  # type: ignore[arg-type]
+    )
+    agent._ensure_running = lambda payload: (CONTAINER, False)  # type: ignore[method-assign]
+    payload = {"env_id": ENV_ID, "container": CONTAINER, "cmd": ["sleep", "100"], "timeout": 60}
+    result = agent.do_exec({**payload, "keep_container": True})
+    assert result["timed_out"] is True and docker.stopped == [] and proxy.closed == []
+    agent.do_exec(payload)  # 普通的一次性执行：照旧停容器
+    assert docker.stopped == [CONTAINER] and proxy.closed == [ENV_ID]
+
+
 def test_lost_container_is_reported_without_cleanup(clock: _Clock) -> None:
     agent, docker, workspace, _ = _started(clock)
     docker.fail = DockerError(409, "container is not running")
@@ -617,10 +705,11 @@ def test_wrapper_writes_output_exit_and_stderr_tail(tmp_path: Path) -> None:
     assert not (folder / "stdin").exists()
 
     head = _sh(agent_module.PROC_READ, str(folder), "11", "20")
-    size, code = head.split(b"\n", 1)[0].split()
-    assert int(size) == len(out) and code == b"7"
+    size, code, alive = head.split(b"\n", 1)[0].split()
+    # 进程组在外壳回报之前就停了（外壳最后还会给整个组发 TERM / KILL）
+    assert int(size) == len(out) and code == b"7" and alive == b"0"
     assert head.split(b"\n", 1)[1] == out[11:31]
-    assert _sh(agent_module.PROC_READ, str(tmp_path / "nope"), "0", "10") == b"-1 -\n"
+    assert _sh(agent_module.PROC_READ, str(tmp_path / "nope"), "0", "10") == b"-1 - -\n"
     tail = _sh(agent_module.PROC_ERR, str(folder), "100")
     assert tail == b"e" * 100
     _sh(agent_module.PROC_CLEAN, str(folder))

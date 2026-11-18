@@ -72,6 +72,8 @@ PROC_IDLE_AFTER = 10.0
 PROC_CHUNK = 256 * 1024  # 一次最多回传的字节数
 PROC_TERM_GRACE = 10.0  # TERM 之后多久还在就 KILL
 PROC_MISSING_GRACE = 60.0  # 进程目录一直不见（多半是容器被重建过）多久后算丢失
+PROC_KILL_GRACE = 30.0  # 发了 KILL 之后多久还没有结束记录，就按已结束上报
+PROC_DEAD_GRACE = 30.0  # 进程组已经没了、却没有结束记录（外壳被杀了）多久后算丢失
 PROC_STDIN_MAX = 4 * 1024 * 1024
 PROC_STDIN_PIECE = 64 * 1024  # 一次 exec 写多少（base64 后不超过单个环境变量的上限 128 KB）
 PROC_INPUT_MAX = 4096
@@ -112,7 +114,8 @@ tail -c 65536 "$d/err" > "$d/err.tmp" 2>/dev/null && mv -f "$d/err.tmp" "$d/err"
 echo "$code" > "$d/exit.tmp" && mv -f "$d/exit.tmp" "$d/exit"
 """
 # $1 目录 $2 已确认的字节数 $3 最多读多少。
-# 第一行“大小 退出码”（没有退出码是 -，目录不在大小是 -1），
+# 第一行“大小 退出码 进程组在不在”（没有退出码是 -，目录不在大小是 -1；
+# 进程组在是 1、不在是 0、还没有进程号是 -），
 # 之后是从已确认处开始的输出
 PROC_READ = r"""
 exec 2>/dev/null
@@ -120,7 +123,10 @@ d=$1; o=$2; n=$3
 s=$(wc -c < "$d/out") || s=-1
 e=-
 [ -f "$d/exit" ] && e=$(cat "$d/exit")
-printf '%s %s\n' "$s" "${e:--}"
+a=-
+p=$(cat "$d/pid")
+if [ -n "$p" ]; then if kill -0 "-$p"; then a=1; else a=0; fi; fi
+printf '%s %s %s\n' "$s" "${e:--}" "$a"
 if [ "$s" -gt "$o" ]; then tail -c +$((o + 1)) "$d/out" | head -c "$n"; fi
 """
 # $1 目录 $2 new / append；内容在 MW_CHUNK（base64）
@@ -167,6 +173,7 @@ class _Proc:
     busy: bool = False
     errors: int = 0
     missing_since: float | None = None
+    dead_since: float | None = None  # 进程组没了、却还没有结束记录的时刻
 
 
 @dataclass
@@ -855,8 +862,10 @@ class Agent:
             timeout=timeout,
             limit=OUTPUT_LIMIT,
         )
-        if result.timed_out:
-            # 单个 exec 不能单独终止：停止这个容器（数据卷保留）
+        if result.timed_out and not p.get("keep_container"):
+            # 单个 exec 不能单独终止：停止这个容器（数据卷保留）。
+            # 模块的辅助命令（keep_container）在容器里自己带了 timeout，到时只结束它这一条：
+            # 远程开发容器是共享的，里面还有别的回合和作业（T-0295 集成审查）
             self.docker.stop(container, seconds=5)
             self.proxy.close(str(p["env_id"]))
         return {
@@ -1173,6 +1182,24 @@ class Agent:
         proc.next_check = 0.0
         return bool(result.exit_code == 0)
 
+    def _ended_without_exit(self, proc: _Proc, alive: str, now: float) -> bool:
+        """没有结束记录的进程：托管的外壳在写结束记录之前被杀了（例如容器里有人 kill -9 -1），
+        或者发了 KILL 之后一直等不到。宽限之后按已结束上报，免得运行一直“正在运行”、容器一直忙。"""
+        killed_long_ago = proc.signaled == "KILL" and now - proc.signaled_at >= PROC_KILL_GRACE
+        if alive == "0":
+            proc.dead_since = proc.dead_since or now
+        elif not killed_long_ago:
+            proc.dead_since = None
+            return False
+        if not killed_long_ago and now - (proc.dead_since or now) < PROC_DEAD_GRACE:
+            proc.next_check = now + PROC_SLOW
+            return False
+        state = "timeout" if proc.reason == "timeout" else "killed" if proc.reason else "lost"
+        self._report_exit(
+            proc, None, state, "进程已经不在了，没有留下结束记录（可能被容器里的命令杀掉了）"
+        )
+        return True
+
     def check_proc(self, proc: _Proc) -> None:
         """读一次：先看时限（TERM，10 秒后 KILL），再回传新的输出，最后在输出全部确认后回报结束。"""
         now = time.monotonic()
@@ -1199,6 +1226,7 @@ class Agent:
         except (IndexError, ValueError):
             size = -1
         code_text = fields[1] if len(fields) > 1 else "-"
+        alive = fields[2] if len(fields) > 2 else "-"
         if size < 0:
             proc.missing_since = proc.missing_since or now
             if now - proc.missing_since >= PROC_MISSING_GRACE:
@@ -1237,6 +1265,8 @@ class Agent:
                 else "exited"
             )
             self._report_exit(proc, code, state, None)
+            return
+        if code_text == "-" and proc.acked >= size and self._ended_without_exit(proc, alive, now):
             return
         more = proc.acked < size
         idle = now - proc.last_output >= PROC_IDLE_AFTER

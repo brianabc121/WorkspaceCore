@@ -16,11 +16,12 @@ import base64
 import logging
 import re
 import uuid
+from datetime import timedelta
 from typing import Any
 from urllib.parse import urlparse
 
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings
@@ -31,7 +32,7 @@ from app.domain.runner_managed import ManagedRunner, agent_outdated, require_age
 from app.domain.sync import SyncContext
 from app.integrations.base import ConnectorError
 from app.integrations.http import CircuitBreaker
-from app.models import RunnerEnvironment, RunnerHost, RunnerRun, RunnerTemplate
+from app.models import RunnerCommand, RunnerEnvironment, RunnerHost, RunnerRun, RunnerTemplate
 from app.modules import service as modules
 from app.modules.llm_bridge import remote_config as cfg
 from app.modules.llm_bridge.client import BridgeCallError
@@ -52,6 +53,7 @@ PURPOSES = ("turn", "login", "job", "prepare")
 OPS_WAIT = 20
 TICK_SECONDS = 50
 HELPER_WAIT = 40
+LOCK_KEY = "llm_bridge_remote_create:"  # 新建远程容器的事务级锁（按工作空间）
 FILES_WAIT = 30
 MAX_TIMEOUT = 6 * 3600 + 600
 
@@ -62,6 +64,13 @@ PREPARE_SCRIPT = (
     'if [ -n "$url" ]; then '
     'if [ -n "$br" ]; then git clone --depth 1 --branch "$br" -- "$url" "$d"; '
     'else git clone --depth 1 -- "$url" "$d"; fi; fi; echo "准备好了"'
+)
+# 删除会话目录：先改名挪进回收目录（马上返回），再在后台删。大仓库加 node_modules 在 gVisor 里
+# rm -rf 可能要好几分钟，不能让辅助命令一直等着（T-0295 集成审查）
+TRASH_DIR = "/workspace/.trash"
+REMOVE_SCRIPT = (
+    'd=$1; t=$2; [ -e "$d" ] || exit 0; mkdir -p "$t" && mv -- "$d" "$t/$(date +%s)-$$" || exit 1; '
+    '(rm -rf -- "$t"/* >/dev/null 2>&1 &)'
 )
 VERSIONS_SCRIPT = (
     f'for p in codex claude codebuddy; do printf "%s=" "$p"; '
@@ -213,8 +222,28 @@ class RemoteContainers:
         idle_stop_minutes: int,
         repo_hosts: list[str],
         actor_id: uuid.UUID | None,
-    ) -> LlmBridgeRemoteContainer:
-        """登记一个远程容器并开始构建镜像。调用方提交。"""
+        request_id: str | None = None,
+    ) -> tuple[LlmBridgeRemoteContainer, bool]:
+        """登记一个远程容器并开始构建镜像，返回（容器，是不是这次新建的）。调用方提交。
+
+        同一个工作空间的新建排队做（事务级锁，到提交为止）：配额检查不会被并发的请求绕过；
+        request_id 用过的直接返回那个容器（集成审查第 6 条）。"""
+        await self.db.execute(
+            select(
+                func.pg_advisory_xact_lock(func.hashtextextended(f"{LOCK_KEY}{workspace_id}", 0))
+            )
+        )
+        if request_id is not None:
+            replay = await self.db.scalar(
+                select(LlmBridgeRemoteContainer).where(
+                    LlmBridgeRemoteContainer.workspace_id == workspace_id,
+                    LlmBridgeRemoteContainer.request_id == request_id,
+                )
+            )
+            if replay is not None:
+                if replay.bridge_id != bridge.id:
+                    raise RemoteError("CONFLICT", "这个 request_id 已经用在别的管理器上了")
+                return replay, False
         host = await self.db.scalar(
             select(RunnerHost).where(
                 RunnerHost.id == host_id, RunnerHost.workspace_id == workspace_id
@@ -265,12 +294,13 @@ class RemoteContainers:
             image=image if image_kind == "custom" else template_name,
             cli_versions=dict(cfg.CLI_VERSIONS),
             settings=settings,
+            request_id=request_id,
             created_by=actor_id,
         )
         self.db.add(row)
         await self.db.flush()
         await self._start_build(row, host, actor_id)
-        return row
+        return row, True
 
     async def _start_build(
         self, row: LlmBridgeRemoteContainer, host: RunnerHost, actor_id: uuid.UUID | None
@@ -283,6 +313,7 @@ class RemoteContainers:
             description=cfg.BUILTIN_DESCRIPTION,
             spec={"image": cfg.BASE_IMAGE, "steps": cfg.BUILTIN_STEPS, "lifetime": "persistent"},
             actor_id=actor_id,
+            owner_kind=cfg.OWNER,
         )
         if row.image_kind == "builtin":
             row.template_id = builtin.id
@@ -313,6 +344,7 @@ class RemoteContainers:
                 "lifetime": "persistent",
             },
             actor_id=actor_id,
+            owner_kind=cfg.OWNER,
         )
         row.template_id = derived.id
 
@@ -686,7 +718,8 @@ class RemoteContainers:
         name = str(args.get("name") or "")
         extra: dict[str, Any] = {}
         if name == "remove_session":
-            argv = ["rm", "-rf", "--", session_dir(str(args.get("session_id") or ""))]
+            folder = session_dir(str(args.get("session_id") or ""))
+            argv = ["sh", "-c", REMOVE_SCRIPT, "mw-rm", folder, TRASH_DIR]
         elif name == "transcript_exists":
             native = str(args.get("native_id") or "")
             platform = str(args.get("platform") or "")
@@ -922,9 +955,61 @@ async def _relay_bridge(context: SyncContext, bridge_id: uuid.UUID, until: float
     return handled
 
 
+ORPHAN_RETRY = 600  # 留下的容器删除失败后，过多久再试一次
+
+
+async def delete_orphans(
+    db: AsyncSession, settings: Settings, redis: Redis | None = None
+) -> list[uuid.UUID]:
+    """删掉登记已经没有了的远程开发容器（集成审查第 5 条）。返回这次发了删除的环境。调用方提交。
+
+    登记会在删除远程容器、移除管理器时删掉，容器服务器那边的删除可能失败（runner-agent 回报失败、
+    指令过期）；容器服务器页面又不让删模块的容器、回收也不把它当孤儿，存着凭据的数据卷就会一直留着。
+    这里每次定时任务都看一遍，删除失败的过 ORPHAN_RETRY 秒再试。"""
+    registered = exists().where(
+        LlmBridgeRemoteContainer.runner_environment_id == RunnerEnvironment.id
+    )
+    recent = exists().where(
+        RunnerCommand.environment_id == RunnerEnvironment.id,
+        RunnerCommand.kind == "delete_env",
+        or_(
+            RunnerCommand.status.in_(("pending", "sent")),
+            RunnerCommand.created_at > specs.now() - timedelta(seconds=ORPHAN_RETRY),
+        ),
+    )
+    envs = list(
+        await db.scalars(
+            select(RunnerEnvironment)
+            .where(
+                RunnerEnvironment.owner_kind == cfg.OWNER,
+                RunnerEnvironment.state != "deleted",
+                ~registered,
+                ~recent,
+            )
+            .limit(50)
+        )
+    )
+    managed = ManagedRunner(db, settings, redis)
+    done = []
+    for env in envs:
+        try:
+            await managed.delete(env, "远程开发容器的登记已经删除：清理留下的容器和数据卷")
+        except RunnerError as error:
+            logger.info("清理留下的远程容器 %s 没成：%s", env.id, error.message)
+            continue
+        done.append(env.id)
+    return done
+
+
 async def _housekeeping(context: SyncContext) -> None:
-    """建等着的容器、补发没送到的结束、停用的管理器停掉它的容器。"""
+    """建等着的容器、补发没送到的结束、停用的管理器停掉它的容器、删掉登记没了的容器。"""
     async with context.sessions() as db:
+        try:
+            if await delete_orphans(db, context.settings, context.redis):
+                await db.commit()
+        except Exception:
+            await db.rollback()
+            logger.exception("清理留下的远程容器失败")
         rows = list(await db.scalars(select(LlmBridgeRemoteContainer)))
         for row in rows:
             if not await modules.is_enabled(db, row.workspace_id, "llm_bridge"):

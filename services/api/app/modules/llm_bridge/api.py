@@ -5,12 +5,15 @@
 登录、环境、设置、会话都是转给会话桥的管理接口（services/llm-bridge 的 /admin/*）。
 """
 
+import json
 from datetime import datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlencode
 from uuid import UUID
 
 from fastapi import Depends, Path, Query, Response, status
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from app.api.deps import csrf_protected
 from app.core.errors import ApiError
@@ -19,6 +22,7 @@ from app.domain.runner import RunnerError
 from app.models import RunnerHost, User
 from app.modules.llm_bridge.client import LOGIN_READ_TIMEOUT
 from app.modules.llm_bridge.deps import Admin, Owner, Service, router
+from app.modules.llm_bridge.models import LlmBridge
 from app.modules.llm_bridge.remote import RemoteError
 from app.modules.llm_bridge.remote import repo_host as remote_repo_host
 from app.modules.llm_bridge.remote_api import Redis_, create_container, remote_error, remote_of
@@ -391,6 +395,67 @@ async def llm_bridge_create_environment(
 ) -> LlmBridgeEnvironmentOut:
     row = await service.bridge(access.workspace.id, bridge_id)
     _check_remote_sandbox(body)
+    claim = f"{ENV_REQUEST_KEY}{access.workspace.id}:{bridge_id}:{body.request_id}"
+    if body.request_id is not None:
+        done = await _claim_request(redis, claim)
+        if done is not None:
+            return LlmBridgeEnvironmentOut(**done)
+        if body.new_container is not None and body.new_container.request_id is None:
+            body.new_container.request_id = f"{body.request_id}.container"
+    try:
+        out = await _create_environment(access, service, redis, row, bridge_id, body)
+    except Exception:
+        if body.request_id is not None:
+            await _release_request(redis, claim, None)
+        raise
+    if body.request_id is not None:
+        await _release_request(redis, claim, out.model_dump(mode="json"))
+    return out
+
+
+# 新增开发环境的幂等号（集成审查第 6 条）：处理中记 pending，成功后记下结果（一天）
+ENV_REQUEST_KEY = "llm_bridge:env-request:"
+ENV_REQUEST_PENDING = 600
+ENV_REQUEST_KEEP = 86400
+
+
+async def _claim_request(redis: Redis, key: str) -> dict[str, Any] | None:
+    """用过的幂等号返回上次的结果；正在处理的回 409；没用过的占上。Redis 不可用时不做幂等。"""
+    try:
+        if await redis.set(key, "pending", nx=True, ex=ENV_REQUEST_PENDING):
+            return None
+        raw = await redis.get(key)
+    except RedisError:
+        return None
+    text = raw.decode() if isinstance(raw, bytes) else raw
+    if text and text != "pending":
+        try:
+            done = json.loads(text)
+        except ValueError:
+            done = None
+        if isinstance(done, dict):
+            return done
+    raise ApiError(409, "REQUEST_IN_PROGRESS", "同一个请求还在处理，稍后刷新列表看看")
+
+
+async def _release_request(redis: Redis, key: str, result: dict[str, Any] | None) -> None:
+    try:
+        if result is None:
+            await redis.delete(key)
+        else:
+            await redis.set(key, json.dumps(result, ensure_ascii=False), ex=ENV_REQUEST_KEEP)
+    except RedisError:
+        pass
+
+
+async def _create_environment(
+    access: Owner,
+    service: Service,
+    redis: Redis,
+    row: LlmBridge,
+    bridge_id: UUID,
+    body: LlmBridgeEnvironmentIn,
+) -> LlmBridgeEnvironmentOut:
     payload = _bridge_env_body(body)
     meta: dict[str, Any] = {"platform": body.platform, "name": body.name, "sandbox": body.sandbox}
     if body.location == "remote":

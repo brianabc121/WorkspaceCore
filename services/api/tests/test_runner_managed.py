@@ -18,11 +18,26 @@ from sqlalchemy import select, update
 
 from app.domain import runner_reclaim
 from app.domain import runner_specs as specs
-from app.domain.runner import RunnerError
-from app.domain.runner_managed import ManagedRunner, agent_outdated, proc_input_key
-from app.models import RunnerCommand, RunnerEnvironment, RunnerHost, RunnerRun, RunnerTemplate
+from app.domain.runner import Runner, RunnerError, Viewer
+from app.domain.runner_managed import (
+    PROC_EXPIRE_GRACE,
+    PROC_START_DEADLINE,
+    ManagedRunner,
+    agent_outdated,
+    proc_input_key,
+)
+from app.models import (
+    AgentInstance,
+    RunnerCommand,
+    RunnerEnvironment,
+    RunnerHost,
+    RunnerRun,
+    RunnerTemplate,
+)
 from app.modules import registry
+from app.modules.llm_bridge import remote_config as cfg
 from app.runner_agent import VERSION
+from tests.test_mcp_api import new_instance
 from tests.test_runner_api import (
     SETTINGS,
     add_host,
@@ -402,6 +417,43 @@ async def test_exit_output_is_redacted_and_expired_starts_end_as_unknown(
     assert sink.exits[-1]["run_id"] == str(expired) and sink.exits[-1]["state"] == "lost"
 
 
+async def test_started_proc_that_never_reports_ends_as_unknown(env: Env, sink: FakeSink) -> None:
+    """集成审查第 3 条：进程起来了，之后再没有回报（外壳被杀、runner-agent 一直没上线）。
+    过了时限加宽限，回收记为结果未知并通知模块，容器不再一直算“正忙”。"""
+    rtoken, env_id, _ = await _setup(env)
+    app = app_of(env.client)
+    run_id = await _start(env, env_id)
+    command = await next_command(env, rtoken, "proc_start")
+    assert await report_result(env, rtoken, command["id"], {"started": True, "pgid": 9})
+    async with app.state.sessionmaker() as db:
+        await runner_reclaim.tick(db, app.state.settings, app.state.redis)
+        await db.commit()
+        fresh = await db.get(RunnerRun, run_id)
+        assert fresh is not None and fresh.status == "running"  # 还在时限里：不动
+        late = timedelta(seconds=600 + PROC_START_DEADLINE + PROC_EXPIRE_GRACE + 1)
+        await db.execute(
+            update(RunnerRun)
+            .where(RunnerRun.id == run_id)
+            .values(started_at=specs.now() - late, created_at=specs.now() - late)
+        )
+        await db.commit()
+        await runner_reclaim.tick(db, app.state.settings, app.state.redis)
+        await db.commit()
+        stale = await db.get(RunnerRun, run_id, populate_existing=True)
+        assert stale is not None and stale.status == "unknown" and stale.finished_at is not None
+    assert sink.exits[-1]["run_id"] == str(run_id) and sink.exits[-1]["state"] == "lost"
+    # 之后迟到的结束回报：不改已经记下的结果
+    late_exit = await env.client.post(
+        f"/runner-api/v1/procs/{run_id}/exit",
+        json={"exit_code": 0, "state": "exited", "stderr_tail": "", "error": None},
+        headers=runner_headers(rtoken),
+    )
+    assert late_exit.status_code == 200, late_exit.text
+    async with app.state.sessionmaker() as db:
+        kept = await db.get(RunnerRun, run_id)
+        assert kept is not None and kept.status == "unknown"
+
+
 def test_agent_version_gate() -> None:
     """托管进程的指令从 runner-agent 0.4.0 起才有：旧接入包要先重新部署。"""
     assert agent_outdated(RunnerHost(agent_version=VERSION)) is None
@@ -428,3 +480,132 @@ async def test_old_agent_is_refused_before_any_command(env: Env) -> None:
         )
         assert "proc_start" not in kinds
         assert not list(await db.scalars(select(RunnerRun).where(RunnerRun.kind == "proc")))
+
+
+async def test_module_templates_cannot_be_squatted_or_changed(env: Env) -> None:
+    """集成审查的阻塞问题：智能体抢先用模块的模板名建模板，再把镜像换掉。"""
+    await add_host(env)
+    app = app_of(env.client)
+    workspace_id = uuid.UUID(env.workspace_id)
+    instance_id = uuid.UUID(await new_instance(env))
+    builtin_spec = {"image": cfg.BASE_IMAGE, "steps": cfg.BUILTIN_STEPS, "lifetime": "persistent"}
+    async with app.state.sessionmaker() as db:
+        host = await db.scalar(select(RunnerHost).where(RunnerHost.workspace_id == workspace_id))
+        instance = await db.get(AgentInstance, instance_id)
+        assert host is not None and instance is not None
+        runner = Runner(db, app.state.settings, app.state.redis)
+        name = f"mw-llm-dev-{str(host.id)[:8]}"
+
+        # 保留前缀：智能体和管理员都不能用它建新模板
+        for viewer in (Viewer(workspace_id, instance=instance), Viewer(workspace_id)):
+            with pytest.raises(RunnerError) as caught:
+                await runner.save_template(
+                    viewer, name=name, description="", spec={"image": "evil/image:1"}
+                )
+            assert caught.value.code == "VALIDATION_FAILED" and "留给" in caught.value.message
+
+        # 保留之前就被抢注的同名模板：模块不用、不改，换备用名
+        squat = RunnerTemplate(
+            id=uuid.uuid4(),
+            workspace_id=workspace_id,
+            name=name,
+            owner_instance_id=instance.id,
+            spec={"image": "evil/image:1"},
+            build_host_id=host.id,
+            build_status="ready",
+            image_ref="evil/image:1",
+        )
+        db.add(squat)
+        await db.flush()
+        managed = ManagedRunner(db, app.state.settings, app.state.redis)
+        mine = await managed.ensure_template(
+            workspace_id,
+            host,
+            name=name,
+            description="内置",
+            spec=builtin_spec,
+            actor_id=None,
+            owner_kind="llm_bridge",
+        )
+        assert mine.id != squat.id
+        assert mine.name == f"{name}-2" and mine.owner_kind == "llm_bridge"
+        assert mine.owner_instance_id is None
+        again = await managed.ensure_template(
+            workspace_id,
+            host,
+            name=name,
+            description="内置",
+            spec=builtin_spec,
+            actor_id=None,
+            owner_kind="llm_bridge",
+        )
+        assert again.id == mine.id
+        await db.refresh(squat)
+        assert squat.spec == {"image": "evil/image:1"} and squat.owner_kind == "instance"
+
+        # 模块的模板：智能体改不了（不论是不是它建的同名模板）
+        with pytest.raises(RunnerError) as caught:
+            await runner.save_template(
+                Viewer(workspace_id, instance=instance),
+                name=mine.name,
+                description="",
+                spec={"image": "evil/image:2"},
+            )
+        assert caught.value.code == "MANAGED_BY_MODULE"
+        template_id, version = mine.id, mine.version
+        await db.commit()
+
+    # 管理员页面：保存、停用、重建都不行
+    saved = await env.client.put(
+        "/api/v1/runner/templates",
+        json={"name": f"{name}-2", "spec": {"image": "evil/image:3"}, "version": version},
+        headers=env.headers(write=True),
+    )
+    assert saved.status_code == 409 and saved.json()["error"]["code"] == "MANAGED_BY_MODULE"
+    status = await env.client.put(
+        f"/api/v1/runner/templates/{template_id}/status",
+        json={"status": "disabled", "version": version},
+        headers=env.headers(write=True),
+    )
+    assert status.status_code == 409 and status.json()["error"]["code"] == "MANAGED_BY_MODULE"
+    rebuilt = await env.client.post(
+        f"/api/v1/runner/templates/{template_id}/rebuild", headers=env.headers(write=True)
+    )
+    assert rebuilt.status_code == 409 and rebuilt.json()["error"]["code"] == "MANAGED_BY_MODULE"
+    async with app.state.sessionmaker() as db:
+        row = await db.get(RunnerTemplate, template_id)
+        assert row is not None and row.spec["image"] == cfg.BASE_IMAGE and row.status == "active"
+
+
+async def test_module_containers_left_without_a_registration_are_deleted(env: Env) -> None:
+    """集成审查第 5 条：登记删了、容器服务器那边的删除失败，容器和存着凭据的数据卷不能一直留着。"""
+    from app.modules.llm_bridge import remote as remote_module
+
+    rtoken, env_id, _ = await _setup(env)  # 模块建的环境，没有远程容器的登记：就是留下的
+    app = app_of(env.client)
+
+    async def sweep() -> list[uuid.UUID]:
+        async with app.state.sessionmaker() as db:
+            done = await remote_module.delete_orphans(db, app.state.settings, app.state.redis)
+            await db.commit()
+            return done
+
+    assert await sweep() == [env_id]
+    assert await sweep() == []  # 删除指令还没回报：不重复发
+    command = await next_command(env, rtoken, "delete_env")
+    assert await report_result(env, rtoken, command["id"], {}, status="failed")
+    assert await sweep() == []  # 刚失败：过一会儿再试
+    async with app.state.sessionmaker() as db:
+        await db.execute(
+            update(RunnerCommand)
+            .where(RunnerCommand.id == uuid.UUID(command["id"]))
+            .values(created_at=specs.now() - timedelta(seconds=remote_module.ORPHAN_RETRY + 1))
+        )
+        await db.commit()
+    assert await sweep() == [env_id]
+    retry = await next_command(env, rtoken, "delete_env")
+    assert await report_result(env, rtoken, retry["id"], {})
+    async with app.state.sessionmaker() as db:
+        gone = await db.get(RunnerEnvironment, env_id)
+        assert gone is not None and gone.state == "deleted"
+    assert await sweep() == []

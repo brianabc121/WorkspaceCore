@@ -580,9 +580,9 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `GET /api/v1/runner/environments/{id}` | 一个环境的详情（T-0185），与列表项相同；不在列表筛选里也能读；其他工作空间与不存在的都 `404`；只读本地记录，不连 Docker / SSH |
 | `POST /api/v1/runner/environments/{id}/actions` | `action` ∈ `start` / `stop` / `archive`（常驻先停止、做快照，完成后才归档；被保护的 `409`）/ `delete`（立即进入待删除；常驻先做快照，快照保留 30 天）/ `keep`（撤销待删除：回到停止，归档过的回到归档）/ `restore`（归档的按配置记录重建；已删除的常驻环境在快照保留期内从快照恢复，没有快照 `409 SNAPSHOT_NOT_FOUND`）/ `pin` / `unpin`（保护：不被自动回收），带 `version`；审计 `runner.environment_<action>`。模块建的环境（`owner_kind` 不是 `instance`，例如 MCP 管理器的远程开发容器）不能 `archive` / `delete` / `keep` / `restore`：`409 MANAGED_BY_MODULE`（在模块自己的页面上删） |
 | `GET /api/v1/runner/templates` | 模板（`RunnerTemplateAdminOut`：谁建的、`untrusted.description`、规格、构建状态、构建日志的结尾 `build_log`（最多 20000 字，已脱敏）、镜像 digest、构建耗时、镜像大小、使用次数、乐观并发的 `version`）；新建、修改、改状态、重新构建都返回同样的结构 |
-| `PUT /api/v1/runner/templates` | 管理员新建 / 修改模板（`name` 只能是小写字母数字与 `._-`）：规格变了版本号加一并下发构建；修改带 `version`；审计 `runner.template_saved` |
-| `PUT /api/v1/runner/templates/{id}/status` | `active` / `disabled`，带 `version`；审计 `runner.template_status` |
-| `POST /api/v1/runner/templates/{id}/rebuild` | 重新构建；审计 `runner.template_rebuild` |
+| `PUT /api/v1/runner/templates` | 管理员新建 / 修改模板（`name` 只能是小写字母数字与 `._-`）：规格变了版本号加一并下发构建；修改带 `version`；审计 `runner.template_saved`。`mw-` 开头的新名字留给工作台的模块（`422`）；模块建的模板（例如远程开发容器的镜像）不能修改：`409 MANAGED_BY_MODULE`。智能体的 `runner_template_save` 同样 |
+| `PUT /api/v1/runner/templates/{id}/status` | `active` / `disabled`，带 `version`；审计 `runner.template_status`；模块建的模板 `409 MANAGED_BY_MODULE` |
+| `POST /api/v1/runner/templates/{id}/rebuild` | 重新构建；审计 `runner.template_rebuild`；模块建的模板 `409 MANAGED_BY_MODULE` |
 | `GET /api/v1/runner/runs` | 运行记录：`environment_id`、`instance_id`、`limit`（≤ 200）；输出只返回最后 16 KB |
 | `GET /api/v1/runner/runs/{id}` | 一次运行的完整输出（最多 1 MB，已按注入的密钥值与密钥扫描脱敏，放在 `untrusted.output`） |
 | `GET /api/v1/agents/instances/{id}/runner` | 实例的运行环境权限：`enabled`、生效的 `limits`、可以注入的密钥（密钥库已授权给这个实例的名称）、`enabled_at`、`version`（实例的） |
@@ -1086,7 +1086,7 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 |---|---|
 | `GET /api/v1/llm_bridge/remote/targets` | 能放远程容器的容器服务器（`available`、不能选的原因：Kubernetes 类、不在线）、资源预设（`small` / `medium` / `large`）、工作空间上限 `limits`（个数 5、合计 16 核 / 32768 MB / 200 GB）与已用 `used`、内置镜像里的命令行版本、各网络档放行的域名 |
 | `GET /api/v1/llm_bridge/bridges/{id}/containers` | 这个管理器的远程容器：`state`（`building` 构建镜像中 / `creating` / `running` / `stopped` / `archived` / `deleting` / `failed` / `gone`）、`state_reason`、服务器、资源、运行时、网络与域名、密钥名称、空闲停止、命令行版本与 `versions_ok`、`updating_image`、`image_error`、`runner_environment_id`、`version` |
-| `POST /api/v1/llm_bridge/bridges/{id}/containers` | 新建（`201`）：`name`、`host_id`、`image_kind`（`builtin` / `template` / `custom`）、`image`、`preset` 或 `resources`、`runtime`（`gvisor` / `runc`）、`network`（`models` / `models_registries` / `all`，默认 `all`）、`domains`、`secrets`、`idle_stop_minutes`（0 / 30 / 120）。先在那台服务器上构建内置镜像（自定义镜像再加一层命令行），好了以后定时任务自动建容器；超过上限 `409 QUOTA_EXCEEDED`；同名 `409 CONFLICT` |
+| `POST /api/v1/llm_bridge/bridges/{id}/containers` | 新建（`201`）：`request_id`（可选的幂等号：用同一个再提交一次，得到的是同一个容器）、`name`、`host_id`、`image_kind`（`builtin` / `template` / `custom`）、`image`、`preset` 或 `resources`、`runtime`（`gvisor` / `runc`）、`network`（`models` / `models_registries` / `all`，默认 `all`）、`domains`、`secrets`、`idle_stop_minutes`（0 / 30 / 120）。先在那台服务器上构建内置镜像（自定义镜像再加一层命令行），好了以后定时任务自动建容器；超过上限 `409 QUOTA_EXCEEDED`（同一个工作空间的新建排队做，并发也不会超过）；同名 `409 CONFLICT`；容器服务器的 runner-agent 是 0.4.0 以前的 `409 AGENT_OUTDATED`（请在容器服务器页面重新部署接入包） |
 | `PATCH /api/v1/llm_bridge/bridges/{id}/containers/{cid}` | 改 `idle_stop_minutes`、`network`、`domains`（带 `version`）；网络在下一次启动或执行时生效；资源不能改 |
 | `POST /api/v1/llm_bridge/bridges/{id}/containers/{cid}/actions` | `start` / `stop` / `retry`（失败后重来）/ `update_image`（按管理器现在的命令行版本重建镜像，再按新镜像重建容器，数据卷保留），带 `version` |
 | `DELETE /api/v1/llm_bridge/bridges/{id}/containers/{cid}` | 删除（`204`）：容器连数据卷删、不做快照；还有开发环境用它 `409 CONTAINER_IN_USE` |
@@ -1096,7 +1096,7 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 
 其他接口的变化：
 
-- `POST /api/v1/llm_bridge/bridges/{id}/environments` 加 `location`（`local` / `remote`），远程时 `remote_container_id`（已有的）或 `new_container`（新建，字段同上）二选一；远程的 Codex 只能 `sandbox=exec`（`422`）。管理器没收下时新建的容器登记一起撤回。`PUT` 不能改运行位置（`422`）。环境的返回加 `location`、`remote_container`、`remote_label`。
+- `POST /api/v1/llm_bridge/bridges/{id}/environments` 加可选的 `request_id`（幂等号：用同一个再提交一次，返回同一个环境；上一次还在处理时 `409 REQUEST_IN_PROGRESS`），加 `location`（`local` / `remote`），远程时 `remote_container_id`（已有的）或 `new_container`（新建，字段同上）二选一；远程的 Codex 只能 `sandbox=exec`（`422`）。管理器没收下时新建的容器登记一起撤回。`PUT` 不能改运行位置（`422`）。环境的返回加 `location`、`remote_container`、`remote_label`。
 - 会话工作目录的三个文件接口对远程会话改由工作台经容器服务器读（管理器回答 `REMOTE_SESSION`）：只读、解析符号链接后必须在 `/workspace/sessions/<会话号>` 里、预览脱敏规则相同；下载最多 20 MB。环境会话列表的每项加 `remote`（`{container, path}`）。
 - 智能体工具没有新增：`llm_bridge_environments` 的结果带 `location`，远程环境照常用 `llm_bridge_session_create` / `llm_bridge_send`。
 

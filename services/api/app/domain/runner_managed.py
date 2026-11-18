@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.domain import runner_specs as specs
 from app.domain.credentials import CredentialBox, CredentialError
-from app.domain.runner import Runner, RunnerError, Viewer, _redact
+from app.domain.runner import MODULE_TEMPLATE_PREFIX, Runner, RunnerError, Viewer, _redact
 from app.models import RunnerCommand, RunnerEnvironment, RunnerHost, RunnerRun, RunnerTemplate
 
 OWNER_INSTANCE = "instance"
@@ -41,6 +41,10 @@ STDIN_LIMIT = 2 * 1024 * 1024
 INPUT_LIMIT = 4096
 SECRET_ENV_MAX = 8
 PROC_START_DEADLINE = 1800  # 容器停着要先启动、归档的要先重建
+HELPER_MARGIN = 10  # 辅助命令在容器里的时限比 runner-agent 的时限短这么多秒
+# 托管进程过了时限还没有结束：runner-agent 本该在时限到时停掉它并回报。再宽限这么久仍没有回报
+# （runner-agent 一直没上线、外壳被杀、回报丢了），回收就记为结果未知
+PROC_EXPIRE_GRACE = 900
 SIGNALS = ("TERM", "KILL")
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 # 托管进程的三条指令（proc_start / proc_signal / proc_input）和 create_env 的 recreate
@@ -200,29 +204,43 @@ class ManagedRunner:
         description: str,
         spec: dict[str, Any],
         actor_id: uuid.UUID | None,
+        owner_kind: str,
     ) -> RunnerTemplate:
-        """找到（或建）在这台服务器上构建的模板；规格变了就按新规格重建。调用方提交。"""
+        """找到（或建）模块自己的、在这台服务器上构建的模板；规格变了就按新规格重建。调用方提交。
+
+        只用模块自己建的模板（owner_kind 相同）：同名的模板如果是实例或管理员建的（例如在
+        MODULE_TEMPLATE_PREFIX 保留之前抢注的），不碰它，换下一个备用名（name-2 … name-5）。
+        备用名是固定的，下次还能找到同一个模板。"""
+        if owner_kind == OWNER_INSTANCE or not name.startswith(MODULE_TEMPLATE_PREFIX):
+            raise RunnerError("VALIDATION_FAILED", "模块的模板要写明归属，名字用保留前缀")
         try:
             normalized = specs.normalize(spec)
         except specs.SpecError as error:
             raise RunnerError("VALIDATION_FAILED", str(error)) from None
-        found = await self.runner.template_by_name(workspace_id, name)
-        if (
-            found is not None
-            and found.status == "active"
-            and found.spec == normalized
-            and found.build_host_id == host.id
-            and found.build_status in ("building", "ready")
-        ):
-            return found
-        template, _ = await self.runner.save_template(
-            Viewer(workspace_id, user_id=actor_id),
-            name=name,
-            description=description,
-            spec=spec,
-            host=host,
+        for candidate in (name, *(f"{name}-{n}" for n in range(2, 6))):
+            found = await self.runner.template_by_name(workspace_id, candidate)
+            if found is not None and found.owner_kind != owner_kind:
+                continue  # 别人的模板：不用、不改
+            if (
+                found is not None
+                and found.status == "active"
+                and found.spec == normalized
+                and found.build_host_id == host.id
+                and found.build_status in ("building", "ready")
+            ):
+                return found
+            template, _ = await self.runner.save_template(
+                Viewer(workspace_id, user_id=actor_id),
+                name=candidate,
+                description=description,
+                spec=spec,
+                host=host,
+                owner_kind=owner_kind,
+            )
+            return template
+        raise RunnerError(
+            "CONFLICT", f"模板名 {name} 和它的备用名都被别的模板占用了，请联系管理员处理"
         )
-        return template
 
     # ------------------------------------------------------------------ 环境
 
@@ -552,8 +570,16 @@ class ManagedRunner:
     async def helper(
         self, env: RunnerEnvironment, argv: list[str], *, timeout_seconds: int = 60
     ) -> RunnerRun:
-        """跑一条一次性的辅助命令（删除会话目录、查会话记录、查版本），返回运行。调用方提交后等它。"""
-        run = await self.runner.start_run(None, env, argv, timeout_seconds)
+        """跑一条一次性的辅助命令（删除会话目录、查会话记录、查版本），返回运行。调用方提交后等它。
+
+        容器是共享的（别的回合、作业还在跑）：命令在容器里自己带 timeout，到时只结束这一条；
+        runner-agent 看到 keep_container 也不会因为超时停掉整个容器（T-0295 集成审查）。"""
+        inner = max(5, timeout_seconds - HELPER_MARGIN)
+        wrapped = ["timeout", "-s", "KILL", str(inner), *argv]
+        run = await self.runner.start_run(None, env, wrapped, timeout_seconds)
+        pending = await self.db.scalar(select(RunnerCommand).where(RunnerCommand.run_id == run.id))
+        if pending is not None:
+            pending.payload = {**pending.payload, "keep_container": True}
         await self.runner.touch(env)
         return run
 

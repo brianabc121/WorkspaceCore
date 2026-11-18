@@ -27,7 +27,7 @@ from app.domain import notifications, runner_metrics, runner_reclaim
 from app.domain import runner_specs as specs
 from app.domain.audit import AuditTrail
 from app.domain.policy import WorkspaceAccess, not_found
-from app.domain.runner import Runner, RunnerError, Viewer, spec_out
+from app.domain.runner import MODULE_TEMPLATE_MESSAGE, Runner, RunnerError, Viewer, spec_out
 from app.domain.runner_capabilities import ContainerApprovalRequired
 from app.domain.runner_hosts import RunnerHosts, host_out
 from app.models import (
@@ -59,10 +59,21 @@ from app.schemas.runner import (
 )
 
 
+def _not_module_template(template: RunnerTemplate) -> None:
+    if template.owner_kind != "instance":
+        raise ApiError(
+            409,
+            "MANAGED_BY_MODULE",
+            MODULE_TEMPLATE_MESSAGE,
+            details={"owner_kind": template.owner_kind},
+        )
+
+
 def _error(error: RunnerError) -> ApiError:
     status = {
         "NOT_FOUND": 404,
         "VERSION_CONFLICT": 409,
+        "MANAGED_BY_MODULE": 409,
         "FORBIDDEN": 403,
         "RUNNER_UNAVAILABLE": 409,
         "RUNNER_HOST_AMBIGUOUS": 409,
@@ -564,6 +575,7 @@ class RunnerAdmin:
         self, access: WorkspaceAccess, template_id: uuid.UUID, body: RunnerTemplateStatus
     ) -> RunnerTemplateAdminOut:
         template = await self._template(access, template_id)
+        _not_module_template(template)
         if template.version != body.version:
             raise ApiError(409, "VERSION_CONFLICT", "模板已被修改，请刷新后重试")
         template.status = body.status
@@ -589,6 +601,7 @@ class RunnerAdmin:
         await self.runner._lock_pool_hosts(access.workspace.id)
         template = await self._template(access, template_id)
         await self.db.refresh(template, with_for_update=True)
+        _not_module_template(template)
         try:
             host = await self.runner.online_host(access.workspace.id, template.build_host_id)
         except RunnerError as error:

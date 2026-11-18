@@ -122,6 +122,7 @@ async def tick(db: AsyncSession, settings: Settings, redis: Redis | None = None)
     )
     # Hosts registered after the lock snapshot belong to the next tick.
     await _expire_commands(runner, out, host_ids=host_ids)
+    await _expire_procs(runner, out, host_ids=host_ids)
     await _hosts_offline(runner, out, host_ids=host_ids)
     await _event_conditions(runner, out, host_ids=host_ids)
     await _lifecycle(runner, out, host_ids=host_ids)
@@ -198,6 +199,40 @@ async def _expire_commands(
                 env.state = "stopped"
                 env.delete_after = None
             env.state_reason = "快照超时，没有归档或删除"
+
+
+async def _expire_procs(
+    runner: Runner, out: TickResult, *, host_ids: set[uuid.UUID] | None = None
+) -> None:
+    """托管进程过了时限加宽限还没有结束：记为结果未知并通知模块，容器不再一直算“正忙”。"""
+    from app.domain.runner_managed import PROC_EXPIRE_GRACE, PROC_START_DEADLINE
+    from app.domain.runner_procs import notify_exit
+
+    db = runner.db
+    now = specs.now()
+    started = func.coalesce(RunnerRun.started_at, RunnerRun.created_at)
+    limit = RunnerRun.timeout_seconds + PROC_START_DEADLINE + PROC_EXPIRE_GRACE
+    rows = list(
+        await db.scalars(
+            select(RunnerRun)
+            .join(RunnerEnvironment, RunnerEnvironment.id == RunnerRun.environment_id)
+            .where(
+                RunnerRun.kind == "proc",
+                RunnerRun.finished_at.is_(None),
+                started + func.make_interval(0, 0, 0, 0, 0, 0, limit) < now,
+                RunnerEnvironment.host_id.in_(host_ids) if host_ids is not None else true(),
+            )
+            .with_for_update(of=RunnerRun, skip_locked=True)
+            .limit(200)
+        )
+    )
+    for run in rows:
+        await _run_unknown(db, run.id)
+        if run.status == "unknown":
+            out.expired += 1
+            await notify_exit(
+                db, runner.settings, run, "lost", "过了时限，容器服务器一直没有回报进程结束"
+            )
 
 
 async def _run_unknown(db: AsyncSession, run_id: uuid.UUID) -> None:

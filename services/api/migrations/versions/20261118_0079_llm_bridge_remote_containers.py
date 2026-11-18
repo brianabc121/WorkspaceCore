@@ -6,6 +6,8 @@
   owner_ref、owner_label，以及 no_auto_archive（不自动归档）。已有的行都是 instance。
 - runner_runs 加托管进程：kind（exec 默认 / proc）、owner_kind、owner_ref、acked_offset
   （工作台已经确认收到的输出字节数）。已有的行都是 exec。
+- runner_templates 加 owner_kind（instance 默认 / 模块 key）：模块建的模板只有模块自己能改，
+  实例和管理员不能保存、停用、重建它（防止抢注模块的模板名后换镜像）。已有的行都是 instance。
 
 大模型客户端模块：
 
@@ -123,6 +125,11 @@ def upgrade() -> None:
         "acked_offset >= 0",
         schema="workspace",
     )
+    op.add_column(
+        "runner_templates",
+        sa.Column("owner_kind", sa.Text(), server_default=sa.text("'instance'"), nullable=False),
+        schema="workspace",
+    )
     # 对账时找某台服务器上还没结束的托管进程
     op.create_index(
         "ix_runner_runs_open_procs",
@@ -138,6 +145,8 @@ def upgrade() -> None:
         _id(),
         _uuid("workspace_id", nullable=False),
         _uuid("bridge_id", nullable=False),
+        # 新建时的幂等号
+        sa.Column("request_id", sa.Text()),
         _uuid("runner_environment_id"),
         _uuid("host_id"),
         sa.Column("name", sa.Text(), nullable=False),
@@ -166,6 +175,9 @@ def upgrade() -> None:
         sa.UniqueConstraint("bridge_id", "name", name=op.f(f"uq_{CONTAINERS}_bridge_id_name")),
         sa.UniqueConstraint(
             "runner_environment_id", name=op.f(f"uq_{CONTAINERS}_runner_environment_id")
+        ),
+        sa.UniqueConstraint(
+            "workspace_id", "request_id", name=op.f(f"uq_{CONTAINERS}_workspace_id_request_id")
         ),
         schema="workspace",
     )
@@ -215,6 +227,7 @@ def downgrade() -> None:
         op.drop_constraint(op.f(name), "runner_runs", schema="workspace", type_="check")
     for column in ("acked_offset", "owner_ref", "owner_kind", "kind"):
         op.drop_column("runner_runs", column, schema="workspace")
+    op.drop_column("runner_templates", "owner_kind", schema="workspace")
     op.drop_index(
         "ix_runner_environments_owner_ref", table_name="runner_environments", schema="workspace"
     )

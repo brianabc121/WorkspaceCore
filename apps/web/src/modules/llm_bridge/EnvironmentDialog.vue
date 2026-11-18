@@ -3,7 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, reactive, ref, toRef, useId
 import { FolderPlus, X } from '@lucide/vue'
 import { PLATFORM_MARK } from './chat/chatApi'
 import {
-  CONTAINER_STATE, IDLE_STOP, PLATFORMS, REMOTE_NETWORK, REMOTE_NETWORK_NOTE, REMOTE_PRESET, SANDBOX, bridgeError, platformName, resourceText,
+  CONTAINER_STATE, IDLE_STOP, PLATFORMS, REMOTE_NETWORK, REMOTE_NETWORK_NOTE, REMOTE_PRESET, SANDBOX, bridgeError, newDeployRequestId, platformName, resourceText,
   type Environment, type EnvironmentBody, type LlmBridgeApi, type Platform, type RemoteContainerBody, type RemoteNetwork,
 } from './api'
 
@@ -75,6 +75,8 @@ const footNote = computed(() => {
 })
 const list = (text: string) => text.split(/[\s,，、]+/).map(s => s.trim()).filter(Boolean)
 const error = ref(''), busy = ref(false)
+// 新增的幂等号：这个弹窗里重试（例如网络断了再点一次）不会多建一个环境或远程容器
+const requestId = newDeployRequestId()
 
 function newContainer(envName: string): RemoteContainerBody | string {
   const name = (nc.name.trim() || `${envName} 容器`).slice(0, 60)
@@ -107,6 +109,7 @@ async function submit() {
     network: remote.value ? false : form.network, description: form.description.trim(), enabled: form.enabled,
     turn_timeout_seconds: minutes == null ? null : Math.max(30, minutes * 60), location: location.value,
   }
+  if (!editing.value) body.request_id = requestId
   if (remote.value) {
     if (editing.value) body.remote_container_id = props.env?.remote_container ?? null
     else if (pick.value === 'existing') {
