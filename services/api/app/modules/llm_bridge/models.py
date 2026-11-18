@@ -12,6 +12,10 @@
   地址和主机公钥：服务器从工作台移除、改密码、吊销密钥都不影响已经部署的管理器。
 - llm_bridge_deploy_jobs：部署、重新部署、重启、卸载任务，各一条记录，带步骤和脱敏后的日志。
   管理令牌、服务器密码、sudo 密码都不在这两张表里。
+- llm_bridge_remote_containers：MCP 管理器在容器服务器上的远程开发容器
+  （docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md）：对应一个容器服务器环境（owner_kind=llm_bridge）；
+  镜像、资源、网络等设置。各平台在容器里的登录记在管理器里。
+- llm_bridge_remote_procs：管理器的远程进程号 ↔ 容器服务器的运行（转发输出、补发结束用）。不存输出。
 - llm_bridge_sessions：会话索引（docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md 3.4）：每个管理器上有哪些会话、
   谁建的、出处、回合数和用量。不含对话内容。
 """
@@ -415,3 +419,91 @@ class LlmBridgeDigest(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class LlmBridgeRemoteContainer(Base):
+    """远程开发容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 5、11 节）。"""
+
+    __tablename__ = "llm_bridge_remote_containers"
+    __table_args__ = (
+        CheckConstraint("image_kind IN ('builtin', 'template', 'custom')", name="image_kind"),
+        UniqueConstraint("bridge_id", "name"),
+        UniqueConstraint("runner_environment_id"),
+        UniqueConstraint("workspace_id", "request_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    bridge_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.llm_bridge_bridges.id", ondelete="CASCADE")
+    )
+    # 新建时的幂等号：用同一个再提交一次，得到的是同一个容器
+    request_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 容器服务器上的环境；被删掉（或者从容器服务器页面以外的途径没了）时置空，页面显示“容器已不在”
+    runner_environment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.runner_environments.id", ondelete="SET NULL"), nullable=True
+    )
+    host_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.runner_hosts.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(Text)
+    image_kind: Mapped[str] = mapped_column(Text)
+    # template：模板名；custom：镜像名
+    image: Mapped[str | None] = mapped_column(Text, nullable=True)
+    template_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.runner_templates.id", ondelete="SET NULL"), nullable=True
+    )
+    # 建容器时的命令行版本（和管理器不一致时提示更新镜像）
+    cli_versions: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    # 资源（cpus、memory_mb、disk_gb）、runtime、network、domains、secrets、idle_stop_minutes
+    settings: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    version: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+
+
+class LlmBridgeRemoteProc(Base):
+    """管理器的一个远程进程（回合、登录、作业、准备会话目录）对应的容器服务器运行。"""
+
+    __tablename__ = "llm_bridge_remote_procs"
+    __table_args__ = (
+        CheckConstraint("purpose IN ('turn', 'login', 'job', 'prepare')", name="purpose"),
+        UniqueConstraint("bridge_id", "proc_id"),
+        Index("ix_llm_bridge_remote_procs_run", "run_id"),
+        Index(
+            "ix_llm_bridge_remote_procs_unsent",
+            "bridge_id",
+            postgresql_where=text("exit_sent = false"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.workspaces.id", ondelete="CASCADE")
+    )
+    bridge_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.llm_bridge_bridges.id", ondelete="CASCADE")
+    )
+    container_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspace.llm_bridge_remote_containers.id", ondelete="CASCADE")
+    )
+    proc_id: Mapped[str] = mapped_column(Text)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspace.runner_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    purpose: Mapped[str] = mapped_column(Text)
+    session_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exit_sent: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

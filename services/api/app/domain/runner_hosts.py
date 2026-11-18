@@ -61,7 +61,9 @@ POLL_BATCH = 10
 AUTH_FAILURE_LIMIT = 10
 AUTH_FAILURE_WINDOW_SECONDS = 15 * 60
 # 带密钥下发的指令（容器启动时写进 /run/secrets）
-SECRET_KINDS = frozenset({"create_env", "start_env", "exec", "restore"})
+SECRET_KINDS = frozenset({"create_env", "start_env", "exec", "restore", "proc_start"})
+# 载荷里要放托管进程输入的指令（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 21.3）
+PROC_INPUT_KINDS = frozenset({"proc_start", "proc_input"})
 # 记录里应当有容器的状态（creating 可能还没建好）
 EXPECT_CONTAINER = ("running", "stopped")
 EGRESS_KEEP = 50
@@ -468,6 +470,12 @@ class RunnerHosts:
                     payload["secret_values"] = await resolve_env_secrets(
                         self.db, self.settings, env, record=True, client_ip=client_ip
                     )
+            if command.kind in PROC_INPUT_KINDS:
+                # 托管进程的标准输入、凭据、交互输入：这时才从 Redis 取出解开（不落库）
+                from app.domain.runner_managed import take_proc_input
+
+                payload["proc_input"] = await take_proc_input(self.redis, self.settings, command.id)
+            # 托管进程等 runner-agent 回报“起来了”才算运行中（对账名单只列真正起来了的）
             if command.kind == "exec" and command.run_id is not None:
                 await self._mark_run_started(command.run_id)
             out.append(RunnerCommandOut(id=command.id, kind=command.kind, payload=payload))
@@ -669,7 +677,9 @@ class RunnerHosts:
                 continue
             if target is not None:
                 target.egress = _merge_egress(target.egress, items)
-        return RunnerReportResult(lost=lost, stray=stray)
+        from app.domain.runner_procs import open_procs
+
+        return RunnerReportResult(lost=lost, stray=stray, procs=await open_procs(self.db, host))
 
 
 def _merge_egress(current: dict[str, Any], items: list[Any]) -> dict[str, Any]:

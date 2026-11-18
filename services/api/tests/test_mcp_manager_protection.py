@@ -773,7 +773,7 @@ async def test_workspace_keeps_the_manager_count_and_old_agents_report_none(
         headers=runner_api_tests.runner_headers(token),
     )
     assert posted.status_code == 200, posted.text
-    assert posted.json() == {"lost": [], "stray": []}
+    assert posted.json() == {"lost": [], "stray": [], "procs": []}
     report = await _host_report(env)
     assert report["unlabeled_containers"] == 2 and report["mcp_manager_containers"] == 1
 

@@ -89,6 +89,20 @@ class ModelInfo:
 
 
 @dataclass(frozen=True)
+class RemoteTarget:
+    """远程开发容器里的会话（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 21.1 节）。
+
+    container 是工作台给的远程容器号，workdir 是容器里的工作目录（/workspace/sessions/<会话号>）。
+    官方程序不在管理器里跑，而是经工作台在那个容器里起（bridge/remote.py）。"""
+
+    container: str
+    workdir: str
+    session_id: str
+    # 托管进程的时限（秒）：单回合时限再加一点，到了由 runner-agent 在容器服务器上停掉
+    timeout_seconds: int = 1800
+
+
+@dataclass(frozen=True)
 class SessionSpec:
     """engine 交给驱动的一个会话。"""
 
@@ -113,6 +127,8 @@ class SessionSpec:
     # 这个开发会话能开后台作业（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.5）：给模型说明 llm-task，
     # 并关掉官方程序自带的后台任务（回答结束时会被停掉，见 5.11）
     jobs: bool = False
+    # 远程开发容器里的会话；None 是在管理器自己的容器里
+    remote: RemoteTarget | None = None
 
 
 # 能开后台作业的开发会话给模型的说明（三家官方程序共用；LONGRUN 5.5）
@@ -202,6 +218,19 @@ class Driver:
 
     slot: str = ""
     login_methods: tuple[str, ...] = ()
+    # 远程开发容器（bridge/remote.py 的 RemoteHub）：engine 建好后设上；没有就不支持远程会话
+    remote: Any = None
+
+    def remote_credentials(self) -> dict[str, str]:
+        """远程容器里每个回合随进程注入的凭据（环境变量名 → 值）。
+
+        只给不会自己刷新的凭据（API 密钥、Claude 的长期令牌）；会刷新的登录（网页登录、设备码登录）
+        不下发，要在容器里单独登录同一个账号（方案第 9 节）。默认没有。"""
+        return {}
+
+    async def version(self) -> str | None:
+        """管理器里这个官方程序的版本（例如 2.1.323）；查不到为 None。远程容器里的要和它一样。"""
+        return None
 
     async def start(self) -> None:
         return None

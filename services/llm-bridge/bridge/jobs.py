@@ -24,6 +24,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 LOG_CAP = 20 * 1024 * 1024  # 日志文件最多写这么多
 TAIL_KEEP = 256 * 1024  # 超过上限后在内存里留最近的这么多
@@ -37,10 +38,21 @@ ExitHandler = Callable[[str, str, int | None, str | None], Awaitable[None]]
 ProgressHandler = Callable[[str, int, float | None], None]
 
 
+@dataclass(frozen=True)
+class RemoteJob:
+    """远程开发容器里的作业（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 14 节）：
+    经工作台在容器里起托管进程（purpose=job，argv=["bash","-c",命令]），输出照样写进管理器里的日志。"""
+
+    hub: Any  # bridge.remote.RemoteHub（不在这里导入，免得循环）
+    container: str
+    workdir: str
+    session_id: str
+
+
 @dataclass
 class _Running:
     job_id: str
-    proc: asyncio.subprocess.Process
+    proc: Any  # asyncio.subprocess.Process，或远程进程（bridge.remote.RemoteProcess）
     path: Path
     timeout: float
     written: int = 0
@@ -68,12 +80,39 @@ class JobRunner:
         return job_id in self._running
 
     async def start(
-        self, job_id: str, command: str, cwd: Path, env: dict[str, str], limit_seconds: float
+        self,
+        job_id: str,
+        command: str,
+        cwd: Path,
+        env: dict[str, str],
+        limit_seconds: float,
+        remote: RemoteJob | None = None,
     ) -> int:
-        """起一个作业，返回进程号。失败抛 OSError。"""
+        """起一个作业，返回进程号（远程作业是 0）。失败抛 OSError。"""
         self.log_dir.mkdir(parents=True, exist_ok=True)
         path = self.log_path(job_id)
         path.write_bytes(b"")
+        if remote is not None:
+            from bridge.drivers.base import DriverError
+
+            try:
+                proc: Any = await remote.hub.spawn(
+                    remote.container,
+                    purpose="job",
+                    platform=None,
+                    session_id=remote.session_id,
+                    # 标准错误并进标准输出，和本地作业一样写进同一份日志
+                    argv=["bash", "-c", f"exec 2>&1\n{command}"],
+                    cwd=remote.workdir,
+                    env=env,
+                    timeout_seconds=int(limit_seconds) + 60,
+                )
+            except DriverError as error:
+                raise OSError(error.message) from error
+            running = _Running(job_id=job_id, proc=proc, path=path, timeout=limit_seconds)
+            self._running[job_id] = running
+            running.supervisor = asyncio.create_task(self._supervise(running), name=f"job-{job_id}")
+            return 0
         proc = await asyncio.create_subprocess_exec(
             "/bin/bash",
             "-c",
@@ -219,5 +258,11 @@ class JobRunner:
 
     @staticmethod
     def _signal(running: _Running, sig: signal.Signals) -> None:
+        if running.proc.pid is None:  # 远程作业：经工作台给容器里的整个进程组发信号
+            if sig == signal.SIGKILL:
+                running.proc.kill()
+            else:
+                running.proc.terminate()
+            return
         with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(running.proc.pid, sig)

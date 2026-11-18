@@ -48,6 +48,8 @@ function setup(role: Role, handler?: (r: Request) => Response | undefined | Prom
     if (p === '/api/v1/llm_bridge/deployments' && r.method === 'GET') return Response.json({ jobs: [], available: false })
     if (p === `${base}/environments` && r.method === 'GET') return Response.json({ environments: [] })
     if (p === `${base}/sessions`) return Response.json({ sessions: [], sync_failed: '' })
+    // 云端远程容器（llm_bridge_remote.test.ts 另有完整的测试）：这里默认还没有
+    if (p === `${base}/containers` && r.method === 'GET') return Response.json({ containers: [] })
     return undefined
   })
 }
@@ -1089,7 +1091,7 @@ describe('大模型客户端管理', () => {
     await fireEvent.click(within(form).getByLabelText(/允许联网/))
     await fireEvent.click(within(form).getByRole('button', { name: '创建环境' }))
     expect(await within(env).findByText('已新增环境「工作台仓库」。')).toBeVisible()
-    expect(await writes(requests)[2]!.clone().json()).toEqual({ platform: 'claude', mode: 'dev', name: '工作台仓库', repo_url: 'https://github.com/o/r', branch: null, sandbox: 'exec', network: true, description: '', enabled: true, turn_timeout_seconds: null })
+    expect(await writes(requests)[2]!.clone().json()).toEqual({ platform: 'claude', mode: 'dev', name: '工作台仓库', repo_url: 'https://github.com/o/r', branch: null, sandbox: 'exec', network: true, description: '', enabled: true, turn_timeout_seconds: null, location: 'local', request_id: expect.stringMatching(/^web-/) })
   })
 
   it('sets the background task limits (jobs unlimited by default) and a turn time limit per environment', async () => {

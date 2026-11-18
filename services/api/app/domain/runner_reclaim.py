@@ -19,6 +19,7 @@ import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 from redis.asyncio import Redis
 from sqlalchemy import delete, func, select, true, update
@@ -121,6 +122,7 @@ async def tick(db: AsyncSession, settings: Settings, redis: Redis | None = None)
     )
     # Hosts registered after the lock snapshot belong to the next tick.
     await _expire_commands(runner, out, host_ids=host_ids)
+    await _expire_procs(runner, out, host_ids=host_ids)
     await _hosts_offline(runner, out, host_ids=host_ids)
     await _event_conditions(runner, out, host_ids=host_ids)
     await _lifecycle(runner, out, host_ids=host_ids)
@@ -164,6 +166,14 @@ async def _expire_commands(
         )
         if command.kind == "exec" and command.run_id is not None:
             await _run_unknown(db, command.run_id)
+        elif command.kind == "proc_start" and command.run_id is not None:
+            # 托管进程没回报“起来了”：结果未知，告诉建它的模块（模块自己的对账也会补发）
+            from app.domain.runner_procs import notify_exit
+
+            await _run_unknown(db, command.run_id)
+            run = await db.get(RunnerRun, command.run_id)
+            if run is not None and run.status == "unknown":
+                await notify_exit(db, runner.settings, run, "lost", command.error)
         elif command.kind == "create_env" and env is not None and env.state == "creating":
             env.state = "failed"
             env.state_reason = "创建超时：容器服务器在时限内没有回报"
@@ -189,6 +199,40 @@ async def _expire_commands(
                 env.state = "stopped"
                 env.delete_after = None
             env.state_reason = "快照超时，没有归档或删除"
+
+
+async def _expire_procs(
+    runner: Runner, out: TickResult, *, host_ids: set[uuid.UUID] | None = None
+) -> None:
+    """托管进程过了时限加宽限还没有结束：记为结果未知并通知模块，容器不再一直算“正忙”。"""
+    from app.domain.runner_managed import PROC_EXPIRE_GRACE, PROC_START_DEADLINE
+    from app.domain.runner_procs import notify_exit
+
+    db = runner.db
+    now = specs.now()
+    started = func.coalesce(RunnerRun.started_at, RunnerRun.created_at)
+    limit = RunnerRun.timeout_seconds + PROC_START_DEADLINE + PROC_EXPIRE_GRACE
+    rows = list(
+        await db.scalars(
+            select(RunnerRun)
+            .join(RunnerEnvironment, RunnerEnvironment.id == RunnerRun.environment_id)
+            .where(
+                RunnerRun.kind == "proc",
+                RunnerRun.finished_at.is_(None),
+                started + func.make_interval(0, 0, 0, 0, 0, 0, limit) < now,
+                RunnerEnvironment.host_id.in_(host_ids) if host_ids is not None else true(),
+            )
+            .with_for_update(of=RunnerRun, skip_locked=True)
+            .limit(200)
+        )
+    )
+    for run in rows:
+        await _run_unknown(db, run.id)
+        if run.status == "unknown":
+            out.expired += 1
+            await notify_exit(
+                db, runner.settings, run, "lost", "过了时限，容器服务器一直没有回报进程结束"
+            )
 
 
 async def _run_unknown(db: AsyncSession, run_id: uuid.UUID) -> None:
@@ -290,6 +334,8 @@ async def _event_conditions(
             .where(
                 RunnerEnvironment.state.in_(("creating", "running", "stopped", "archived")),
                 RunnerEnvironment.host_id.in_(host_ids) if host_ids is not None else true(),
+                # 模块建的环境（远程开发容器等）没有创建者实例，由模块管理，不算孤儿
+                RunnerEnvironment.owner_kind == "instance",
                 (RunnerEnvironment.owner_instance_id.is_(None))
                 | (AgentInstance.status == "disabled"),
             )
@@ -302,6 +348,15 @@ async def _event_conditions(
         else:
             await runner.mark_pending_delete(env, "创建者实例已停用或删除")
             out.pending_delete += 1
+
+
+def _idle_stop_after(env: RunnerEnvironment, policy: dict[str, Any]) -> float:
+    """空闲多久停止。模块建的环境按它自己的设置（runtime_metadata.idle_stop_seconds，0 = 不停）。"""
+    if env.owner_kind != "instance":
+        seconds = (env.runtime_metadata or {}).get("idle_stop_seconds")
+        if isinstance(seconds, int | float) and seconds >= 0:
+            return math.inf if seconds == 0 else float(seconds)
+    return specs.idle_stop_after(env.lifetime, env.start_seconds, policy)
 
 
 async def _busy(
@@ -403,7 +458,7 @@ async def _lifecycle(
             continue
         viewer = Viewer(env.workspace_id)
         if env.state == "running":
-            if idle >= specs.idle_stop_after(env.lifetime, env.start_seconds, policy):
+            if idle >= _idle_stop_after(env, policy):
                 await runner.stop(viewer, env, f"空闲 {round(idle / 60)} 分钟，自动停止")
                 out.stopped += 1
             elif (
@@ -419,7 +474,7 @@ async def _lifecycle(
             due = idle >= policy["persistent_archive_days"] * 86400
         else:
             due = since >= policy["session_archive_hours"] * 3600
-        if due and await runner.archive(env, "停止到点，自动归档"):
+        if due and not env.no_auto_archive and await runner.archive(env, "停止到点，自动归档"):
             out.archived += 1
 
 
@@ -504,7 +559,7 @@ async def _watermarks(
             for env in [e for e in candidates if e.state == "stopped"]:
                 if archived >= RECLAIM_PER_TICK:
                     break
-                if math.isinf(ranked.get(env.id, 0.0)):
+                if math.isinf(ranked.get(env.id, 0.0)) or env.no_auto_archive:
                     continue
                 if await runner.archive(env, "容器服务器磁盘紧张，按保留分归档"):
                     archived += 1

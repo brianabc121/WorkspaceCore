@@ -30,7 +30,7 @@ export const env = (over: Partial<Schema['RunnerEnvAdminOut']> = {}): Schema['Ru
   runtime_backend: 'docker', host_id: 'host-1', placement: {},
   id: '0a1b2c3d-0000-4000-8000-000000000001', untrusted: { purpose: '前端构建' }, lifetime: 'session', state: 'running', state_reason: null, template: 'node', reuse_key: null, owner: '开发助手', mine: false,
   runtime: 'gvisor', user: 'user', network: 'none', memory_mb: 2048, cpus: 2, delete_when: [], share: 'none', project_id: null, pinned: false, use_count: 3, created_at: at, last_used_at: at,
-  next_step: '空闲 15 分钟后停止', wake_seconds: 2.5, owner_instance_id: 'inst-a', template_id: 'tpl-1', spec: spec(), mem_bytes: 640 * MIB, disk_bytes: Math.round(1.2 * GIB), egress: {},
+  next_step: '空闲 15 分钟后停止', wake_seconds: 2.5, owner_instance_id: 'inst-a', owner_kind: 'instance', owner_label: null, no_auto_archive: false, template_id: 'tpl-1', spec: spec(), mem_bytes: 640 * MIB, disk_bytes: Math.round(1.2 * GIB), egress: {},
   retention_score: 12.5, retention_infinite: false, snapshot_at: null, snapshot_bytes: null, started_at: at, stopped_at: null, archived_at: null, deleted_at: null, delete_after: null, version: 7,
   metrics: metrics(), ...over,
 })

@@ -27,9 +27,9 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from bridge import session_cli
+from bridge import remote, session_cli
 from bridge.errors import BridgeError
-from bridge.jobs import JobRunner
+from bridge.jobs import JobRunner, RemoteJob
 from bridge.redact import redact
 
 if TYPE_CHECKING:
@@ -87,6 +87,11 @@ TIMER_STATUS = {
 }
 CHAIN_STATUS = {"active": "进行中", "paused": "已暂停"}
 ORIGIN_LABEL = {"caller": "调用方", "session": "会话里的模型", "admin": "人"}
+# 远程开发容器里的会话（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 14 节）：容器连不到管理器
+REMOTE_NO_CLI = (
+    "远程容器里的 llm-task 还没接上，用页面或外层智能体的工具开作业"
+    "（大模型客户端的“后台任务”面板，或 llm_bridge_job_start）"
+)
 
 
 def fmt_time(ts: float | None) -> str:
@@ -185,8 +190,8 @@ class LongRun:
         只在“可以执行命令”档位（能开作业）的会话里写：别的档位用不了 llm-task，不留令牌。
         写的时候不跟随符号链接：`.llm-task` 或 `session.json` 是链接（仓库里提交的、会话自己建的）时
         不会写到链接指向的文件里（T-0292 审查）。"""
-        if self.jobs_blocked(session) is not None:
-            return None
+        if self.jobs_blocked(session) is not None or remote.parse_workdir(session["workdir"]):
+            return None  # 远程会话：容器里连不到管理器，不写令牌（方案第 14 节）
         token = secrets.token_urlsafe(24)
         info = {
             "api": self.engine.settings.session_api_url,
@@ -242,6 +247,8 @@ class LongRun:
             return "这个会话的开发环境已停用，不能开后台作业"
         if (env["config"] or {}).get("sandbox") != "exec":
             return "后台作业只能在“可以执行命令”档位的开发环境里开（管理员在开发环境里设置）"
+        if remote.parse_workdir(session["workdir"]) is not None:
+            return None  # 远程会话的目录在容器里：作业经工作台在那里跑
         if not Path(session["workdir"] or "").is_dir():
             return "会话的工作目录已经不在了"
         return None
@@ -264,6 +271,9 @@ class LongRun:
         blocked = self.jobs_blocked(session)
         if blocked:
             raise BridgeError("NOT_SUPPORTED", blocked)
+        found = remote.parse_workdir(session["workdir"])
+        if found is not None and origin == "session":
+            raise BridgeError("NOT_SUPPORTED", REMOTE_NO_CLI)
         command = command.strip()
         if not command or "\x00" in command or len(command) > MAX_COMMAND_CHARS:
             raise BridgeError("VALIDATION_FAILED", f"命令不能为空，最多 {MAX_COMMAND_CHARS} 个字符")
@@ -303,11 +313,19 @@ class LongRun:
             timeout_seconds=timeout,
             started_at=time.time(),
         )
-        workdir = Path(session["workdir"])
+        workdir = Path(session["workdir"]) if found is None else Path("/nonexistent")
+        target = (
+            RemoteJob(self.engine.remote, found[0], found[1], session["id"])
+            if found is not None
+            else None
+        )
+        env = (
+            self._remote_job_env(job["id"])
+            if target is not None
+            else self._job_env(job["id"], session["id"])
+        )
         try:
-            pid = await self.runner.start(
-                job["id"], command, workdir, self._job_env(job["id"], session["id"]), timeout
-            )
+            pid = await self.runner.start(job["id"], command, workdir, env, timeout, target)
         except OSError as error:
             self.store.update_job(
                 job["id"], status="failed", finished_at=time.time(), error=f"启动失败：{error}"
@@ -319,6 +337,16 @@ class LongRun:
         self.store.add_event(session["id"], turn_id, "job_started", {"job_id": job["id"], "by": by})
         self.store.add_message(session["id"], turn_id, "process", "notice", text)
         return self.job_view(self.store.get_job(job["id"]) or job)
+
+    @staticmethod
+    def _remote_job_env(job_id: str) -> dict[str, str]:
+        """远程作业的环境：容器里的 HOME 和 PATH（没有凭据：作业不需要官方程序的登录）。"""
+        return {
+            "HOME": remote.REMOTE_HOME,
+            "PATH": remote.REMOTE_PATH,
+            "LANG": "C.UTF-8",
+            "LLM_TASK_JOB_ID": job_id,
+        }
 
     def _job_env(self, job_id: str, session_id: str) -> dict[str, str]:
         """作业的环境变量：只给白名单，不带管理器和回合的令牌。

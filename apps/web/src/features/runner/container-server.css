@@ -71,6 +71,7 @@
 .cs-owner { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; white-space: nowrap; }
 .cs-owner svg { width: 15px; height: 15px; flex: none; }
 .cs-owner.is-gone { color: var(--muted); font-weight: 400; }
+.cs-owner.is-module { overflow-wrap: anywhere; }
 .cs-chip { display: inline-block; padding: 1px 8px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: .78rem; white-space: nowrap; }
 .cs-chip.is-persistent { background: var(--accent-soft); color: var(--accent); }
 .cs-chip.is-pinned { margin-left: 4px; background: color-mix(in srgb, var(--success) 12%, var(--surface)); color: var(--success); }

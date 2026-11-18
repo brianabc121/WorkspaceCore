@@ -458,7 +458,7 @@ async def test_create_waits_for_confirmed_stop_before_reusing_capacity(
         headers=runner_headers(rtoken),
     )
     assert report.status_code == 200, report.text
-    assert report.json() == {"lost": [], "stray": []}
+    assert report.json() == {"lost": [], "stray": [], "procs": []}
 
     async def assert_capacity_refused(purpose: str) -> None:
         refused = await call(

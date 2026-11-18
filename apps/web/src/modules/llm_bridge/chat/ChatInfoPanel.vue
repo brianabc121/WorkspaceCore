@@ -88,8 +88,10 @@ const recent = computed(() => {
       <section class="lc-info-env" :aria-label="env ? '开发环境' : '用法'">
         <span class="lc-info-env-icon" aria-hidden="true"><component :is="session.mode === 'chat' ? MessageSquare : CodeXml" /></span>
         <div v-if="env" class="lc-info-title">
-          <strong>{{ env.name }}</strong>
-          <span>{{ sandbox(env.sandbox) }} · {{ env.network ? '可联网' : '不联网' }}</span>
+          <strong>{{ env.name }}<template v-if="env.location === 'remote'"> · 云端</template></strong>
+          <span v-if="env.location === 'remote'">{{ sandbox(env.sandbox) }} · 远程容器「{{ env.remote_label ?? '—' }}」</span>
+          <span v-else>{{ sandbox(env.sandbox) }} · {{ env.network ? '可联网' : '不联网' }}</span>
+          <span v-if="env.location === 'remote'" class="lc-info-note">远程会话暂不支持：Codex 的插话、压缩钩子、会话里的 llm-task 命令（后台作业可以在页面上开）。</span>
         </div>
         <div v-else class="lc-info-title">
           <strong>{{ mode }}</strong>

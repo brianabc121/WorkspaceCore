@@ -25,6 +25,7 @@ from sqlalchemy import select, update
 from app.domain import runner_reclaim
 from app.domain import runner_specs as specs
 from app.models import AgentSecretAccess, AgentWakeup, RunnerCommand, RunnerEnvironment
+from app.runner_agent import VERSION
 from tests.helpers import tool_error
 from tests.test_mcp_api import call, issue_token, new_instance, rpc
 from tests.workspace_support import Env, app_of, open_env
@@ -38,7 +39,8 @@ SETTINGS: dict[str, Any] = {
 }
 SECRET_VALUE = "ghp_" + "S3cr3tValue" * 3
 POLL = {
-    "agent_version": "0.1.0",
+    # 模拟当前版本的 runner-agent（托管进程的指令要 0.4.0 起才有）
+    "agent_version": VERSION,
     "docker_version": "29.9.1",
     "runtimes": ["io.containerd.runc.v2", "runc", "runsc"],
     "kvm": False,
@@ -634,7 +636,11 @@ async def test_report_marks_lost_and_stray_containers(env: Env) -> None:
         headers=runner_headers(rtoken),
     )
     assert report.status_code == 200, report.text
-    assert report.json() == {"lost": [environment["id"]], "stray": ["mw-env-0123456789ab"]}
+    assert report.json() == {
+        "lost": [environment["id"]],
+        "stray": ["mw-env-0123456789ab"],
+        "procs": [],
+    }
     listed = await env.client.get(
         "/api/v1/runner/environments", params={"include_deleted": True}, headers=env.headers()
     )

@@ -4,7 +4,7 @@ import { Shield, ShieldCheck } from '@lucide/vue'
 import { dataOf, type Schema } from '../../services/api'
 import { useAuthStore } from '../../stores/auth'
 import { formatTime } from '../time'
-import { LIFETIME, NETWORK, RUNTIME, USER, riskyChoices, seconds, useRunnerAction, type RunnerEnv } from './api'
+import { LIFETIME, MODULE_MANAGED_ACTIONS, NETWORK, RUNTIME, USER, isModuleOwned, ownerText, riskyChoices, seconds, useRunnerAction, type RunnerEnv } from './api'
 import { binary } from './containerMetrics'
 
 // 详情里的“配置与回收”（T-0187）：运行配置、回收规则与下一步、保护、生命周期动作。
@@ -27,8 +27,10 @@ const actions = computed<Action[]>(() => {
   if (env.state === 'pending_delete') out.push('keep')
   if (env.state === 'archived' || (env.state === 'deleted' && env.lifetime === 'persistent' && env.snapshot_at)) out.push('restore')
   if (env.state !== 'deleted' && env.state !== 'pending_delete') out.push('delete')
-  return out
+  // 模块建的容器（MCP 管理器的远程开发容器）：归档、删除、恢复在大模型客户端里做（后端同样拒绝）
+  return isModuleOwned(env) ? out.filter(a => !MODULE_MANAGED_ACTIONS.includes(a)) : out
 })
+const managed = computed(() => isModuleOwned(props.env))
 const canPin = computed(() => props.env.state !== 'deleted')
 const CONFIRM: Partial<Record<Action, (env: RunnerEnv) => string>> = {
   stop: env => `停止「${env.untrusted.purpose}」？容器停下，数据卷保留；正在执行的命令会中断。再用时自动启动。`,
@@ -67,7 +69,8 @@ const score = computed(() => {
         <div><dt>用户 / 网络</dt><dd>{{ USER[env.user] }} / {{ NETWORK[env.network] }}<template v-if="env.network === 'allowlist' && env.spec.domains.length">（{{ env.spec.domains.join('、') }}）</template></dd></div>
         <div><dt>上限</dt><dd>{{ env.cpus }} 核 · {{ env.memory_mb }} MiB 内存 · 数据卷 {{ env.spec.disk_gb }} GiB（模板设置，不是硬配额）</dd></div>
         <div><dt>模板 / 镜像</dt><dd class="cs-break">{{ env.template ?? env.spec.image }}</dd></div>
-        <div><dt>申请者</dt><dd>{{ env.owner_instance_id ? env.owner : '原智能体已删除（环境保留，不挂到其他智能体）' }}</dd></div>
+        <div><dt>申请者</dt><dd>{{ managed || env.owner_instance_id ? ownerText(env) : '原智能体已删除（环境保留，不挂到其他智能体）' }}</dd></div>
+        <div v-if="env.no_auto_archive"><dt>自动归档</dt><dd>不自动归档（空闲时只停止）</dd></div>
         <div v-if="env.share !== 'none'"><dt>共享</dt><dd>同项目的智能体可以用（申请者仍是上面这个）</dd></div>
         <div v-if="env.spec.secrets.length"><dt>注入的密钥</dt><dd>{{ env.spec.secrets.join('、') }}</dd></div>
         <div><dt>创建</dt><dd>{{ formatTime(env.created_at) }}</dd></div>
@@ -102,6 +105,7 @@ const score = computed(() => {
         <button v-for="a in actions" :key="a" type="button" class="secondary-button" :class="{ 'im-danger': a === 'delete' }" :disabled="busy" @click="run(a)">{{ ACTION[a] }}</button>
         <span v-if="!actions.length" class="form-help">这个状态没有可以做的操作。</span>
       </div>
+      <p v-if="managed" role="note" class="form-help">这个容器由大模型客户端管理：归档、删除在 <RouterLink to="/llm_bridge?view=manage" class="asv-link">大模型客户端 → 开发环境</RouterLink> 里做；这里可以启动、停止、保护。</p>
       <p v-if="error" role="alert" class="feedback">{{ error }}<template v-if="conflict"> 已重新读取这个容器。</template></p>
       <p v-if="notice" role="status" class="feedback">{{ notice }}</p>
     </section>

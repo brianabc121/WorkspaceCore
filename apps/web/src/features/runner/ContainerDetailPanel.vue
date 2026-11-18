@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Bot, ChevronRight, LoaderCircle, X } from '@lucide/vue'
+import { Bot, ChevronRight, LoaderCircle, Server, X } from '@lucide/vue'
 import { ApiError } from '../../services/api'
 import { useAuthStore } from '../../stores/auth'
 import { formatTime } from '../time'
-import { RUN_STATUS, runnerError, seconds, STATE, useRunnerEnvironment, useRunnerRuns, type RunFilter } from './api'
+import { RUN_STATUS, isModuleOwned, ownerText, runnerError, seconds, STATE, useRunnerEnvironment, useRunnerRuns, type RunFilter } from './api'
 import { shortId, STATE_TONE } from './containerMetrics'
 import ContainerResourceMeters from './ContainerResourceMeters.vue'
 import ContainerLifecyclePanel from './ContainerLifecyclePanel.vue'
@@ -37,7 +37,7 @@ const active = computed(() => runItems.value.filter(r => r.status === 'running' 
       <div class="cs-detail-title">
         <h2 v-if="env"><span class="preserve-text">{{ env.untrusted.purpose }}</span> <span class="asv-state" :class="`tone-${STATE_TONE[env.state] ?? 'muted'}`">{{ STATE[env.state] ?? '未知状态' }}</span></h2>
         <h2 v-else>容器详情</h2>
-        <p class="asv-sub"><span :title="environmentId">{{ shortId(environmentId) }}</span><template v-if="env"> · <span class="cs-owner" :class="{ 'is-gone': !env.owner_instance_id }"><Bot aria-hidden="true" />{{ env.owner_instance_id ? env.owner : '原智能体已删除' }}</span></template></p>
+        <p class="asv-sub"><span :title="environmentId">{{ shortId(environmentId) }}</span><template v-if="env"> · <span class="cs-owner" :class="{ 'is-gone': !isModuleOwned(env) && !env.owner_instance_id, 'is-module': isModuleOwned(env) }"><component :is="isModuleOwned(env) ? Server : Bot" aria-hidden="true" />{{ ownerText(env) }}</span></template></p>
       </div>
       <button v-if="aside" type="button" class="icon-button" aria-label="关闭容器详情" @click="emit('close')"><X aria-hidden="true" /></button>
     </div>

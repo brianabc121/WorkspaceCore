@@ -109,6 +109,8 @@ _JSON_COLUMNS = {
     "data",
     "source",
     "context",
+    "op_args",
+    "op_result",
 }
 
 
@@ -260,6 +262,7 @@ class Store:
         self._migrate_memory()
         self._migrate_longrun()
         self._migrate_platforms()
+        self._migrate_remote()
         self._db.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),)
         )
@@ -321,6 +324,57 @@ class Store:
                 started_at REAL NOT NULL,
                 paused_reason TEXT,
                 updated_at REAL NOT NULL
+            );
+            """
+        )
+
+    def _migrate_remote(self) -> None:
+        """远程开发容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 21.2 节）。只加表。
+
+        - remote_ops：交给工作台去做的远程操作。参数里不存凭据和标准输入（只在内存里），
+          所以管理器重启后没做完的操作都作废，对应的回合记“结果未知”；
+        - remote_procs：远程容器里的托管进程（回合、登录、作业、准备工作目录）；
+        - remote_logins：远程容器里单独登录的账号（会刷新的登录不下发，在容器里登录同一个账号）。"""
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS remote_ops (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL,
+                container TEXT NOT NULL,
+                op_args TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL,
+                op_result TEXT,
+                error TEXT,
+                created_at REAL NOT NULL,
+                sent_at REAL,
+                finished_at REAL
+            );
+            CREATE INDEX IF NOT EXISTS remote_ops_status ON remote_ops (status, created_at);
+            CREATE TABLE IF NOT EXISTS remote_procs (
+                id TEXT PRIMARY KEY,
+                container TEXT NOT NULL,
+                purpose TEXT NOT NULL,
+                platform TEXT,
+                session_id TEXT,
+                run_id TEXT,
+                received INTEGER NOT NULL DEFAULT 0,
+                state TEXT NOT NULL,
+                exit_code INTEGER,
+                error TEXT,
+                created_at REAL NOT NULL,
+                finished_at REAL
+            );
+            CREATE INDEX IF NOT EXISTS remote_procs_state ON remote_procs (state);
+            CREATE TABLE IF NOT EXISTS remote_logins (
+                container TEXT NOT NULL,
+                slot TEXT NOT NULL,
+                state TEXT NOT NULL,
+                method TEXT,
+                identity_hash TEXT,
+                identity_label TEXT,
+                detail TEXT NOT NULL DEFAULT '',
+                updated_at REAL NOT NULL,
+                PRIMARY KEY (container, slot)
             );
             """
         )
@@ -1067,6 +1121,83 @@ class Store:
             "GROUP BY s.platform"
         )
         return {row["platform"]: int(row["n"]) for row in rows}
+
+    # ---- 远程开发容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 21.2 节）----
+    def create_remote_op(self, op_id: str, kind: str, container: str, args: Row) -> None:
+        self._exec(
+            "INSERT INTO remote_ops (id, kind, container, op_args, status, created_at) "
+            "VALUES (?,?,?,?, 'pending', ?)",
+            (op_id, kind, container, json.dumps(args, ensure_ascii=False), time.time()),
+        )
+
+    def get_remote_op(self, op_id: str) -> Row | None:
+        return self._one("SELECT * FROM remote_ops WHERE id = ?", (op_id,))
+
+    def update_remote_op(self, op_id: str, **fields: Any) -> None:
+        self._update("remote_ops", "id", op_id, fields)
+
+    def fail_open_remote_ops(self, reason: str) -> int:
+        """没做完的远程操作都作废（管理器重启时：等结果的回合已经不在了）。"""
+        return self._exec(
+            "UPDATE remote_ops SET status = 'failed', error = ?, finished_at = ? "
+            "WHERE status IN ('pending', 'sent')",
+            (reason, time.time()),
+        ).rowcount
+
+    def purge_remote_ops(self, before: float) -> int:
+        return self._exec(
+            "DELETE FROM remote_ops WHERE status IN ('done', 'failed') AND created_at < ?",
+            (before,),
+        ).rowcount
+
+    def create_remote_proc(self, **fields: Any) -> None:
+        data = {"state": "starting", "created_at": time.time(), **fields}
+        columns, marks = ", ".join(data), ", ".join("?" for _ in data)
+        self._exec(  # 列名来自本文件里的调用方，不来自外部输入
+            f"INSERT INTO remote_procs ({columns}) VALUES ({marks})",  # noqa: S608
+            tuple(data.values()),
+        )
+
+    def get_remote_proc(self, proc_id: str) -> Row | None:
+        return self._one("SELECT * FROM remote_procs WHERE id = ?", (proc_id,))
+
+    def update_remote_proc(self, proc_id: str, **fields: Any) -> None:
+        self._update("remote_procs", "id", proc_id, fields)
+
+    def lose_running_remote_procs(self, reason: str) -> int:
+        return self._exec(
+            "UPDATE remote_procs SET state = 'lost', error = ?, finished_at = ? "
+            "WHERE state IN ('starting', 'running')",
+            (reason, time.time()),
+        ).rowcount
+
+    def purge_remote_procs(self, before: float) -> int:
+        return self._exec(
+            "DELETE FROM remote_procs WHERE finished_at IS NOT NULL AND finished_at < ?",
+            (before,),
+        ).rowcount
+
+    def get_remote_login(self, container: str, slot: str) -> Row | None:
+        return self._one(
+            "SELECT * FROM remote_logins WHERE container = ? AND slot = ?", (container, slot)
+        )
+
+    def save_remote_login(self, container: str, slot: str, **fields: Any) -> None:
+        if self.get_remote_login(container, slot) is None:
+            self._exec(
+                "INSERT INTO remote_logins (container, slot, state, updated_at) VALUES (?,?,?,?)",
+                (container, slot, fields.get("state", "needs_login"), time.time()),
+            )
+        sets = ", ".join(f"{name} = ?" for name in fields)
+        if sets:
+            self._exec(  # 列名来自本文件里的调用方
+                f"UPDATE remote_logins SET {sets}, updated_at = ? "  # noqa: S608
+                "WHERE container = ? AND slot = ?",
+                (*fields.values(), time.time(), container, slot),
+            )
+
+    def forget_remote_container(self, container: str) -> int:
+        return self._exec("DELETE FROM remote_logins WHERE container = ?", (container,)).rowcount
 
     # ---- 长时间任务：后台作业、预约、循环（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md）----
     def create_job(self, **fields: Any) -> Row:

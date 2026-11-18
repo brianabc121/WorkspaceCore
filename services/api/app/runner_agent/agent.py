@@ -60,6 +60,120 @@ HOST_MACHINE_ID = Path("/run/host-machine-id")
 LIFECYCLE = frozenset(
     {"create_env", "start_env", "stop_env", "delete_env", "snapshot", "restore", "build_template"}
 )
+# 停止、送输入：不等同一个环境里更早的指令，立即执行（停不下来的进程不能排在它自己后面）
+NO_WAIT = frozenset({"proc_signal", "proc_input"})
+
+# ---------------------------------------------------------------- 托管进程
+# docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 7 节、第 21.3 节。脚本都作为 sh -c 的参数下发，
+# 不写进容器里可写的位置（免得被容器里的程序改掉）；全部按 dash 的写法（核验记录 V9）。
+PROC_TICK = 0.5  # 有输出时每 0.5 秒读一次
+PROC_SLOW = 2.0  # 连续 PROC_IDLE_AFTER 秒没有新输出后每 2 秒读一次
+PROC_IDLE_AFTER = 10.0
+PROC_CHUNK = 256 * 1024  # 一次最多回传的字节数
+PROC_TERM_GRACE = 10.0  # TERM 之后多久还在就 KILL
+PROC_MISSING_GRACE = 60.0  # 进程目录一直不见（多半是容器被重建过）多久后算丢失
+PROC_KILL_GRACE = 30.0  # 发了 KILL 之后多久还没有结束记录，就按已结束上报
+PROC_DEAD_GRACE = 30.0  # 进程组已经没了、却没有结束记录（外壳被杀了）多久后算丢失
+PROC_STDIN_MAX = 4 * 1024 * 1024
+PROC_STDIN_PIECE = 64 * 1024  # 一次 exec 写多少（base64 后不超过单个环境变量的上限 128 KB）
+PROC_INPUT_MAX = 4096
+PROC_MAX_SECONDS = 7 * 86400
+PROC_PID_WAIT = 3.0
+PROC_ERR_TAIL = 8192
+
+# 参数：$1 进程目录 $2 工作目录 $3 是否交互（1/0），其后是命令。
+# 标准输出写 out；标准错误先全量写 err，结束后只留最后 64 KB；
+# 进程组号写 pid；退出码写 exit（原子改名）。
+# 主进程结束后把同一进程组里还在的子进程也停掉，不留孤儿。
+PROC_WRAPPER = r"""
+d=$1; cwd=$2; inter=$3; shift 3
+umask 077
+mkdir -p "$d" && : > "$d/out" && : > "$d/err" || exit 1
+lead='echo $$ > "$0/pid.tmp" && mv -f "$0/pid.tmp" "$0/pid"; exec "$@"'
+code=126
+if [ "$inter" = 1 ] && ! { rm -f "$d/in" && mkfifo "$d/in"; }; then
+  echo "建不了输入管道" >> "$d/err"
+elif cd "$cwd" 2>>"$d/err"; then
+  if [ "$inter" = 1 ]; then
+    setsid sh -c "$lead" "$d" "$@" <>"$d/in" >>"$d/out" 2>>"$d/err" &
+  elif [ -f "$d/stdin" ]; then
+    setsid sh -c "$lead" "$d" "$@" <"$d/stdin" >>"$d/out" 2>>"$d/err" &
+  else
+    setsid sh -c "$lead" "$d" "$@" </dev/null >>"$d/out" 2>>"$d/err" &
+  fi
+  wait $!
+  code=$?
+  pg=$(cat "$d/pid" 2>/dev/null)
+  if [ -n "$pg" ]; then
+    kill -TERM "-$pg" 2>/dev/null
+    (sleep 5; kill -KILL "-$pg" 2>/dev/null) >/dev/null 2>&1 &
+  fi
+fi
+rm -f "$d/stdin" "$d/in"
+tail -c 65536 "$d/err" > "$d/err.tmp" 2>/dev/null && mv -f "$d/err.tmp" "$d/err"
+echo "$code" > "$d/exit.tmp" && mv -f "$d/exit.tmp" "$d/exit"
+"""
+# $1 目录 $2 已确认的字节数 $3 最多读多少。
+# 第一行“大小 退出码 进程组在不在”（没有退出码是 -，目录不在大小是 -1；
+# 进程组在是 1、不在是 0、还没有进程号是 -），
+# 之后是从已确认处开始的输出
+PROC_READ = r"""
+exec 2>/dev/null
+d=$1; o=$2; n=$3
+s=$(wc -c < "$d/out") || s=-1
+e=-
+[ -f "$d/exit" ] && e=$(cat "$d/exit")
+a=-
+p=$(cat "$d/pid")
+if [ -n "$p" ]; then if kill -0 "-$p"; then a=1; else a=0; fi; fi
+printf '%s %s %s\n' "$s" "${e:--}" "$a"
+if [ "$s" -gt "$o" ]; then tail -c +$((o + 1)) "$d/out" | head -c "$n"; fi
+"""
+# $1 目录 $2 new / append；内容在 MW_CHUNK（base64）
+PROC_STDIN = r"""
+exec 2>/dev/null
+umask 077
+mkdir -p "$1" || exit 1
+if [ "$2" = new ]; then : > "$1/stdin" || exit 1; fi
+[ -z "$MW_CHUNK" ] || printf '%s' "$MW_CHUNK" | base64 -d >> "$1/stdin"
+"""
+PROC_PID = 'exec 2>/dev/null; cat "$1/pid" || true'
+# $1 目录 $2 TERM / KILL；没有进程组号时退出码 3
+PROC_SIGNAL = r"""
+exec 2>/dev/null
+pg=$(cat "$1/pid") || exit 3
+[ -n "$pg" ] || exit 3
+kill -"$2" "-$pg"
+"""
+# 输入管道用读写方式打开：进程已经不在时也不会卡住
+PROC_INPUT = r"""
+exec 2>/dev/null
+[ -p "$1/in" ] || exit 3
+printf '%s' "$MW_INPUT" 1<>"$1/in"
+"""
+PROC_ERR = 'exec 2>/dev/null; tail -c "$2" "$1/err" || true'
+PROC_CLEAN = 'exec 2>/dev/null; rm -rf -- "$1"'
+
+
+@dataclass
+class _Proc:
+    """读取线程盯着的一个托管进程。时间都是 time.monotonic()。"""
+
+    run_id: str
+    env_id: str
+    container: str
+    folder: str
+    acked: int = 0
+    deadline: float = float("inf")
+    last_output: float = 0.0  # 最近一次有新输出（起进程时记为当时）
+    next_check: float = 0.0
+    signaled: str | None = None
+    signaled_at: float = 0.0
+    reason: str | None = None  # timeout：到时限停的；killed：工作台叫停的
+    busy: bool = False
+    errors: int = 0
+    missing_since: float | None = None
+    dead_since: float | None = None  # 进程组没了、却还没有结束记录的时刻
 
 
 @dataclass
@@ -182,11 +296,16 @@ class Agent:
     _unsent: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     stopping: threading.Event = field(default_factory=threading.Event)
     cpu: ContainerCPUSampler = field(default_factory=ContainerCPUSampler)
+    proc_pool: ThreadPoolExecutor = field(init=False)
+    _procs: dict[str, _Proc] = field(default_factory=dict)
+    _proc_guard: threading.Lock = field(default_factory=threading.Lock)
 
     def __post_init__(self) -> None:
         # exec 单独一个线程池：长时间运行的命令占满了也不耽误停止、删除、读写文件
         self.pool = ThreadPoolExecutor(max_workers=self.config.workers)
         self.exec_pool = ThreadPoolExecutor(max_workers=self.config.workers)
+        # 读托管进程的输出：单独的小线程池，不占指令池
+        self.proc_pool = ThreadPoolExecutor(max_workers=max(2, min(8, self.config.workers)))
 
     # ------------------------------------------------------------------ 启动
     def start(self) -> None:
@@ -232,6 +351,7 @@ class Agent:
 
     def run_forever(self) -> None:
         threading.Thread(target=self._report_loop, daemon=True).start()
+        threading.Thread(target=self._proc_loop, daemon=True).start()
         delay = 1.0
         capacity = self.capacity()
         refreshed = time.monotonic()
@@ -257,6 +377,8 @@ class Agent:
         kind = str(command.get("kind"))
         payload = command.get("payload") or {}
         key = str(payload.get("env_id") or payload.get("template_id") or command_id)
+        if kind in NO_WAIT:
+            key = command_id
         with self._guard:
             if command_id in self._inflight:
                 return
@@ -532,6 +654,12 @@ class Agent:
         policy = self._policy(p)
         proxy = self._attach_proxy(env_id, network, policy)  # 固定地址：写进环境的代理变量与 hosts
         existed = self.docker.inspect(container) is not None
+        # 更新镜像（recreate）：容器换成载荷里的新镜像、按原参数重建，数据卷原样保留——
+        # 不重新改属主、不恢复快照、不写初始文件（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 5.2）
+        recreate = bool(p.get("recreate")) and existed
+        if recreate:
+            self.docker.stop(container, seconds=10)
+            self.docker.remove(container)
         if not existed:
             self.docker.create_volume(volume, c.labels(p))
             uid, gid = c.user_ids(p)
@@ -552,6 +680,7 @@ class Agent:
             files = p.get("files") or []
             if files:
                 self._put(p, files)
+        if not existed or recreate:
             config = c.container_config(p, host_memory=None, proxy=proxy)
             config["Labels"].update(
                 {
@@ -580,6 +709,7 @@ class Agent:
             "seconds": round(time.monotonic() - started, 2),
             "image_digest": digests[0] if digests else str(image.get("Id") or ""),
             "existed": existed,
+            "recreated": recreate,
         }
 
     def _image_for(self, p: dict[str, Any]) -> dict[str, Any]:
@@ -732,8 +862,10 @@ class Agent:
             timeout=timeout,
             limit=OUTPUT_LIMIT,
         )
-        if result.timed_out:
-            # 单个 exec 不能单独终止：停止这个容器（数据卷保留）
+        if result.timed_out and not p.get("keep_container"):
+            # 单个 exec 不能单独终止：停止这个容器（数据卷保留）。
+            # 模块的辅助命令（keep_container）在容器里自己带了 timeout，到时只结束它这一条：
+            # 远程开发容器是共享的，里面还有别的回合和作业（T-0295 集成审查）
             self.docker.stop(container, seconds=5)
             self.proxy.close(str(p["env_id"]))
         return {
@@ -815,6 +947,346 @@ class Agent:
                 }
             )
         return {"entries": entries}
+
+    # ------------------------------------------------------------------ 托管进程
+    def _sh(
+        self,
+        container: str,
+        script: str,
+        args: list[str],
+        *,
+        env: list[str] | None = None,
+        timeout: float = 30,
+        limit: int = 64 * 1024,
+    ) -> Any:
+        """以普通用户在容器里跑一段固定脚本（托管进程的辅助操作）。"""
+        return self.docker.exec(
+            container,
+            ["sh", "-c", script, "mw", *args],
+            user=c.USERS["user"],
+            workdir=c.WORKDIR,
+            env=env,
+            timeout=timeout,
+            limit=limit,
+        )
+
+    def _proc_pid(self, container: str, folder: str) -> int | None:
+        result = self._sh(container, PROC_PID, [folder])
+        text = result.output.decode("ascii", "replace").strip()
+        return int(text) if text.isdigit() else None
+
+    def _write_stdin(self, container: str, folder: str, data: bytes) -> None:
+        """标准输入分段写进进程目录（每段经一个环境变量传，不经 Docker 的文件接口：
+        gVisor 下直接往运行中的容器里写文件不可靠）。"""
+        pieces = [data[i : i + PROC_STDIN_PIECE] for i in range(0, len(data), PROC_STDIN_PIECE)]
+        for index, piece in enumerate(pieces or [b""]):
+            result = self._sh(
+                container,
+                PROC_STDIN,
+                [folder, "new" if index == 0 else "append"],
+                env=[f"MW_CHUNK={_b64(piece)}"],
+            )
+            if result.exit_code != 0:
+                raise CommandError("写入标准输入失败（镜像里要有 sh 和 base64）")
+
+    def do_proc_start(self, p: dict[str, Any]) -> dict[str, Any]:
+        run_id, folder = c.proc_dir(p)
+        argv = c.proc_argv(p.get("argv"))
+        cwd = c.proc_cwd(p.get("cwd") or c.WORKDIR)
+        given = p.get("proc_input")
+        if not isinstance(given, dict) or given.get("missing"):
+            raise CommandError("输入已过期（工作台重启过或指令排队太久），请重新发起")
+        env = c.proc_env(p.get("env"), given.get("secret_env"))
+        timeout = p.get("timeout") or 1800
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+            raise CommandError("时限不合法")
+        timeout = min(timeout, PROC_MAX_SECONDS)
+        try:
+            stdin = base64.b64decode(str(given.get("stdin_b64") or ""), validate=True)
+        except ValueError:
+            raise CommandError("标准输入不是合法的 base64") from None
+        if len(stdin) > PROC_STDIN_MAX:
+            raise CommandError("标准输入太大")
+        container, _ = self._ensure_running(p)
+        # 同一个运行号已经起过（runner-agent 重启后工作台重发了指令）：不再起第二个
+        pgid = self._proc_pid(container, folder)
+        if pgid is None:
+            self._write_stdin(container, folder, stdin)
+            self.docker.exec_detached(
+                container,
+                [
+                    "sh",
+                    "-c",
+                    PROC_WRAPPER,
+                    "mw-proc",
+                    folder,
+                    cwd,
+                    "1" if p.get("interactive") else "0",
+                    *argv,
+                ],
+                user=c.USERS["user"],
+                workdir=c.WORKDIR,
+                env=env or None,
+            )
+            until = time.monotonic() + PROC_PID_WAIT
+            while pgid is None and time.monotonic() < until:
+                time.sleep(0.1)
+                pgid = self._proc_pid(container, folder)
+        self.watch_proc(
+            run_id,
+            str(p.get("env_id") or ""),
+            container,
+            folder,
+            deadline=time.monotonic() + timeout,
+        )
+        return {"started": True, "pgid": pgid}
+
+    def do_proc_signal(self, p: dict[str, Any]) -> dict[str, Any]:
+        run_id, folder = c.proc_dir(p)
+        container = c.check_name(p.get("container"), "env")
+        sig = p.get("signal")
+        if sig not in ("TERM", "KILL"):
+            raise CommandError("信号只能是 TERM 或 KILL")
+        with self._proc_guard:
+            proc = self._procs.get(run_id)
+        if proc is not None:
+            return {"signaled": self._signal_proc(proc, str(sig), "killed")}
+        try:
+            result = self._sh(container, PROC_SIGNAL, [folder, str(sig)])
+        except DockerError as error:
+            if error.status in (404, 409):
+                return {"signaled": False}
+            raise
+        return {"signaled": result.exit_code == 0}
+
+    def do_proc_input(self, p: dict[str, Any]) -> dict[str, Any]:
+        _run_id, folder = c.proc_dir(p)
+        container = c.check_name(p.get("container"), "env")
+        given = p.get("proc_input")
+        if not isinstance(given, dict) or given.get("missing"):
+            raise CommandError("输入已过期（工作台重启过或指令排队太久），请重新发起")
+        data = given.get("data")
+        if not isinstance(data, str) or "\x00" in data or len(data.encode()) > PROC_INPUT_MAX:
+            raise CommandError("输入不合法（最多 4 KB 文字）")
+        result = self._sh(container, PROC_INPUT, [folder], env=[f"MW_INPUT={data}"])
+        if result.exit_code == 3:
+            raise CommandError("这个进程不接受输入（已经结束或不是交互进程）")
+        if result.exit_code != 0:
+            raise CommandError("送输入失败")
+        return {"written": len(data.encode())}
+
+    def watch_proc(
+        self,
+        run_id: str,
+        env_id: str,
+        container: str,
+        folder: str,
+        *,
+        acked: int = 0,
+        deadline: float = float("inf"),
+    ) -> None:
+        """开始（或继续）盯一个托管进程；已经在盯的只把已确认数往前推。"""
+        with self._proc_guard:
+            proc = self._procs.get(run_id)
+            if proc is None:
+                self._procs[run_id] = _Proc(
+                    run_id,
+                    env_id,
+                    container,
+                    folder,
+                    acked=acked,
+                    deadline=deadline,
+                    last_output=time.monotonic(),
+                )
+            elif acked > proc.acked:
+                proc.acked = acked
+
+    def sync_procs(self, items: list[Any]) -> None:
+        """对账应答里的托管进程（工作台认为还在跑的）：runner-agent 重启后据此接着读。
+        工作台没列出的不停止：可能是刚起来、对账还没看到；工作台真不认识时读到输出会回 404。"""
+        now_wall, now = time.time(), time.monotonic()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            try:
+                run_id, folder = c.proc_dir(item)
+                container = c.check_name(item.get("container"), "env")
+            except c.ParamError:
+                continue
+            acked = item.get("acked")
+            acked = acked if isinstance(acked, int) and not isinstance(acked, bool) else 0
+            deadline = float("inf")
+            raw = item.get("timeout_at")
+            if isinstance(raw, str) and raw:
+                try:
+                    when = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    if when.tzinfo is None:
+                        when = when.replace(tzinfo=UTC)
+                    deadline = now + (when.timestamp() - now_wall)
+                except ValueError:
+                    pass
+            self.watch_proc(
+                run_id,
+                str(item.get("env_id") or ""),
+                container,
+                folder,
+                acked=max(acked, 0),
+                deadline=deadline,
+            )
+
+    def _proc_loop(self) -> None:
+        while not self.stopping.wait(PROC_TICK):
+            self.proc_round(wait=False)
+
+    def proc_round(self, *, wait: bool = True) -> None:
+        """把到点的托管进程各读一次；wait=True 时在当前线程里做完（测试用）。"""
+        now = time.monotonic()
+        with self._proc_guard:
+            due = [p for p in self._procs.values() if not p.busy and p.next_check <= now]
+            for proc in due:
+                proc.busy = True
+        for proc in due:
+            if wait:
+                self._check_proc_safely(proc)
+            else:
+                self.proc_pool.submit(self._check_proc_safely, proc)
+
+    def _check_proc_safely(self, proc: _Proc) -> None:
+        try:
+            self.check_proc(proc)
+        except Exception as error:  # 一个进程出错不影响别的
+            proc.errors += 1
+            proc.next_check = time.monotonic() + min(2.0**proc.errors, 30.0)
+            logger.warning("读托管进程 %s 失败：%s", proc.run_id, error)
+        finally:
+            proc.busy = False
+
+    def _drop_proc(self, proc: _Proc, *, clean: bool) -> None:
+        if clean:
+            try:
+                self._sh(proc.container, PROC_CLEAN, [proc.folder])
+            except DockerError as error:
+                logger.info("清理托管进程 %s 的目录失败：%s", proc.run_id, error)
+        with self._proc_guard:
+            self._procs.pop(proc.run_id, None)
+
+    def _signal_proc(self, proc: _Proc, sig: str, reason: str) -> bool:
+        try:
+            result = self._sh(proc.container, PROC_SIGNAL, [proc.folder, sig])
+        except DockerError as error:
+            if error.status in (404, 409):
+                return False
+            raise
+        proc.reason = proc.reason or reason
+        proc.signaled, proc.signaled_at = sig, time.monotonic()
+        proc.next_check = 0.0
+        return bool(result.exit_code == 0)
+
+    def _ended_without_exit(self, proc: _Proc, alive: str, now: float) -> bool:
+        """没有结束记录的进程：托管的外壳在写结束记录之前被杀了（例如容器里有人 kill -9 -1），
+        或者发了 KILL 之后一直等不到。宽限之后按已结束上报，免得运行一直“正在运行”、容器一直忙。"""
+        killed_long_ago = proc.signaled == "KILL" and now - proc.signaled_at >= PROC_KILL_GRACE
+        if alive == "0":
+            proc.dead_since = proc.dead_since or now
+        elif not killed_long_ago:
+            proc.dead_since = None
+            return False
+        if not killed_long_ago and now - (proc.dead_since or now) < PROC_DEAD_GRACE:
+            proc.next_check = now + PROC_SLOW
+            return False
+        state = "timeout" if proc.reason == "timeout" else "killed" if proc.reason else "lost"
+        self._report_exit(
+            proc, None, state, "进程已经不在了，没有留下结束记录（可能被容器里的命令杀掉了）"
+        )
+        return True
+
+    def check_proc(self, proc: _Proc) -> None:
+        """读一次：先看时限（TERM，10 秒后 KILL），再回传新的输出，最后在输出全部确认后回报结束。"""
+        now = time.monotonic()
+        if proc.signaled is None and now >= proc.deadline:
+            self._signal_proc(proc, "TERM", "timeout")
+        elif proc.signaled == "TERM" and now - proc.signaled_at >= PROC_TERM_GRACE:
+            self._signal_proc(proc, "KILL", proc.reason or "killed")
+        try:
+            result = self._sh(
+                proc.container,
+                PROC_READ,
+                [proc.folder, str(proc.acked), str(PROC_CHUNK)],
+                limit=PROC_CHUNK + 4096,
+            )
+        except DockerError as error:
+            if error.status in (404, 409):  # 容器没了或停了：进程不可能还在
+                self._report_exit(proc, None, "lost", "容器已经不在运行，进程结果未知")
+                return
+            raise
+        header, _, data = bytes(result.output).partition(b"\n")
+        fields = header.decode("ascii", "replace").split()
+        try:
+            size = int(fields[0])
+        except (IndexError, ValueError):
+            size = -1
+        code_text = fields[1] if len(fields) > 1 else "-"
+        alive = fields[2] if len(fields) > 2 else "-"
+        if size < 0:
+            proc.missing_since = proc.missing_since or now
+            if now - proc.missing_since >= PROC_MISSING_GRACE:
+                self._report_exit(proc, None, "lost", "进程目录不见了（容器可能被重建过）")
+            else:
+                proc.next_check = now + PROC_SLOW
+            return
+        proc.missing_since = None
+        if data:
+            sent_from = proc.acked
+            try:
+                answer = self.workspace.post(
+                    f"/procs/{proc.run_id}/output",
+                    {"offset": sent_from, "data_b64": _b64(data)},
+                    timeout=30,
+                )
+            except WorkspaceError as error:
+                if error.status == 404:  # 工作台不认识这个进程了：停掉它，不留在容器里
+                    self._signal_proc(proc, "KILL", "killed")
+                    self._drop_proc(proc, clean=True)
+                    return
+                raise
+            acked = answer.get("acked") if isinstance(answer, dict) else None
+            if isinstance(acked, int) and not isinstance(acked, bool) and 0 <= acked <= size:
+                if acked > proc.acked:
+                    proc.last_output = now
+                proc.acked = acked
+        proc.errors = 0
+        if code_text != "-" and proc.acked >= size:
+            code = int(code_text) if code_text.lstrip("-").isdigit() else None
+            state = (
+                "timeout"
+                if proc.reason == "timeout"
+                else "killed"
+                if proc.reason == "killed"
+                else "exited"
+            )
+            self._report_exit(proc, code, state, None)
+            return
+        if code_text == "-" and proc.acked >= size and self._ended_without_exit(proc, alive, now):
+            return
+        more = proc.acked < size
+        idle = now - proc.last_output >= PROC_IDLE_AFTER
+        proc.next_check = now if more else now + (PROC_SLOW if idle else PROC_TICK)
+
+    def _report_exit(self, proc: _Proc, code: int | None, state: str, error: str | None) -> None:
+        tail = ""
+        if state != "lost":
+            try:
+                result = self._sh(proc.container, PROC_ERR, [proc.folder, str(PROC_ERR_TAIL)])
+                tail = bytes(result.output).decode("utf-8", "replace")
+            except DockerError:
+                tail = ""
+        body = {"exit_code": code, "state": state, "stderr_tail": tail, "error": error}
+        try:
+            self.workspace.post(f"/procs/{proc.run_id}/exit", body, timeout=30)
+        except WorkspaceError as failure:
+            if failure.status != 404 and (failure.retryable or failure.status == 401):
+                raise  # 下一轮再报；输出和退出码还在容器里
+        self._drop_proc(proc, clean=state != "lost")
 
     # ------------------------------------------------------------------ 对账
     def _report_loop(self) -> None:
@@ -936,6 +1408,7 @@ class Agent:
         }
         result: dict[str, Any] = self.workspace.post("/report", body, timeout=60)
         self._handle_stray([str(n) for n in result.get("stray") or []])
+        self.sync_procs(result.get("procs") or [])
         live = {e["env_id"] for e in envs if e["state"] == "running"}
         for env_id in self.proxy.envs() - live - {BUILD_ENV}:
             self.proxy.close(env_id)

@@ -409,9 +409,43 @@ class RunnerReport(BaseModel):
     load: float | None = Field(None, ge=0, allow_inf_nan=False)
 
 
+class RunnerProcWatch(BaseModel):
+    """这台服务器上还在跑的托管进程：runner-agent（重启后）据此接着读输出。"""
+
+    run_id: UUID
+    env_id: UUID
+    container: str
+    proc_dir: str
+    acked: int
+    timeout_at: datetime
+
+
 class RunnerReportResult(BaseModel):
     lost: list[UUID]
     stray: list[str]
+    procs: list[RunnerProcWatch] = Field(default_factory=list)
+
+
+class RunnerProcOutput(_Strict):
+    """托管进程的一块输出（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 21.3）。"""
+
+    offset: int = Field(ge=0, description="这一块在输出里的起始位置（字节）")
+    data_b64: str = Field(max_length=360_000, description="最多 256 KB，base64")
+
+
+class RunnerProcAck(BaseModel):
+    acked: int = Field(description="工作台已经确认收到的字节数；下一块从这里开始")
+
+
+class RunnerProcExit(_Strict):
+    exit_code: int | None = None
+    state: Literal["exited", "killed", "timeout", "lost"]
+    stderr_tail: str = Field(default="", max_length=70_000)
+    error: str | None = Field(default=None, max_length=4000)
+
+
+class RunnerProcExitAccepted(BaseModel):
+    accepted: bool
 
 
 class RunnerReportSample(BaseModel):
@@ -493,6 +527,13 @@ class RunnerEnvMetrics(BaseModel):
 
 class RunnerEnvAdminOut(EnvOut):
     owner_instance_id: UUID | None
+    owner_kind: str = Field(
+        "instance",
+        description="instance：智能体建的；其他值是建它的模块"
+        "（llm_bridge = MCP 管理器的远程开发容器）",
+    )
+    owner_label: str | None = Field(None, description="模块建的环境显示的申请方")
+    no_auto_archive: bool = Field(False, description="不自动归档（空闲时只停止）")
     template_id: UUID | None
     spec: RunnerSpecOut
     mem_bytes: int | None

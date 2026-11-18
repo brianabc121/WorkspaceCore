@@ -254,6 +254,70 @@ def secret_command(name: str) -> list[str]:
     ]
 
 
+PROCS_ROOT = "/workspace/.mw/procs"
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+PROC_ENV_VALUE_MAX = 16 * 1024
+PROC_ARGV_MAX = 256 * 1024
+
+
+def proc_dir(payload: dict[str, Any]) -> tuple[str, str]:
+    """托管进程的运行号和目录。
+
+    目录只能是 /workspace/.mw/procs/<运行号>（不信任指令里的别的写法）。"""
+    run_id = payload.get("run_id")
+    if not isinstance(run_id, str) or not _UUID.match(run_id):
+        raise ParamError("运行号不合法")
+    folder = f"{PROCS_ROOT}/{run_id}"
+    if payload.get("proc_dir") not in (None, folder):
+        raise ParamError("进程目录不合法")
+    return run_id, folder
+
+
+def proc_argv(value: Any) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(isinstance(a, str) and "\x00" not in a for a in value)
+        or sum(len(a) for a in value) > PROC_ARGV_MAX
+    ):
+        raise ParamError("命令不合法")
+    return list(value)
+
+
+def proc_cwd(value: Any) -> str:
+    """工作目录：/workspace 下的绝对路径，不许 .."""
+    if (
+        not isinstance(value, str)
+        or not (value == WORKDIR or value.startswith(f"{WORKDIR}/"))
+        or ".." in value.split("/")
+        or "\x00" in value
+    ):
+        raise ParamError("工作目录要是 /workspace 下的绝对路径")
+    return value
+
+
+def proc_env(env: Any, secret_env: Any = None) -> list[str]:
+    """托管进程的环境变量（普通的 + 凭据）：名字合法；不能改代理、HOME 和 MYWS_ 开头的；
+    值不截断（凭据截了就错了），超长直接拒绝。"""
+    out: list[str] = []
+    for source in (env or {}, secret_env or {}):
+        if not isinstance(source, dict):
+            raise ParamError("环境变量不合法")
+        for key, value in source.items():
+            if not isinstance(key, str) or not _ENV_KEY.match(key):
+                raise ParamError(f"环境变量名不合法：{str(key)[:64]}")
+            if not isinstance(value, str) or "\x00" in value or len(value) > PROC_ENV_VALUE_MAX:
+                raise ParamError(f"环境变量 {key} 的值不合法")
+            if (
+                key.upper() in RESERVED_ENV
+                or key.startswith("MYWS_")
+                or key.lower() in {"http_proxy", "https_proxy", "no_proxy"}
+            ):
+                continue
+            out.append(f"{key}={value}")
+    return out
+
+
 def exec_workdir(relative: Any) -> str:
     if relative in (None, ""):
         return WORKDIR
@@ -272,6 +336,7 @@ __all__ = [
     "LABEL_RUNNER",
     "LABEL_TEMPLATE",
     "LABEL_WORKSPACE",
+    "PROCS_ROOT",
     "PROXY_ALIAS",
     "PROXY_PORT",
     "ParamError",
@@ -281,6 +346,10 @@ __all__ = [
     "exec_workdir",
     "helper_config",
     "labels",
+    "proc_argv",
+    "proc_cwd",
+    "proc_dir",
+    "proc_env",
     "proxy_address",
     "secret_command",
     "user_ids",

@@ -972,3 +972,10 @@ async def test_official_programs_never_get_the_bridge_settings(
         leaked = sorted(k for k in env if k.startswith("BRIDGE_") or k == "UNRELATED_SECRET")
         assert leaked == [], (dump.name, leaked)
     assert json.loads(codex_dump.read_text())["CODEX_HOME"] == str(tmp_path / "codex-home")
+    # 查版本（远程会话的第一回合要核对容器里的版本）也一样（T-0295 集成审查第 4 条）
+    for driver, dump in ((codex, codex_dump), (cli, cli_dump)):
+        dump.unlink()
+        await driver.version()
+        env = json.loads(dump.read_text())
+        leaked = sorted(k for k in env if k.startswith("BRIDGE_") or k == "UNRELATED_SECRET")
+        assert leaked == [], (dump.name, leaked)

@@ -38,7 +38,7 @@ const session = (over: Partial<Session> = {}): Session => ({ session_id: S1, pla
 const asked = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'user', turn_id: turn, text, at: now() - 100, by: '测试用户', mine: true, steps: [], attachments: [], imported: false, references: [], ...over })
 const answered = (text: string, turn = T1, over: Partial<Message> = {}): Message => ({ role: 'assistant', turn_id: turn, text, at: now() - 90, status: 'completed', steps: [], attachments: [], imported: false, references: [], ...over })
 const talk = (over: Partial<Session> = {}, messages: Message[] = [asked('写一个周报模板'), answered('好的，模板如下。')], last = 10): Conversation => ({ session: session(over), messages, last_event_id: last })
-const environment = (id: string, name: string): Schema['LlmBridgeEnvironmentOut'] => ({ id, platform: 'codex', mode: 'dev', name, enabled: true, repo_url: 'https://example.com/a.git', branch: 'main', sandbox: 'workspace_write', network: false, description: '' })
+const environment = (id: string, name: string): Schema['LlmBridgeEnvironmentOut'] => ({ id, platform: 'codex', mode: 'dev', name, enabled: true, repo_url: 'https://example.com/a.git', branch: 'main', sandbox: 'workspace_write', network: false, description: '', location: 'local' })
 
 interface World {
   bridges: Bridge[]; sessions: Session[]; conversations: Record<string, Conversation>

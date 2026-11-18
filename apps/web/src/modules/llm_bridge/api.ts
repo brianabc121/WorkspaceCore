@@ -30,6 +30,49 @@ export type EnvSession = Schema['LlmBridgeEnvSessionOut']
 export type WorkEntry = Schema['LlmBridgeFileEntryOut']
 export type WorkFile = Schema['LlmBridgeFileOut']
 export type EnvironmentBody = Schema['LlmBridgeEnvironmentIn']
+// 云端远程容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md）：开发环境可以放在容器服务器上的一个专用容器里
+export type RemoteContainer = Schema['LlmBridgeRemoteContainerOut']
+export type RemoteContainerBody = Schema['LlmBridgeRemoteContainerIn']
+export type RemoteTargets = Schema['LlmBridgeRemoteTargets']
+export type RemoteHost = Schema['LlmBridgeRemoteHostOut']
+export type RemotePlatform = Schema['LlmBridgeRemotePlatformOut']
+export type RemoteAction = Schema['LlmBridgeRemoteContainerAction']['action']
+export type RemoteLoginAction = Schema['LlmBridgeRemoteLoginIn']['action']
+export type RemoteNetwork = RemoteContainerBody['network']
+/** 远程容器的状态（页面上的说法和颜色） */
+export const CONTAINER_STATE: Record<RemoteContainer['state'], { text: string; tone: string }> = {
+  building: { text: '构建镜像中', tone: 'tone-amber' },
+  creating: { text: '创建中', tone: 'tone-amber' },
+  running: { text: '运行中', tone: 'tone-green' },
+  stopped: { text: '已停止', tone: 'tone-muted' },
+  archived: { text: '已归档', tone: 'tone-muted' },
+  deleting: { text: '删除中', tone: 'tone-amber' },
+  failed: { text: '失败', tone: 'tone-red' },
+  gone: { text: '已不在', tone: 'tone-red' },
+}
+/** 这些状态的容器还在变：页面每 5 秒刷新一次 */
+export const containerBusy = (c: RemoteContainer) => ['building', 'creating', 'deleting'].includes(c.state) || c.updating_image
+export const REMOTE_NETWORK: Record<RemoteNetwork, { name: string; help: string }> = {
+  models: { name: '只连模型接口和代码仓库', help: '只放行三家模型接口（核验过的域名）和环境里代码仓库所在的主机。' },
+  models_registries: { name: '再加常用包仓库', help: '在上一档的基础上放行 npm、PyPI、Go、crates、Debian 软件源和 GitHub 下载。' },
+  all: { name: '全部外网', help: '能访问任何公网地址（私有网段、工作台和 OpenClaw 服务器仍然连不到）。' },
+}
+/** 订阅账号登录、刷新令牌要连的域名还没核验完（核验记录 V3），所以默认推荐“全部外网” */
+export const REMOTE_NETWORK_NOTE = '订阅账号登录、刷新令牌要连的域名还没核验完：用订阅账号时先选“全部外网”，以免登录失败。'
+export const REMOTE_PRESET: Record<'small' | 'medium' | 'large', string> = { small: '小', medium: '中', large: '大' }
+export const IDLE_STOP: readonly { minutes: 0 | 30 | 120; name: string }[] = [
+  { minutes: 30, name: '空闲 30 分钟后停止' }, { minutes: 120, name: '空闲 2 小时后停止' }, { minutes: 0, name: '不停止' },
+]
+/** 一个平台在远程容器里能不能用 */
+export const REMOTE_PLATFORM_STATE: Record<RemotePlatform['state'], { text: string; tone: string }> = {
+  injected: { text: '凭据随回合注入', tone: 'tone-green' },
+  ready: { text: '容器里已登录', tone: 'tone-green' },
+  needs_login: { text: '要在容器里登录', tone: 'tone-amber' },
+  mismatch: { text: '账号不一致', tone: 'tone-red' },
+}
+/** 资源的写法：“2 核 · 4 GB 内存” */
+export const resourceText = (r: { cpus: number; memory_mb: number; disk_gb?: number }) =>
+  `${r.cpus} 核 · ${r.memory_mb >= 1024 ? `${+(r.memory_mb / 1024).toFixed(1)} GB` : `${r.memory_mb} MB`} 内存${r.disk_gb ? ` · ${r.disk_gb} GB 磁盘` : ''}`
 export type Grant = Schema['LlmBridgeGrantOut']
 export type IndexSession = Schema['LlmBridgeIndexSessionOut']
 export type SearchHit = Schema['LlmBridgeSearchHitOut']
@@ -174,10 +217,14 @@ const MESSAGES: Record<string, string> = {
   LB_ACK_REQUIRED: 'Claude 用订阅登录前，要先确认了解合规风险：请勾选下面的风险确认后再试。',
 }
 const BRIDGE_CODES = ['CONFLICT', 'NOT_SUPPORTED', 'NOT_LOGGED_IN', 'ACCOUNT_MISMATCH', 'UNAVAILABLE', 'RATE_LIMITED']
+// 远程开发容器的错误：工作台写的中文说明（为什么建不了、还有环境在用等），直接显示
+const REMOTE_CODES = ['CONTAINER_IN_USE', 'QUOTA_EXCEEDED', 'ENV_UNAVAILABLE', 'TEMPLATE_NOT_READY', 'PLACEMENT_CONFLICT', 'RUNNER_UNAVAILABLE', 'RESOURCE_BUSY', 'REMOTE_SESSION']
 export function bridgeError(error: unknown): string {
   if (error instanceof ApiError) {
     if (MESSAGES[error.code]) return MESSAGES[error.code]!
-    if (BRIDGE_CODES.includes(error.code) && error.message) return error.message
+    if ([...BRIDGE_CODES, ...REMOTE_CODES].includes(error.code) && error.message) return error.message
+    // 后端自己写了原因的校验失败（例如“远程容器里的 Codex 只有可执行命令这一档”），不是通用的参数校验
+    if (error.code === 'VALIDATION_FAILED' && error.message && error.message !== '请求参数校验失败') return error.message
   }
   return errorMessage(error)
 }
@@ -343,7 +390,40 @@ export function useLlmBridge(scope: string) {
       const out = envId
         ? dataOf(await auth.api.PUT('/api/v1/llm_bridge/bridges/{bridge_id}/environments/{env_id}', { params: { header, path: { bridge_id: id, env_id: envId } }, body }))
         : dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/environments', { params: at(id), body }))
-      await invalidate('bridge', id, 'environments'); return out
+      await Promise.all([invalidate('bridge', id, 'environments'), ...(body.location === 'remote' ? [invalidate('bridge', id, 'containers'), invalidate('remote-targets')] : [])]); return out
+    },
+    // ---- 云端远程容器 ----
+    useRemoteTargets: (enabled: Ref<boolean> = ref(true)) => useQuery({ queryKey: key(user, scope, 'remote-targets'), enabled: computed(() => active() && enabled.value),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/remote/targets', { params: { header }, signal })) }),
+    useContainers: (id: Ref<string>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'containers')), enabled: computed(active),
+      refetchInterval: (query: { state: { data?: RemoteContainer[] } }) => (query.state.data?.some(containerBusy) ? 5000 : false),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/containers', { params: at(id.value), signal })).containers }),
+    useContainerPlatforms: (id: Ref<string>, container: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'container-platforms', container.value)), enabled: computed(() => active() && !!container.value), retry: false,
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/containers/{container_id}/platforms', { params: { header, path: { bridge_id: id.value, container_id: container.value! } }, signal })).platforms }),
+    async createContainer(id: string, body: RemoteContainerBody) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/containers', { params: at(id), body }))
+      await invalidate('bridge', id, 'containers'); return out
+    },
+    async updateContainer(id: string, container: string, body: Schema['LlmBridgeRemoteContainerPatch']) {
+      const out = dataOf(await auth.api.PATCH('/api/v1/llm_bridge/bridges/{bridge_id}/containers/{container_id}', { params: { header, path: { bridge_id: id, container_id: container } }, body }))
+      await invalidate('bridge', id, 'containers'); return out
+    },
+    async containerAction(id: string, container: RemoteContainer, action: RemoteAction) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/containers/{container_id}/actions', { params: { header, path: { bridge_id: id, container_id: container.id } }, body: { action, version: container.version } }))
+      await invalidate('bridge', id, 'containers'); return out
+    },
+    async deleteContainer(id: string, container: string) {
+      await auth.api.DELETE('/api/v1/llm_bridge/bridges/{bridge_id}/containers/{container_id}', { params: { header, path: { bridge_id: id, container_id: container } } })
+      await Promise.all([invalidate('bridge', id, 'containers'), invalidate('remote-targets')])
+    },
+    // 在远程容器里登录一个平台：start 要等管理器在容器里起好登录程序、拿到网址，用长等待
+    async remoteLogin(id: string, container: string, slot: Slot, action: RemoteLoginAction, code?: string) {
+      const out = dataOf(await auth.longApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/containers/{container_id}/login/{slot}', { params: { header, path: { bridge_id: id, container_id: container, slot } }, body: { action, ...(code ? { code } : {}) } }))
+      if (action !== 'start') await invalidate('bridge', id, 'container-platforms', container)
+      return out
+    },
+    async remoteLoginState(id: string, container: string, slot: Slot) {
+      return dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/containers/{container_id}/login/{slot}', { params: { header, path: { bridge_id: id, container_id: container, slot } } }))
     },
     async deleteEnvironment(id: string, envId: string) {
       await auth.api.DELETE('/api/v1/llm_bridge/bridges/{bridge_id}/environments/{env_id}', { params: { header, path: { bridge_id: id, env_id: envId } } })

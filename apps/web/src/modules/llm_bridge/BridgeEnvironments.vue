@@ -2,9 +2,10 @@
 import { computed, reactive, ref, toRef, watch } from 'vue'
 import { Plus } from '@lucide/vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
-import { PLATFORMS, SANDBOX, bridgeError, platformName, type Bridge, type BridgeStatus, type Environment, type LlmBridgeApi } from './api'
+import { CONTAINER_STATE, PLATFORMS, SANDBOX, bridgeError, platformName, type Bridge, type BridgeStatus, type Environment, type LlmBridgeApi } from './api'
 import BridgeWorkFiles from './BridgeWorkFiles.vue'
 import EnvironmentDialog from './EnvironmentDialog.vue'
+import RemoteContainerBar from './RemoteContainerBar.vue'
 import WorkTreeNode from './WorkTreeNode.vue'
 import { defaultSession, rootName } from './workFiles'
 
@@ -22,6 +23,16 @@ const DEV_PLATFORMS = computed(() => PLATFORMS.filter(p => !props.status?.reacha
 const selectedId = ref<string | null>(null)
 watch(list, items => { if (!items.some(e => e.id === selectedId.value)) selectedId.value = items[0]?.id ?? null }, { immediate: true })
 const selected = computed(() => list.value.find(e => e.id === selectedId.value) ?? null)
+// 云端远程容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 10.2）：远程环境标出在哪台服务器、容器的状态；
+// 构建 / 创建中的容器每 5 秒刷新（api.useContainers）。读不到容器列表时只是不显示状态
+const containers = props.api.useContainers(bridgeId)
+const containerOf = (env: Environment) => (env.location === 'remote' ? (containers.data.value ?? []).find(c => c.id === env.remote_container) ?? null : null)
+const selectedContainer = computed(() => (selected.value ? containerOf(selected.value) : null))
+function placeText(env: Environment) {
+  if (env.location !== 'remote') return ''
+  const c = containerOf(env)
+  return `云端 · ${c?.host_name ?? env.remote_label ?? '远程容器'}`
+}
 const sessions = props.api.useEnvSessions(bridgeId, selectedId)
 const sessionList = computed(() => sessions.data.value ?? [])
 const session = ref<string | null>(null), path = ref('')
@@ -55,6 +66,11 @@ async function remove(env: Environment) {
     </div>
     <p v-else-if="!list.length" class="ws-state-line">还没有开发环境。{{ canWrite ? '点“新增环境”添加一个。' : '' }}</p>
     <div v-else class="lb-envs-layout">
+      <!-- 远程环境：容器信息条占满一行，下面照旧是三栏 -->
+      <RemoteContainerBar
+        v-if="selected?.location === 'remote' && selected.remote_container" :key="selected.remote_container" :api="api" :bridge-id="bridge.id"
+        :container-id="selected.remote_container" :container="selectedContainer" :label="selected.remote_label ?? null" :can-write="canWrite"
+      />
       <aside class="lb-envs-side">
         <nav aria-label="开发环境列表">
           <h4>开发环境<span class="lb-count-pill">{{ list.length }}</span></h4>
@@ -62,7 +78,9 @@ async function remove(env: Environment) {
             <li v-for="e in list" :key="e.id">
               <button type="button" class="lb-env-item" :aria-current="e.id === selectedId ? 'true' : undefined" :title="`${SANDBOX[e.sandbox as keyof typeof SANDBOX] ?? e.sandbox} · ${e.network ? '可以联网' : '不联网'}${e.repo_url ? ` · ${e.repo_url}` : ''}`" @click="selectedId = e.id">
                 <span class="lb-env-dot" :data-on="e.enabled" aria-hidden="true" />
-                <span class="lb-env-text"><strong>{{ e.name }}</strong><span>{{ platformName(e.platform) }}<template v-if="!e.enabled"> · 已停用</template></span></span>
+                <span class="lb-env-text"><strong>{{ e.name }}</strong><span>{{ platformName(e.platform) }}<template v-if="!e.enabled"> · 已停用</template></span>
+                  <span v-if="e.location === 'remote'" class="lb-env-place">{{ placeText(e) }}<span v-if="containerOf(e)" class="asv-state" :class="CONTAINER_STATE[containerOf(e)!.state].tone">{{ CONTAINER_STATE[containerOf(e)!.state].text }}</span></span>
+                </span>
               </button>
             </li>
           </ul>

@@ -25,7 +25,7 @@ const env = (over: Partial<Schema['RunnerEnvAdminOut']> = {}): Schema['RunnerEnv
   runtime_backend: 'docker', host_id: 'host-1', placement: {},
   id: 'env-1', untrusted: { purpose: '跑回归测试' }, lifetime: 'session', state: 'running', state_reason: null, template: 'py', reuse_key: null, owner: 'alpha', mine: false,
   runtime: 'gvisor', user: 'user', network: 'none', memory_mb: 2048, cpus: 2, delete_when: [], share: 'none', project_id: null, pinned: false, use_count: 3, created_at: at, last_used_at: at,
-  next_step: '空闲 15 分钟后停止', wake_seconds: 2.5, owner_instance_id: 'inst-a', template_id: 'tpl-1', spec: spec(), mem_bytes: 512 * 1024 * 1024, disk_bytes: GB, egress: {},
+  next_step: '空闲 15 分钟后停止', wake_seconds: 2.5, owner_instance_id: 'inst-a', owner_kind: 'instance', owner_label: null, no_auto_archive: false, template_id: 'tpl-1', spec: spec(), mem_bytes: 512 * 1024 * 1024, disk_bytes: GB, egress: {},
   retention_score: 12.5, retention_infinite: false, snapshot_at: null, snapshot_bytes: null, started_at: at, stopped_at: null, archived_at: null, deleted_at: null, delete_after: null, version: 7, ...over,
 })
 const template = (over: Partial<Schema['RunnerTemplateAdminOut']> = {}): Schema['RunnerTemplateAdminOut'] => ({

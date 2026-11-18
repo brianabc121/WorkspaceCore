@@ -5,19 +5,28 @@
 登录、环境、设置、会话都是转给会话桥的管理接口（services/llm-bridge 的 /admin/*）。
 """
 
+import json
 from datetime import datetime
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, urlencode
 from uuid import UUID
 
 from fastapi import Depends, Path, Query, Response, status
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from app.api.deps import csrf_protected
 from app.core.errors import ApiError
 from app.domain import agent_ops, secret_scan
-from app.models import User
+from app.domain.runner import RunnerError
+from app.models import RunnerHost, User
 from app.modules.llm_bridge.client import LOGIN_READ_TIMEOUT
 from app.modules.llm_bridge.deps import Admin, Owner, Service, router
+from app.modules.llm_bridge.models import LlmBridge
+from app.modules.llm_bridge.remote import RemoteError
+from app.modules.llm_bridge.remote import repo_host as remote_repo_host
+from app.modules.llm_bridge.remote_api import Redis_, create_container, remote_error, remote_of
+from app.modules.llm_bridge.remote_files import RemoteFiles
 from app.modules.llm_bridge.schemas import (
     LlmBridgeAccountStateOut,
     LlmBridgeChainIn,
@@ -342,27 +351,155 @@ async def llm_bridge_list_environments(
     return LlmBridgeEnvironmentList(**await service.admin(row, "GET", "/environments"))
 
 
+_ENV_FIELDS = (
+    "platform",
+    "mode",
+    "name",
+    "repo_url",
+    "branch",
+    "sandbox",
+    "network",
+    "description",
+    "enabled",
+    "turn_timeout_seconds",
+)
+
+
+def _bridge_env_body(body: LlmBridgeEnvironmentIn) -> dict[str, Any]:
+    """交给会话桥的环境字段（运行位置另加；远程容器的参数不给会话桥）。"""
+    return body.model_dump(include=set(_ENV_FIELDS))
+
+
+def _check_remote_sandbox(body: LlmBridgeEnvironmentIn) -> None:
+    if body.location == "remote" and body.platform == "codex" and body.sandbox != "exec":
+        # 核验记录 V2：Codex 自己的沙箱在容器里起不来，容器本身是沙箱
+        raise ApiError(
+            422,
+            "VALIDATION_FAILED",
+            "远程容器里的 Codex 只有“可执行命令”这一档"
+            "（Codex 自己的沙箱在容器里用不了，容器本身就是沙箱）",
+        )
+
+
 @router.post(
     "/llm_bridge/bridges/{bridge_id}/environments",
     summary="新增开发环境（owner）",
+    description="location=remote 时用一个远程开发容器（已有的，或者 new_container 新建一个；"
+    "新建要先构建镜像，第一次要几分钟）。",
     status_code=status.HTTP_201_CREATED,
     dependencies=_write,
     responses=_write_errors,
 )
 async def llm_bridge_create_environment(
-    access: Owner, service: Service, bridge_id: UUID, body: LlmBridgeEnvironmentIn
+    access: Owner, service: Service, redis: Redis_, bridge_id: UUID, body: LlmBridgeEnvironmentIn
 ) -> LlmBridgeEnvironmentOut:
     row = await service.bridge(access.workspace.id, bridge_id)
-    meta = {"platform": body.platform, "name": body.name, "sandbox": body.sandbox}
-    data = await service.admin_write(
-        access, row, "environment_created", "POST", "/environments", body.model_dump(), meta
-    )
+    _check_remote_sandbox(body)
+    claim = f"{ENV_REQUEST_KEY}{access.workspace.id}:{bridge_id}:{body.request_id}"
+    if body.request_id is not None:
+        done = await _claim_request(redis, claim)
+        if done is not None:
+            return LlmBridgeEnvironmentOut(**done)
+        if body.new_container is not None and body.new_container.request_id is None:
+            body.new_container.request_id = f"{body.request_id}.container"
+    try:
+        out = await _create_environment(access, service, redis, row, bridge_id, body)
+    except Exception:
+        if body.request_id is not None:
+            await _release_request(redis, claim, None)
+        raise
+    if body.request_id is not None:
+        await _release_request(redis, claim, out.model_dump(mode="json"))
+    return out
+
+
+# 新增开发环境的幂等号（集成审查第 6 条）：处理中记 pending，成功后记下结果（一天）
+ENV_REQUEST_KEY = "llm_bridge:env-request:"
+ENV_REQUEST_PENDING = 600
+ENV_REQUEST_KEEP = 86400
+
+
+async def _claim_request(redis: Redis, key: str) -> dict[str, Any] | None:
+    """用过的幂等号返回上次的结果；正在处理的回 409；没用过的占上。Redis 不可用时不做幂等。"""
+    try:
+        if await redis.set(key, "pending", nx=True, ex=ENV_REQUEST_PENDING):
+            return None
+        raw = await redis.get(key)
+    except RedisError:
+        return None
+    text = raw.decode() if isinstance(raw, bytes) else raw
+    if text and text != "pending":
+        try:
+            done = json.loads(text)
+        except ValueError:
+            done = None
+        if isinstance(done, dict):
+            return done
+    raise ApiError(409, "REQUEST_IN_PROGRESS", "同一个请求还在处理，稍后刷新列表看看")
+
+
+async def _release_request(redis: Redis, key: str, result: dict[str, Any] | None) -> None:
+    try:
+        if result is None:
+            await redis.delete(key)
+        else:
+            await redis.set(key, json.dumps(result, ensure_ascii=False), ex=ENV_REQUEST_KEEP)
+    except RedisError:
+        pass
+
+
+async def _create_environment(
+    access: Owner,
+    service: Service,
+    redis: Redis,
+    row: LlmBridge,
+    bridge_id: UUID,
+    body: LlmBridgeEnvironmentIn,
+) -> LlmBridgeEnvironmentOut:
+    payload = _bridge_env_body(body)
+    meta: dict[str, Any] = {"platform": body.platform, "name": body.name, "sandbox": body.sandbox}
+    if body.location == "remote":
+        host = remote_repo_host(body.repo_url)
+        remote = remote_of(service, redis)
+        if body.new_container is not None:
+            container = await create_container(
+                access, service, redis, bridge_id, body.new_container, [host] if host else []
+            )
+        else:
+            assert body.remote_container_id is not None  # noqa: S101 - 校验器保证
+            try:
+                container = await remote.get(access.workspace.id, row.id, body.remote_container_id)
+                if host:
+                    await remote.set_policy(
+                        container,
+                        idle_stop_minutes=None,
+                        network=None,
+                        domains=None,
+                        repo_hosts=[host],
+                    )
+            except (RemoteError, RunnerError) as error:
+                raise remote_error(error) from None
+        await service.db.flush()
+        server = await service.db.get(RunnerHost, container.host_id) if container.host_id else None
+        payload.update(
+            location="remote",
+            remote_container=str(container.id),
+            remote_label=f"{server.name if server else '容器服务器'} · {container.name}",
+        )
+        meta.update(location="remote", container=container.name)
+    try:
+        data = await service.admin(row, "POST", "/environments", payload)
+    except ApiError:
+        await service.db.rollback()  # 管理器没收下：新建的远程容器登记一起撤回
+        raise
+    await service.audit(access, "environment_created", row.id, {"bridge": row.name, **meta})
+    await service.db.commit()
     return LlmBridgeEnvironmentOut(**data)
 
 
 @router.put(
     "/llm_bridge/bridges/{bridge_id}/environments/{env_id}",
-    summary="修改开发环境（owner；不能改所属的平台）",
+    summary="修改开发环境（owner；不能改所属的平台和运行位置）",
     dependencies=_write,
     responses=_write_errors,
 )
@@ -370,15 +507,31 @@ async def llm_bridge_update_environment(
     access: Owner, service: Service, bridge_id: UUID, env_id: EnvId, body: LlmBridgeEnvironmentIn
 ) -> LlmBridgeEnvironmentOut:
     row = await service.bridge(access.workspace.id, bridge_id)
+    listed = await service.admin(row, "GET", "/environments")
+    current = next((e for e in (listed.get("environments") or []) if e.get("id") == env_id), None)
+    if current is None:
+        raise ApiError(404, "NOT_FOUND", "没有这个开发环境")
+    location = current.get("location") or "local"
+    if (
+        body.location != location
+        or body.new_container is not None
+        or (
+            body.remote_container_id is not None
+            and str(body.remote_container_id) != current.get("remote_container")
+        )
+    ):
+        raise ApiError(422, "VALIDATION_FAILED", "运行位置建好后不能改")
+    _check_remote_sandbox(body)
+    payload = _bridge_env_body(body)
+    if location == "remote":
+        payload.update(
+            location="remote",
+            remote_container=current.get("remote_container"),
+            remote_label=current.get("remote_label"),
+        )
     meta = {"platform": body.platform, "name": body.name, "sandbox": body.sandbox}
     data = await service.admin_write(
-        access,
-        row,
-        "environment_updated",
-        "PUT",
-        f"/environments/{env_id}",
-        body.model_dump(),
-        meta,
+        access, row, "environment_updated", "PUT", f"/environments/{env_id}", payload, meta
     )
     return LlmBridgeEnvironmentOut(**data)
 
@@ -597,10 +750,21 @@ async def llm_bridge_environment_sessions(
     responses=error_responses(401, 403, 404, 422, 503),
 )
 async def llm_bridge_session_files(
-    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, path: FilePath = ""
+    access: Admin,
+    service: Service,
+    redis: Redis_,
+    bridge_id: UUID,
+    session_id: SessionId,
+    path: FilePath = "",
 ) -> LlmBridgeFileList:
     row = await service.bridge(access.workspace.id, bridge_id)
-    data = await service.admin(row, "GET", f"/sessions/{session_id}/files?{_file_query(path)}")
+    try:
+        data = await service.admin(row, "GET", f"/sessions/{session_id}/files?{_file_query(path)}")
+    except ApiError as error:
+        if error.code != "REMOTE_SESSION":
+            raise
+        # 远程开发容器里的会话：工作台经容器服务器在容器里读（REMOTE_ENV_PLAN 10.2）
+        return await RemoteFiles(service, remote_of(service, redis)).list_dir(row, session_id, path)
     return LlmBridgeFileList(**data)
 
 
@@ -610,11 +774,21 @@ async def llm_bridge_session_files(
     responses=error_responses(401, 403, 404, 422, 503),
 )
 async def llm_bridge_session_file(
-    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, path: FilePath
+    access: Admin,
+    service: Service,
+    redis: Redis_,
+    bridge_id: UUID,
+    session_id: SessionId,
+    path: FilePath,
 ) -> LlmBridgeFileOut:
     row = await service.bridge(access.workspace.id, bridge_id)
     url = f"/sessions/{session_id}/files/content?{_file_query(path)}"
-    return LlmBridgeFileOut(**await service.admin(row, "GET", url))
+    try:
+        return LlmBridgeFileOut(**await service.admin(row, "GET", url))
+    except ApiError as error:
+        if error.code != "REMOTE_SESSION":
+            raise
+        return await RemoteFiles(service, remote_of(service, redis)).preview(row, session_id, path)
 
 
 @router.get(
@@ -624,13 +798,25 @@ async def llm_bridge_session_file(
     responses={200: _FILE_DOWNLOAD, **error_responses(401, 403, 404, 422, 503)},
 )
 async def llm_bridge_session_file_download(
-    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, path: FilePath
+    access: Admin,
+    service: Service,
+    redis: Redis_,
+    bridge_id: UUID,
+    session_id: SessionId,
+    path: FilePath,
 ) -> Response:
     row = await service.bridge(access.workspace.id, bridge_id)
     bridge_name = row.name
     url = f"/sessions/{session_id}/files/content?{_file_query(path, download='true')}"
-    response = await service.download(row, url)
     name = path.rstrip("/").rsplit("/", 1)[-1] or "file"
+    try:
+        content = (await service.download(row, url)).content
+    except ApiError as error:
+        if error.code != "REMOTE_SESSION":
+            raise
+        name, content = await RemoteFiles(service, remote_of(service, redis)).download(
+            row, session_id, path
+        )
     # 下载原文件记一条审计（谁、哪个会话、哪个文件）；文件内容不记
     await service.audit(
         access,
@@ -640,7 +826,7 @@ async def llm_bridge_session_file_download(
     )
     await service.db.commit()
     return Response(
-        content=response.content,
+        content=content,
         media_type="application/octet-stream",
         headers={
             "Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}",

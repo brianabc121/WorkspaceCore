@@ -27,7 +27,7 @@ from app.domain import notifications, runner_metrics, runner_reclaim
 from app.domain import runner_specs as specs
 from app.domain.audit import AuditTrail
 from app.domain.policy import WorkspaceAccess, not_found
-from app.domain.runner import Runner, RunnerError, Viewer, spec_out
+from app.domain.runner import MODULE_TEMPLATE_MESSAGE, Runner, RunnerError, Viewer, spec_out
 from app.domain.runner_capabilities import ContainerApprovalRequired
 from app.domain.runner_hosts import RunnerHosts, host_out
 from app.models import (
@@ -59,10 +59,21 @@ from app.schemas.runner import (
 )
 
 
+def _not_module_template(template: RunnerTemplate) -> None:
+    if template.owner_kind != "instance":
+        raise ApiError(
+            409,
+            "MANAGED_BY_MODULE",
+            MODULE_TEMPLATE_MESSAGE,
+            details={"owner_kind": template.owner_kind},
+        )
+
+
 def _error(error: RunnerError) -> ApiError:
     status = {
         "NOT_FOUND": 404,
         "VERSION_CONFLICT": 409,
+        "MANAGED_BY_MODULE": 409,
         "FORBIDDEN": 403,
         "RUNNER_UNAVAILABLE": 409,
         "RUNNER_HOST_AMBIGUOUS": 409,
@@ -73,6 +84,10 @@ def _error(error: RunnerError) -> ApiError:
         "TEMPLATE_NOT_READY": 409,
     }.get(error.code, 422)
     return ApiError(status, error.code, error.message)
+
+
+# 模块建的环境不能在容器服务器页面上做的操作（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 5.6）
+MODULE_MANAGED_ACTIONS = frozenset({"archive", "delete", "keep", "restore"})
 
 
 class RunnerAdmin:
@@ -280,6 +295,9 @@ class RunnerAdmin:
         return RunnerEnvAdminOut(
             **base.model_dump(),
             owner_instance_id=env.owner_instance_id,
+            owner_kind=env.owner_kind,
+            owner_label=env.owner_label,
+            no_auto_archive=env.no_auto_archive,
             template_id=env.template_id,
             spec=spec_out(env.spec),
             mem_bytes=env.mem_bytes,
@@ -440,6 +458,14 @@ class RunnerAdmin:
             raise not_found()
         if env.version != body.version:
             raise ApiError(409, "VERSION_CONFLICT", "环境已被修改，请刷新后重试")
+        if env.owner_kind != "instance" and body.action in MODULE_MANAGED_ACTIONS:
+            # 模块建的环境（例如 MCP 管理器的远程开发容器）在模块的页面上归档、删除、恢复
+            raise ApiError(
+                409,
+                "MANAGED_BY_MODULE",
+                f"这个容器归「{env.owner_label or env.owner_kind}」管理，请在它自己的页面上删除",
+                details={"owner_kind": env.owner_kind},
+            )
         viewer = Viewer(access.workspace.id, user_id=access.user_id)
         reason = "管理员操作"
         try:
@@ -549,6 +575,7 @@ class RunnerAdmin:
         self, access: WorkspaceAccess, template_id: uuid.UUID, body: RunnerTemplateStatus
     ) -> RunnerTemplateAdminOut:
         template = await self._template(access, template_id)
+        _not_module_template(template)
         if template.version != body.version:
             raise ApiError(409, "VERSION_CONFLICT", "模板已被修改，请刷新后重试")
         template.status = body.status
@@ -574,6 +601,7 @@ class RunnerAdmin:
         await self.runner._lock_pool_hosts(access.workspace.id)
         template = await self._template(access, template_id)
         await self.db.refresh(template, with_for_update=True)
+        _not_module_template(template)
         try:
             host = await self.runner.online_host(access.workspace.id, template.build_host_id)
         except RunnerError as error:

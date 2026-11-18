@@ -139,6 +139,8 @@ class RunnerTemplate(Base):
     name: Mapped[str] = mapped_column(Text)
     description: Mapped[str] = mapped_column(Text, server_default=text("''"))
     owner_instance_id: Mapped[uuid.UUID | None] = _instance()
+    # instance：实例或管理员建的；模块 key（例如 llm_bridge）：只有模块自己能改（0079）
+    owner_kind: Mapped[str] = mapped_column(Text, server_default=text("'instance'"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspace.users.id", ondelete="SET NULL")
     )
@@ -176,6 +178,14 @@ class RunnerEnvironment(Base):
         CheckConstraint(f"state IN {ENV_STATES}", name="state"),
         CheckConstraint(f"share IN {SHARES}", name="share"),
         CheckConstraint("share = 'none' OR project_id IS NOT NULL", name="share_project"),
+        # 不是智能体建的（模块建的，例如 MCP 管理器的远程开发容器）要写明是谁的（迁移 0079）
+        CheckConstraint("owner_kind = 'instance' OR owner_ref IS NOT NULL", name="owner_ref"),
+        Index(
+            "ix_runner_environments_owner_ref",
+            "owner_kind",
+            "owner_ref",
+            postgresql_where=text("owner_kind <> 'instance'"),
+        ),
         Index("ix_runner_environments_workspace_state", "workspace_id", "state"),
         Index("ix_runner_environments_owner_reuse", "owner_instance_id", "reuse_key"),
         CheckConstraint("cpu_used_cores IS NULL OR cpu_used_cores >= 0", name="cpu_used_cores"),
@@ -197,6 +207,15 @@ class RunnerEnvironment(Base):
     )
     template_revision: Mapped[int | None] = mapped_column(Integer)
     owner_instance_id: Mapped[uuid.UUID | None] = _instance()
+    # 归属（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 21.4）：
+    # instance 是智能体建的（看 owner_instance_id）；其他值是模块 key（例如 llm_bridge），
+    # owner_ref 是模块里的编号，owner_label 显示在页面上。
+    # 模块建的环境不算孤儿、不占实例配额，页面上不能归档 / 删除（由模块管理）
+    owner_kind: Mapped[str] = mapped_column(Text, server_default=text("'instance'"))
+    owner_ref: Mapped[str | None] = mapped_column(Text)
+    owner_label: Mapped[str | None] = mapped_column(Text)
+    # 不自动归档：资源紧张、空闲到点都只停止（远程开发容器里有没提交的改动和登录）
+    no_auto_archive: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     purpose: Mapped[str] = mapped_column(Text)
     lifetime: Mapped[str] = mapped_column(Text)
     reuse_key: Mapped[str | None] = mapped_column(Text)
@@ -271,6 +290,13 @@ class RunnerRun(Base):
     __table_args__ = (
         CheckConstraint(f"status IN {RUN_STATUSES}", name="status"),
         Index("ix_runner_runs_environment_created", "environment_id", "created_at"),
+        CheckConstraint("kind IN ('exec', 'proc')", name="kind"),
+        CheckConstraint("acked_offset >= 0", name="acked_offset"),
+        Index(
+            "ix_runner_runs_open_procs",
+            "environment_id",
+            postgresql_where=text("kind = 'proc' AND finished_at IS NULL"),
+        ),
         Index("ix_runner_runs_workspace_created", "workspace_id", "created_at"),
     )
 
@@ -280,6 +306,12 @@ class RunnerRun(Base):
         ForeignKey("workspace.runner_environments.id", ondelete="CASCADE")
     )
     instance_id: Mapped[uuid.UUID | None] = _instance()
+    # exec：一次性执行，结束时一次回报输出；proc：托管进程（迁移 0079），输出边跑边经
+    # /runner-api/v1/procs/{id}/output 交给 owner_kind 对应的模块，acked_offset 是已经确认的字节数
+    kind: Mapped[str] = mapped_column(Text, server_default=text("'exec'"))
+    owner_kind: Mapped[str | None] = mapped_column(Text)
+    owner_ref: Mapped[str | None] = mapped_column(Text)
+    acked_offset: Mapped[int] = mapped_column(BigInteger, server_default=text("0"))
     command: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, server_default=text("'queued'"))
     exit_code: Mapped[int | None] = mapped_column(Integer)

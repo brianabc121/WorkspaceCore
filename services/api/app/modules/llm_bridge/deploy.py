@@ -733,7 +733,7 @@ class LlmBridgeDeployService:
             {"name": row.name, "uninstalled": False, "forced": True, "server": install.server_name},
         )
         tunnel.POOL.drop(install.id)
-        await remove_bridge(self.db, row)
+        await remove_bridge(self.db, row, self.settings)
         await self.db.commit()
         return job_out(job, with_log=True)
 
@@ -1435,7 +1435,7 @@ class _Job:
         async with self.sessionmaker() as db:
             row = await db.get(LlmBridge, self.facts.bridge_id)
             if row is not None:
-                await remove_bridge(db, row)
+                await remove_bridge(db, row, self.settings)
                 await AuditTrail(db, self.settings).record(
                     "llm_bridge.bridge_deleted",
                     workspace_ids=[self.facts.workspace_id],
