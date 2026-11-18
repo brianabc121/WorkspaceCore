@@ -67,13 +67,17 @@ function setup(role: Role, given: Partial<World> = {}, handler?: (r: Request, wo
 }
 const writes = (requests: Request[]) => requests.filter(r => r.method !== 'GET' && path(r).startsWith(api))
 const card = (name: string) => screen.findByRole('article', { name: `MCP 管理器：${name}` })
-/** 选中这个管理器，打开右边详情里的“管理操作”（只读时没有），返回右边的详情：部署在哪儿、提示和操作都在那里 */
+/**
+ * 选中这个管理器，打开它卡片上的“…”（管理操作，只读时没有）。
+ * 返回列表和右边详情所在的那一块：部署在哪儿、提示在详情里，操作在卡片的菜单里（T-0286）
+ */
 async function manage(name: string) {
-  await fireEvent.click(within(await card(name)).getByRole('button', { name: `查看 MCP 管理器：${name}` }))
+  const own = await card(name)
+  await fireEvent.click(within(own).getByRole('button', { name: `查看 MCP 管理器：${name}` }))
   const detail = await screen.findByRole('region', { name: `MCP 管理器：${name}` })
-  const menu = within(detail).queryByRole('button', { name: '管理操作' })
+  const menu = within(own).queryByRole('button', { name: `${name}的管理操作` })
   if (menu && menu.getAttribute('aria-expanded') !== 'true') await fireEvent.click(menu)
-  return detail
+  return detail.parentElement!
 }
 async function openDeployForm() {
   await fireEvent.click(await screen.findByRole('button', { name: '添加 MCP 管理器' }))

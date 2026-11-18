@@ -103,14 +103,14 @@ const card = (page, name) => page.getByRole('article', { name: `MCP 管理器：
 const panel = (page) => page.getByRole('tabpanel', { name: '平台与账号' })
 const control = (page) => panel(page).getByRole('group', { name: '控制的平台' })
 // 卡片上“控制的平台”那几行的文字，例如 ['Claude未登录', 'CodeBuddy…']
-// 选中这个管理器，打开右边详情里的“管理操作”（修改、停用、删除等都在里面），返回右边的详情
+// 选中这个管理器，打开它卡片上的“…”（修改、删除、重新部署等都在里面；停用是卡片上的开关），返回这张卡片（T-0286）
 async function manage(page, name) {
-  await card(page, name).getByRole('button', { name: `查看 MCP 管理器：${name}` }).click()
-  const detail = page.getByRole('region', { name: `MCP 管理器：${name}`, exact: true })
-  await detail.waitFor()
-  const menu = detail.getByRole('button', { name: '管理操作' })
+  const own = card(page, name)
+  await own.getByRole('button', { name: `查看 MCP 管理器：${name}` }).click()
+  await page.getByRole('region', { name: `MCP 管理器：${name}`, exact: true }).waitFor()
+  const menu = own.getByRole('button', { name: `${name}的管理操作` })
   if ((await menu.count()) && (await menu.getAttribute('aria-expanded')) !== 'true') await menu.click()
-  return detail
+  return own
 }
 async function platformsOn(page, name) {
   const list = card(page, name).getByRole('list', { name: `${name}控制的平台` })
@@ -188,7 +188,10 @@ async function main() {
     await form.getByLabel('管理令牌').fill(bridgeToken)
     await form.getByRole('button', { name: '添加', exact: true }).click()
     await page.getByText(`已添加「${ONE}」。`).waitFor()
-    await card(page, ONE).getByText('已启用').waitFor()
+    // 卡片上的启用开关是开着的（T-0286：原来是“已启用”标签）
+    const enabled = card(page, ONE).getByRole('switch', { name: `启用${ONE}` })
+    await enabled.waitFor()
+    check(await enabled.getAttribute('aria-checked') === 'true', '新添加的管理器应是启用的')
     check(!(await page.content()).includes(bridgeToken), '管理令牌不应留在页面上')
     const listed = await bridges()
     check(listed.length === 1 && listed[0].has_token, `添加后的列表不对：${JSON.stringify(listed)}`)
@@ -475,9 +478,10 @@ async function main() {
 
     // ---------------------------------------------------------------- 停用与删除
     acceptNext(page)
-    await (await manage(page, ONE)).getByRole('button', { name: `停用${ONE}` }).click()
+    await card(page, ONE).getByRole('switch', { name: `启用${ONE}` }).click()
     await page.getByText(`已停用「${ONE}」。`).waitFor()
     await page.getByRole('note').filter({ hasText: '这个 MCP 管理器已停用' }).waitFor()
+    check(await card(page, ONE).getByRole('switch', { name: `启用${ONE}` }).getAttribute('aria-checked') === 'false', '停用后卡片上的开关应是关着的')
     if (two) {
       // 删掉 2 号（先把它控制的平台改回全部：这个容器别的验收还要用）：只允许用它的实例一个都用不了，不会变成“都能用”
       const restoreTwo = await api(page, workspace, 'PUT', `/api/v1/llm_bridge/bridges/${twoId}/settings`, { platforms: ALL_PLATFORMS })
