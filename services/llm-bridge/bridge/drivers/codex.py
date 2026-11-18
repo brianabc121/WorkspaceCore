@@ -24,7 +24,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from bridge import __version__, quota
+from bridge import __version__, quota, remote
 from bridge.drivers import progress
 from bridge.drivers.base import (
     JOBS_INSTRUCTIONS,
@@ -43,6 +43,7 @@ from bridge.drivers.base import (
     TurnOutcome,
     positive_int,
 )
+from bridge.redact import redact
 
 logger = logging.getLogger("bridge.codex")
 
@@ -72,6 +73,22 @@ _APPROVALS = {
     "execCommandApproval",
 }
 _CLOSED = {"method": "$closed", "params": {}}
+REMOTE_EXEC_ONLY = (
+    "远程容器里的 Codex 只能用“可以执行命令”档：Codex 自带的沙箱在容器里起不来，"
+    "容器本身就是沙箱（核验记录 V2）。请把这个开发环境的访问权限改成“可以执行命令”"
+)
+_REMOTE_AUTH_HINTS = ("401", "unauthorized", "not logged in", "login", "api key")
+
+
+def _remote_error_kind(text: str) -> ErrorKind:
+    lowered = text.lower()
+    if any(hint in lowered for hint in _REMOTE_AUTH_HINTS):
+        return "not_logged_in"
+    if "429" in lowered or "rate limit" in lowered:
+        return "rate_limited"
+    return "platform_error"
+
+
 # 手动压缩：看到压缩条目之后再等这么久，没有回合结束的通知也算做完了
 COMPACT_SETTLE_SECONDS = 5.0
 
@@ -108,10 +125,22 @@ class CodexDriver(Driver):
     slot = "openai"
     login_methods = ("device_code", "api_key")
 
-    def __init__(self, binary: str, home: Path, *, rpc_timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        binary: str,
+        home: Path,
+        *,
+        rpc_timeout: float = 30.0,
+        secrets_dir: Path | None = None,
+    ) -> None:
         self._binary = binary
         self._home = home
         self._timeout = rpc_timeout
+        # 用 API 密钥登录时另存一份（权限 0600）：远程开发容器里的 codex exec 每回合经
+        # CODEX_API_KEY 注入（方案第 9 节）。app-server 自己存的那份在 CODEX_HOME 里，管理器不读
+        self._secret_file = secrets_dir / "openai.json" if secrets_dir is not None else None
+        # 远程会话正在跑的回合（会话号 → 远程进程），取消时停掉它
+        self._remote_procs: dict[str, remote.RemoteProcess] = {}
         self._proc: asyncio.subprocess.Process | None = None
         self._reader: asyncio.Task[None] | None = None
         self._start_lock = asyncio.Lock()
@@ -306,10 +335,12 @@ class CodexDriver(Driver):
             if not key:
                 raise DriverError("invalid", "缺少 api_key")
             await self._call("account/login/start", {"type": "apiKey", "apiKey": key})
+            self._save_key(key)
             self._login_id = None
             self._login = LoginChallenge(state="done")
             return self._login
         if method == "device_code":
+            self._save_key(None)
             # 上一次登录的结果作废；从这里起到拿到应答之前到达的完成通知都先记下
             self._login_id = None
             self._early_logins.clear()
@@ -428,8 +459,241 @@ class CodexDriver(Driver):
 
     async def logout(self) -> None:
         await self._call("account/logout", {})
+        self._save_key(None)
         self._login = None
         self._login_id = None
+
+    # ---- 远程开发容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 6.1、9 节）----
+    def _save_key(self, key: str | None) -> None:
+        if self._secret_file is None:
+            return
+        if key is None:
+            self._secret_file.unlink(missing_ok=True)
+            return
+        self._secret_file.parent.mkdir(parents=True, exist_ok=True)
+        self._secret_file.parent.chmod(0o700)
+        self._secret_file.write_text(json.dumps({"method": "api_key", "value": key}))
+        self._secret_file.chmod(0o600)
+
+    def remote_credentials(self) -> dict[str, str]:
+        """API 密钥随回合注入（codex exec 认 CODEX_API_KEY，0.169.0 的 exec/src/lib.rs）。
+        ChatGPT 登录会自己刷新，不下发：要在远程容器里单独登录。"""
+        if self._secret_file is None:
+            return {}
+        try:
+            data = json.loads(self._secret_file.read_text())
+        except (OSError, ValueError):
+            return {}
+        value = data.get("value") if isinstance(data, dict) else None
+        return {"CODEX_API_KEY": value} if isinstance(value, str) and value else {}
+
+    async def version(self) -> str | None:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self._binary,
+                "--version",
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env={**os.environ, "CODEX_HOME": str(self._home)},
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), self._timeout)
+        except (OSError, TimeoutError):
+            return None
+        return remote.parse_version(out.decode(errors="replace"))
+
+    def _remote_argv(self, spec: SessionSpec, images: list[str]) -> list[str]:
+        """远程回合的 codex exec 参数（0.169.0 的 codex-rs/exec/src/cli.rs）。
+
+        --json、-m、-c、--dangerously-bypass-approvals-and-sandbox、--skip-git-repo-check
+        是全局参数，放在 resume 子命令前后都可以；-C 不是，工作目录用进程的 cwd。
+        容器本身是沙箱（V2：Codex 自带的沙箱在容器里起不来），所以只有“可以执行命令”这一档。"""
+        argv = [
+            remote.PROGRAMS[self.slot],
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ]
+        if spec.model:
+            argv += ["-m", spec.model]
+        if spec.effort:
+            argv += ["-c", f"model_reasoning_effort={json.dumps(spec.effort)}"]
+        if spec.autocompact:
+            argv += ["-c", f"model_auto_compact_token_limit={int(spec.autocompact)}"]
+        if spec.pinned:
+            # 固定带着的参考资料：开发者说明（config.toml 的 developer_instructions，每回合带上）。
+            # json.dumps 默认只用 TOML 基本字符串也认的转义
+            argv += ["-c", f"developer_instructions={json.dumps(spec.pinned)}"]
+        if spec.native_id:
+            argv += ["resume", spec.native_id]
+        for path in images:
+            argv += ["-i", path]
+        argv.append("-")  # 提问从标准输入读
+        return argv
+
+    async def _remote_turn(self, spec: SessionSpec, text: str, sink: EventSink) -> TurnOutcome:
+        target, hub = spec.remote, self.remote
+        if target is None or hub is None:
+            raise DriverError("unavailable", "这个管理器没有接上远程开发容器")
+        if spec.sandbox != "exec":
+            raise DriverError("invalid", REMOTE_EXEC_ONLY)
+        images: list[str] = []
+        if spec.images:
+            uploads = []
+            for index, (path, _) in enumerate(spec.images):
+                name = f"{remote.IMAGE_DIR}/{index}-{Path(path).name}"
+                uploads.append((name, await asyncio.to_thread(Path(path).read_bytes)))
+                images.append(f"{target.workdir}/{name}")
+            await hub.put_files(target.container, target.session_id, uploads)
+        proc = await hub.spawn(
+            target.container,
+            purpose="turn",
+            platform=remote.PLATFORM_OF_SLOT[self.slot],
+            session_id=target.session_id,
+            argv=self._remote_argv(spec, images),
+            cwd=target.workdir,
+            env=remote.remote_env(self.slot),
+            secret_env=self.remote_credentials(),
+            stdin=text.encode(),
+            timeout_seconds=target.timeout_seconds,
+        )
+        self._remote_procs[target.session_id] = proc
+        try:
+            return await self._remote_collect(spec, proc, sink)
+        finally:
+            self._remote_procs.pop(target.session_id, None)
+            if proc.returncode is None:
+                proc.kill()
+
+    async def _remote_collect(
+        self, spec: SessionSpec, proc: remote.RemoteProcess, sink: EventSink
+    ) -> TurnOutcome:
+        """读 codex exec --json 的事件（0.169.0 的 codex-rs/exec/src/exec_events.rs）。"""
+        outcome = TurnOutcome(text="")
+        messages: list[str] = []
+        seen_output: dict[str, int] = {}  # 命令的输出是累计的：记下已经报过多少
+        failure: str | None = None
+        completed = False
+        last_error = ""
+        while line := await proc.stdout.readline():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(event, dict):
+                continue
+            kind = event.get("type")
+            raw_item = event.get("item")
+            item: dict[str, Any] = raw_item if isinstance(raw_item, dict) else {}
+            step = str(item.get("id") or "")
+            if kind == "thread.started":
+                thread_id = event.get("thread_id")
+                if isinstance(thread_id, str) and thread_id and thread_id != spec.native_id:
+                    # 第一回合才知道原生会话号：交给 engine 记到会话上，之后的回合用 resume
+                    await sink("native_session", {"native_id": thread_id})
+            elif kind == "item.started":
+                if item.get("type") == "command_execution" and item.get("command"):
+                    await sink(
+                        "command_started", {"command": str(item["command"])[:500], "step": step}
+                    )
+                elif item.get("type") in ("mcp_tool_call", "web_search"):
+                    name = f"{item.get('server') or ''}.{item.get('tool') or ''}".strip(".")
+                    await sink("tool_started", {"name": name or "web_search", "step": step})
+            elif kind == "item.updated":
+                if item.get("type") == "command_execution":
+                    output = str(item.get("aggregated_output") or "")
+                    fresh = output[seen_output.get(step, 0) :]
+                    seen_output[step] = len(output)
+                    if fresh:
+                        await sink("output", {"text": fresh})
+            elif kind == "item.completed":
+                if (
+                    item.get("type") == "command_execution"
+                ):  # 最后一段输出（没经 item.updated 报过的）
+                    output = str(item.get("aggregated_output") or "")
+                    fresh = output[seen_output.pop(step, 0) :]
+                    if fresh:
+                        await sink("output", {"text": fresh})
+                await self._remote_item(item, step, messages, outcome, sink)
+            elif kind == "turn.completed":
+                usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+                used_in = int((usage or {}).get("input_tokens") or 0)
+                used_out = int((usage or {}).get("output_tokens") or 0)
+                outcome.usage = {
+                    "input_tokens": used_in,
+                    "output_tokens": used_out,
+                    "total_tokens": used_in + used_out,
+                    "cached_input_tokens": int((usage or {}).get("cached_input_tokens") or 0),
+                }
+                completed = True
+            elif kind == "turn.failed":
+                error = event.get("error") if isinstance(event.get("error"), dict) else {}
+                failure = str((error or {}).get("message") or "Codex 回合失败")
+            elif kind == "error":
+                last_error = str(event.get("message") or "")
+                if last_error:  # 例如“正在重连”：让调用方在 llm_turn_get 里看得到卡在哪
+                    await sink("notice", {"text": last_error[:200]})
+        code = await proc.wait()
+        if failure is not None or not completed:
+            text = failure or last_error or proc.stderr_tail.strip()[-300:] or f"退出码 {code}"
+            text = redact(text)[:500]
+            if quota.is_quota_text(text):
+                raise DriverError(
+                    "rate_limited", text, quota=True, resets_at=quota.parse_reset(text)
+                )
+            raise DriverError(_remote_error_kind(text), f"Codex 回合失败：{text}")
+        outcome.text = messages[-1] if messages else ""
+        return outcome
+
+    @staticmethod
+    async def _remote_item(
+        item: dict[str, Any],
+        step: str,
+        messages: list[str],
+        outcome: TurnOutcome,
+        sink: EventSink,
+    ) -> None:
+        kind = item.get("type")
+        if kind in ("command_execution", "mcp_tool_call", "web_search") and step:
+            await sink("step_done", {"step": step})
+        if kind == "agent_message" and item.get("text"):
+            messages.append(str(item["text"]))
+            await sink("message", {"text": messages[-1]})
+        elif kind == "command_execution":
+            outcome.commands.append(str(item.get("command", ""))[:500])
+            await sink(
+                "command", {"command": outcome.commands[-1], "exit_code": item.get("exit_code")}
+            )
+        elif kind == "file_change":
+            paths = [
+                str(c.get("path"))
+                for c in item.get("changes") or []
+                if isinstance(c, dict) and c.get("path")
+            ]
+            outcome.files.extend(paths)
+            if paths:
+                await sink("files", {"paths": paths})
+        elif kind == "mcp_tool_call":
+            name = f"{item.get('server') or ''}.{item.get('tool') or ''}".strip(".")
+            await sink(
+                "tool",
+                {"name": name, "input": json.dumps(item.get("arguments"), ensure_ascii=False)},
+            )
+            if item.get("result") is not None or item.get("error") is not None:
+                body = item.get("error") or item.get("result")
+                await sink(
+                    "tool_result",
+                    {
+                        "name": name,
+                        "text": json.dumps(body, ensure_ascii=False),
+                        "error": item.get("error") is not None,
+                    },
+                )
+        elif kind == "web_search" and item.get("query"):
+            await sink("tool", {"name": "web_search", "input": str(item["query"])})
+        elif kind == "error" and item.get("message"):
+            await sink("notice", {"text": str(item["message"])[:200]})
 
     async def models(self, mode: Mode) -> list[ModelInfo]:
         result = await self._call("model/list", {})
@@ -455,6 +719,11 @@ class CodexDriver(Driver):
 
     # ---- 会话 ----
     async def create(self, spec: SessionSpec) -> str:
+        if spec.remote is not None:
+            # 远程会话：原生会话号要等第一回合的 thread.started 才知道
+            if spec.sandbox != "exec":
+                raise DriverError("invalid", REMOTE_EXEC_ONLY)
+            return ""
         params: dict[str, Any] = {
             "cwd": str(spec.workdir),
             "approvalPolicy": "never",
@@ -481,6 +750,8 @@ class CodexDriver(Driver):
         return {"type": "workspaceWrite", "networkAccess": spec.network}
 
     async def run_turn(self, spec: SessionSpec, text: str, sink: EventSink) -> TurnOutcome:
+        if spec.remote is not None:
+            return await self._remote_turn(spec, text, sink)
         thread_id = spec.native_id
         if not thread_id:
             raise DriverError("invalid", "会话没有 Codex 线程号")
@@ -533,6 +804,8 @@ class CodexDriver(Driver):
         """手动压缩：`thread/compact/start {threadId}`（0.169.0，不能带说明），应答是空的；
         压缩在后台做，做完报一个 contextCompaction 条目、回合结束。等到回合结束（或者压缩条目出现后
         短时间内没有别的动静）就返回。"""
+        if spec.remote is not None:
+            raise DriverError("not_supported", "远程容器里的 Codex 不能手动压缩上下文")
         thread_id = spec.native_id
         if not thread_id:
             raise DriverError("invalid", "会话没有 Codex 线程号")
@@ -713,6 +986,8 @@ class CodexDriver(Driver):
 
     async def steer(self, spec: SessionSpec, text: str) -> bool:
         """`turn/steer`（app-server v2）：要给出正在跑的回合号，应答里的回合号对得上才算收下。"""
+        if spec.remote is not None:  # codex exec 不能插话：降级成中断后合并重发
+            return False
         thread_id = spec.native_id
         turn_id = self._active.get(thread_id) if thread_id else None
         if not thread_id or not turn_id:
@@ -731,6 +1006,11 @@ class CodexDriver(Driver):
         return isinstance(answer, dict) and str(answer.get("turnId")) == turn_id
 
     async def cancel(self, spec: SessionSpec) -> None:
+        if spec.remote is not None:
+            proc = self._remote_procs.get(spec.remote.session_id)
+            if proc is not None:
+                proc.terminate()
+            return
         thread_id = spec.native_id
         turn_id = self._active.get(thread_id) if thread_id else None
         if thread_id and turn_id:

@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -21,7 +22,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
 from urllib.parse import quote, unquote
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from starlette.responses import Response
@@ -33,11 +34,12 @@ from bridge.channels import CHANNELS, FAKE_CHANNELS, SLOT_LABELS, canonical, fin
 from bridge.config import Settings, get_settings
 from bridge.drivers.base import Driver
 from bridge.drivers.cli_stream import CliStreamDriver, claude_profile, codebuddy_profile
-from bridge.drivers.codex import CodexDriver
+from bridge.drivers.codex import REMOTE_EXEC_ONLY, CodexDriver
 from bridge.drivers.fake import FakeDriver
 from bridge.engine import Caller, Engine, env_view, preview
 from bridge.errors import BridgeError
 from bridge.mcp_server import CALLER_STATE_KEY, McpRunner
+from bridge.remote import CONTAINER_RE, Gap
 from bridge.store import Store
 
 logger = logging.getLogger("bridge")
@@ -55,6 +57,8 @@ _STATUS = {
     "NOT_LOGGED_IN": 409,
     "ACCOUNT_MISMATCH": 409,
     "NOT_OWNER": 409,
+    # 远程开发容器里的会话目录由工作台经容器服务器浏览（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md）
+    "REMOTE_SESSION": 409,
     # 平台那边没有成功（连不上平台、平台拒绝、超时）：管理器自己是好的，所以不用 5xx——
     # 工作台把 5xx 当成“管理器连不上”，会把真正的原因盖住，还会计入熔断
     "UNAVAILABLE": 424,
@@ -68,7 +72,10 @@ def token_hash(token: str) -> str:
 def build_drivers(settings: Settings) -> dict[str, Driver]:
     drivers: dict[str, Driver] = {
         "openai": CodexDriver(
-            settings.codex_bin, settings.home_dir / "codex", rpc_timeout=settings.rpc_timeout
+            settings.codex_bin,
+            settings.home_dir / "codex",
+            rpc_timeout=settings.rpc_timeout,
+            secrets_dir=settings.secrets_dir,
         ),
         "claude": CliStreamDriver(
             claude_profile(settings.claude_bin),
@@ -194,6 +201,35 @@ class EnvironmentBody(_Body):
     enabled: bool = True
     # 这个环境的单回合时限（秒）；不填用管理器的设置（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.7）
     turn_timeout_seconds: int | None = Field(default=None, ge=30, le=6 * 3600)
+    # 运行位置（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md）：remote 是容器服务器上的远程开发容器，
+    # remote_container 是工作台给的容器号，remote_label 只给页面显示
+    location: Literal["local", "remote"] = "local"
+    remote_container: str | None = Field(default=None, max_length=100)
+    remote_label: str | None = Field(default=None, max_length=120)
+
+
+class RemoteResultBody(_Body):
+    ok: bool
+    data: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+
+
+class RemoteOutputBody(_Body):
+    offset: int = Field(ge=0)
+    data_b64: str = Field(max_length=2 * 1024 * 1024)
+
+
+class RemoteExitBody(_Body):
+    exit_code: int | None = None
+    state: Literal["exited", "killed", "timeout", "lost", "failed"] = "exited"
+    error: str | None = Field(default=None, max_length=4000)
+    stderr_tail: str = Field(default="", max_length=70_000)
+
+
+class RemoteLoginBody(_Body):
+    action: Literal["start", "code", "cancel"] = "start"
+    # 授权页上显示的授权码（Claude）；只转交给容器里的官方程序，不记日志
+    code: str | None = Field(default=None, max_length=4096)
 
 
 class JobBody(_Body):
@@ -261,6 +297,21 @@ def _env_config(body: EnvironmentBody) -> dict[str, Any]:
         raise BridgeError("VALIDATION_FAILED", "仓库地址只支持 https://")
     if body.branch and not re.fullmatch(r"[\w./\-]{1,200}", body.branch):
         raise BridgeError("VALIDATION_FAILED", "分支名不合法")
+    remote: dict[str, Any] = {}
+    if body.location == "remote":
+        if not body.remote_container or not CONTAINER_RE.match(body.remote_container):
+            raise BridgeError(
+                "VALIDATION_FAILED", "远程开发环境要给 remote_container（工作台的容器号）"
+            )
+        if body.mode != "dev":
+            raise BridgeError("VALIDATION_FAILED", "远程开发容器只用于开发模式")
+        if canonical(body.platform) == "codex" and body.sandbox != "exec":
+            raise BridgeError("VALIDATION_FAILED", REMOTE_EXEC_ONLY)
+        remote = {
+            "location": "remote",
+            "remote_container": body.remote_container,
+            "remote_label": " ".join((body.remote_label or "").split())[:120] or None,
+        }
     return {
         "repo_url": body.repo_url or None,
         "branch": body.branch or None,
@@ -268,6 +319,7 @@ def _env_config(body: EnvironmentBody) -> dict[str, Any]:
         "network": body.network,
         "description": body.description,
         "turn_timeout_seconds": body.turn_timeout_seconds,
+        **remote,
     }
 
 
@@ -416,6 +468,85 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not request.app.state.store.delete_environment(env_id):
             raise BridgeError("NOT_FOUND", "没有这个环境")
         return {"ok": True}
+
+    # ---- 远程开发容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 21.2 节）：只给工作台用 ----
+    @app.get("/admin/remote/ops")
+    async def admin_remote_ops(
+        request: Request,
+        _: Admin,
+        wait: Annotated[float, Query(ge=0, le=25)] = 0,
+        limit: Annotated[int, Query(ge=1, le=20)] = 20,
+    ) -> dict[str, Any]:
+        """工作台取远程操作（长轮询）。参数里带凭据和标准输入，只在这个应答里出现。"""
+        return {"ops": await engine_of(request).remote.take(wait, limit)}
+
+    @app.post("/admin/remote/ops/{op_id}/result", status_code=204)
+    async def admin_remote_result(
+        request: Request, op_id: str, body: RemoteResultBody, _: Admin
+    ) -> Response:
+        if not engine_of(request).remote.result(op_id, body.ok, body.data, body.error):
+            raise BridgeError("NOT_FOUND", "没有这个远程操作")
+        return Response(status_code=204)
+
+    @app.post("/admin/remote/procs/{proc_id}/output")
+    async def admin_remote_output(
+        request: Request, proc_id: str, body: RemoteOutputBody, _: Admin
+    ) -> Response:
+        try:
+            data = base64.b64decode(body.data_b64, validate=True)
+        except ValueError:
+            raise BridgeError("VALIDATION_FAILED", "data_b64 不是合法的 base64") from None
+        try:
+            acked = engine_of(request).remote.output(proc_id, body.offset, data)
+        except KeyError:
+            raise BridgeError("NOT_FOUND", "没有这个远程进程（已经结束或管理器重启过）") from None
+        except Gap as gap:
+            return JSONResponse(
+                {
+                    "error": {"code": "CONFLICT", "message": "中间缺了一段：从 acked 处接着发"},
+                    "acked": gap.acked,
+                },
+                status_code=409,
+            )
+        return JSONResponse({"acked": acked})
+
+    @app.post("/admin/remote/procs/{proc_id}/exit", status_code=204)
+    async def admin_remote_exit(
+        request: Request, proc_id: str, body: RemoteExitBody, _: Admin
+    ) -> Response:
+        if not engine_of(request).remote.exit(proc_id, body.model_dump()):
+            raise BridgeError("NOT_FOUND", "没有这个远程进程")
+        return Response(status_code=204)
+
+    def container_of(container: str) -> str:
+        if not CONTAINER_RE.match(container):
+            raise BridgeError("VALIDATION_FAILED", "远程容器号不合法")
+        return container
+
+    @app.get("/admin/remote/containers/{container}")
+    async def admin_remote_container(request: Request, container: str, _: Admin) -> dict[str, Any]:
+        return await engine_of(request).remote_container(container_of(container))
+
+    @app.delete("/admin/remote/containers/{container}")
+    async def admin_remote_forget(request: Request, container: str, _: Admin) -> dict[str, bool]:
+        await engine_of(request).forget_remote_container(container_of(container))
+        return {"ok": True}
+
+    @app.post("/admin/remote/containers/{container}/login/{slot}")
+    async def admin_remote_login(
+        request: Request, container: str, slot: str, body: RemoteLoginBody, _: Admin
+    ) -> dict[str, Any]:
+        return await engine_of(request).remote_login(
+            container_of(container), slot_of(request, slot), body.action, body.code
+        )
+
+    @app.get("/admin/remote/containers/{container}/login/{slot}")
+    async def admin_remote_login_state(
+        request: Request, container: str, slot: str, _: Admin
+    ) -> dict[str, Any]:
+        return engine_of(request).remote_login_state(
+            container_of(container), slot_of(request, slot)
+        )
 
     @app.get("/admin/callers")
     async def admin_callers(request: Request, _: Admin) -> dict[str, Any]:

@@ -24,7 +24,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from bridge import hooks, quota
+from bridge import hooks, quota, remote
 from bridge.drivers import progress
 from bridge.drivers.base import (
     JOBS_INSTRUCTIONS,
@@ -458,9 +458,32 @@ class CliStreamDriver(Driver):
     def _background_env(self, spec: SessionSpec) -> dict[str, str]:
         """能开管理器的后台作业时，关掉官方程序自带的后台任务（LONGRUN 5.11）：
         它们在回答结束、程序退出时会被停掉。"""
-        if spec.jobs and spec.mode == "dev" and self.profile.background_off_env:
+        jobs = spec.jobs or spec.remote is not None  # 远程会话也关（方案第 14 节）
+        if jobs and spec.mode == "dev" and self.profile.background_off_env:
             return {self.profile.background_off_env: "1"}
         return {}
+
+    # ---- 远程开发容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 6.1、9 节）----
+    def remote_credentials(self) -> dict[str, str]:
+        """随回合注入远程容器的凭据：只有 API 密钥和 Claude 的长期令牌（不会自己刷新）。"""
+        secret = self._secret()
+        name = self.profile.secret_envs.get(secret.get("method", ""))
+        return {name: str(secret["value"])} if name and secret.get("value") else {}
+
+    def _remote_env(self, spec: SessionSpec) -> dict[str, str]:
+        env = remote.remote_env(self.slot)
+        env.update(self._autocompact(spec))
+        env.update(self._background_env(spec))
+        if self.slot == "workbuddy" and spec.mode == "dev" and spec.sandbox == "exec":
+            # 帮助文本：“Isolated-sandbox full pass: CODEBUDDY_IS_SANDBOX=1”（2.184.0）；
+            # 容器本身是沙箱
+            env["CODEBUDDY_IS_SANDBOX"] = "1"
+        return env
+
+    async def version(self) -> str | None:
+        with contextlib.suppress(DriverError):
+            return remote.parse_version(await self._run_short(["--version"]))
+        return None
 
     def _save_secret(self, data: dict[str, str]) -> None:
         self._secret_file.parent.mkdir(parents=True, exist_ok=True)
@@ -822,14 +845,15 @@ class CliStreamDriver(Driver):
     async def create(self, spec: SessionSpec) -> str:
         return str(uuid.uuid4())
 
-    def _args(self, spec: SessionSpec) -> list[str]:
+    def _args(self, spec: SessionSpec, resume: bool | None = None) -> list[str]:
         # --include-partial-messages：逐字的增量（stream_event），聊天页据此边写边显示。
         # 在锁定版本的帮助文本和类型定义里核对过：Claude Code 2.1.323、CodeBuddy Code 2.184.0
         args = ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages"]
         assert spec.native_id is not None  # noqa: S101
         # 官方程序里已经有这个会话的记录就续接；按文件判断，不按回合数
-        # （失败的回合也可能已经建了会话）
-        resume = self._find_transcript(spec.native_id) is not None
+        # （失败的回合也可能已经建了会话）。远程会话由调用方先在容器里查好
+        if resume is None:
+            resume = self._find_transcript(spec.native_id) is not None
         args += ["--resume" if resume else "--session-id", spec.native_id]
         if spec.model:
             args += ["--model", spec.model]
@@ -846,9 +870,12 @@ class CliStreamDriver(Driver):
             args += ["--permission-mode", "bypassPermissions"]
             if spec.jobs:  # 能开后台作业：告诉模型用 llm-task（LONGRUN 5.5）
                 args += ["--append-system-prompt", JOBS_INSTRUCTIONS]
+        if spec.remote is not None and spec.mode == "dev" and spec.pinned:
+            # 远程会话的固定参考资料：随系统提示每回合带上（不改仓库里的记忆文件）
+            args += ["--append-system-prompt", spec.pinned]
         if spec.images:  # 带图片时提问按一条 stream-json 的用户消息从标准输入给
             args += ["--input-format", "stream-json"]
-        if spec.hooks and self.hook_script is not None:
+        if spec.hooks and spec.remote is None and self.hook_script is not None:
             # 压缩钩子：按回合经 --settings 带上（两个官方程序都有这个参数，核验记录第 1、2 节）
             args += ["--settings", hooks.settings_json(sys.executable, self.hook_script)]
         return args
@@ -879,33 +906,41 @@ class CliStreamDriver(Driver):
         """起一次官方命令行跑一个回合。manual：这一回合是手动压缩（发的是 /compact）。"""
         if not spec.native_id:
             raise DriverError("invalid", "会话没有会话号")
-        spec.workdir.mkdir(parents=True, exist_ok=True)
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                self.profile.binary,
-                *self._args(spec),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=str(spec.workdir),
-                env=self._env(
-                    {
-                        **spec.env,
-                        **self._autocompact(spec),
-                        **self._hook_env(spec),
-                        **self._background_env(spec),
-                    }
-                ),
-                limit=16 * 1024 * 1024,
-            )
-        except OSError as error:
-            raise DriverError("unavailable", f"启动 {self.profile.binary} 失败：{error}") from error
+        proc: Any
+        if spec.remote is not None:
+            proc = await self._spawn_remote(spec, text)
+        else:
+            spec.workdir.mkdir(parents=True, exist_ok=True)
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    self.profile.binary,
+                    *self._args(spec),
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    cwd=str(spec.workdir),
+                    env=self._env(
+                        {
+                            **spec.env,
+                            **self._autocompact(spec),
+                            **self._hook_env(spec),
+                            **self._background_env(spec),
+                        }
+                    ),
+                    limit=16 * 1024 * 1024,
+                )
+            except OSError as error:
+                raise DriverError(
+                    "unavailable", f"启动 {self.profile.binary} 失败：{error}"
+                ) from error
         self._procs[spec.native_id] = proc
         try:
-            assert proc.stdin and proc.stdout and proc.stderr  # noqa: S101
-            proc.stdin.write(self._stdin(spec, text))
-            await proc.stdin.drain()
-            proc.stdin.close()
+            assert proc.stdout and proc.stderr  # noqa: S101
+            if spec.remote is None:  # 远程进程的标准输入在起进程时已经一次给全
+                assert proc.stdin  # noqa: S101
+                proc.stdin.write(self._stdin(spec, text))
+                await proc.stdin.drain()
+                proc.stdin.close()
             stderr_task = asyncio.create_task(proc.stderr.read())
             outcome = TurnOutcome(text="", native_turn_id=None)
             messages: list[str] = []
@@ -958,6 +993,28 @@ class CliStreamDriver(Driver):
                 proc.kill()
                 with contextlib.suppress(ProcessLookupError):
                     await proc.wait()
+
+    async def _spawn_remote(self, spec: SessionSpec, text: str) -> remote.RemoteProcess:
+        """在远程开发容器里起这一回合的官方程序（凭据随进程注入，不落盘）。"""
+        target = spec.remote
+        hub = self.remote
+        if target is None or hub is None:
+            raise DriverError("unavailable", "这个管理器没有接上远程开发容器")
+        assert spec.native_id is not None  # noqa: S101
+        resume = await hub.transcript_exists(target.container, self.slot, spec.native_id)
+        proc: remote.RemoteProcess = await hub.spawn(
+            target.container,
+            purpose="turn",
+            platform=remote.PLATFORM_OF_SLOT[self.slot],
+            session_id=target.session_id,
+            argv=[remote.PROGRAMS[self.slot], *self._args(spec, resume)],
+            cwd=target.workdir,
+            env=self._remote_env(spec),
+            secret_env=self.remote_credentials(),
+            stdin=self._stdin(spec, text),
+            timeout_seconds=target.timeout_seconds,
+        )
+        return proc
 
     def _hook_env(self, spec: SessionSpec) -> dict[str, str]:
         if spec.hooks and self.hook_dir is not None:

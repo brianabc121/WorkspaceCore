@@ -37,11 +37,21 @@ from bridge.drivers.base import (
     DriverError,
     LoginChallenge,
     Mode,
+    RemoteTarget,
     SessionSpec,
 )
 from bridge.errors import BridgeError
 from bridge.longrun import LongRun
 from bridge.redact import mask_identity, redact
+from bridge.remote import (
+    NO_REMOTE_LOGIN,
+    PROGRAMS,
+    RECIPES,
+    RemoteHub,
+    RemoteLogins,
+    parse_workdir,
+    remote_workdir,
+)
 from bridge.store import Row, Store, message_of, new_id, usage_credits, usage_tokens
 
 logger = logging.getLogger("bridge.engine")
@@ -308,6 +318,12 @@ class Engine:
         self._activity: dict[str, TurnActivity] = {}
         # 后台作业、预约、循环（LONGRUN 第 5 节）
         self.longrun = LongRun(self)
+        # 远程开发容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md）：工作台来取远程操作、推回输出
+        self.remote = RemoteHub(store)
+        self.remote_logins = RemoteLogins(self.remote, store, self._local_identity)
+        self._local_versions: dict[str, str | None] = {}
+        for driver in drivers.values():
+            driver.remote = self.remote
 
     # ---- 设置 ----
     def setting(self, key: str) -> Any:
@@ -404,6 +420,7 @@ class Engine:
         for stale in self.store.stale_uploads(time.time() - files.STALE_UPLOAD_SECONDS):
             (self.attachment_root / stale["path"]).unlink(missing_ok=True)
             self.store.delete_attachment(stale["id"])
+        self.remote.startup()
         await self.longrun.startup()
         self._resumer = asyncio.create_task(self._resume_loop(), name="quota-resume")
         self._retainer = asyncio.create_task(self._retention_loop(), name="retention")
@@ -419,6 +436,7 @@ class Engine:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
         await self.longrun.shutdown()
+        await self.remote.shutdown()
         for driver in self.drivers.values():
             await driver.stop()
 
@@ -589,19 +607,36 @@ class Engine:
     # ---- 会话 ----
     def _spec(self, session: Row) -> SessionSpec:
         options = session["options"] or {}
+        target = self._remote_target(session)
+        # 远程会话的固定参考资料随系统提示每回合带上（不改仓库里的记忆文件）
+        pinned = session["mode"] == "chat" or target is not None
         return SessionSpec(
             mode=session["mode"],
             model=session["model"],
-            workdir=Path(session["workdir"]),
+            workdir=Path(session["workdir"]) if target is None else Path("/nonexistent"),
             sandbox=options.get("sandbox", "read_only"),
             network=bool(options.get("network", False)),
             effort=options.get("effort"),
             native_id=session["native_id"],
             turn_count=session["turn_count"],
             autocompact=self._autocompact(session["slot"]),
-            hooks=bool(self.setting("hooks_enabled")),
-            pinned=str(options.get("pinned") or "") if session["mode"] == "chat" else "",
-            jobs=self.longrun.jobs_blocked(session) is None,
+            hooks=bool(self.setting("hooks_enabled")) and target is None,
+            pinned=str(options.get("pinned") or "") if pinned else "",
+            # 远程会话里的 llm-task 还没接上（方案第 14 节）：不告诉模型用它
+            jobs=target is None and self.longrun.jobs_blocked(session) is None,
+            remote=target,
+        )
+
+    def _remote_target(self, session: Row) -> RemoteTarget | None:
+        found = parse_workdir(session.get("workdir"))
+        if found is None:
+            return None
+        container, workdir = found
+        return RemoteTarget(
+            container=container,
+            workdir=workdir,
+            session_id=session["id"],
+            timeout_seconds=self._turn_timeout(session) + 60,
         )
 
     def _turn_timeout(self, session: Row) -> int:
@@ -757,6 +792,11 @@ class Engine:
                 "sandbox": env_config.get("sandbox", "read_only"),
                 "network": bool(env_config.get("network", False)),
             }
+        container = (
+            env_config.get("remote_container") if env_config.get("location") == "remote" else None
+        )
+        if container:
+            await self.require_remote_ready(str(container), channel.slot)
         if effort:
             options["effort"] = effort
         # 固定带着的参考资料（6.3）
@@ -769,6 +809,20 @@ class Engine:
         from bridge.store import new_id
 
         session_id = new_id("bs")
+        if container:
+            return await self._create_remote_session(
+                caller,
+                channel,
+                container=str(container),
+                session_id=session_id,
+                env_config=env_config,
+                env_id=env_id,
+                options=options,
+                picked=picked,
+                effort=effort,
+                title=title,
+                request_id=request_id,
+            )
         workdir = self.settings.work_dir / session_id
         workdir.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -816,6 +870,192 @@ class Engine:
         )
         self.store.add_event(session_id, None, "created", {"by": caller.label, "model": picked})
         return session_view(session, full=True)
+
+    async def _create_remote_session(
+        self,
+        caller: Caller,
+        channel: Channel,
+        *,
+        container: str,
+        session_id: str,
+        env_config: Row,
+        env_id: str | None,
+        options: Row,
+        picked: str | None,
+        effort: str | None,
+        title: str,
+        request_id: str | None,
+    ) -> Row:
+        """远程开发容器里的会话：在容器里建工作目录、克隆仓库（工作台拼命令），原生会话号照旧由驱动给。"""
+        workdir = remote_workdir(container, session_id)
+        target = RemoteTarget(container, workdir.split(":", 2)[2], session_id)
+        spec = SessionSpec(
+            mode=channel.mode,
+            model=picked,
+            workdir=Path("/nonexistent"),
+            sandbox=options["sandbox"],
+            network=options["network"],
+            effort=effort,
+            autocompact=self._autocompact(channel.slot),
+            pinned=str(options.get("pinned") or ""),
+            remote=target,
+        )
+        try:
+            native = await self._driver(channel.slot).create(spec)
+            await self.remote.prepare(
+                container,
+                session_id,
+                target.workdir,
+                env_config.get("repo_url"),
+                env_config.get("branch"),
+                self.settings.clone_timeout,
+            )
+        except DriverError as error:
+            raise from_driver(error) from error
+        session = self.store.create_session(
+            id=session_id,
+            platform=channel.platform,
+            mode=channel.mode,
+            slot=channel.slot,
+            native_id=native or None,
+            model=picked,
+            environment_id=env_id,
+            caller_id=caller.id,
+            caller_label=caller.label,
+            title=" ".join(title.split())[:120],
+            workdir=workdir,
+            options=options,
+            request_id=request_id,
+            source=caller.source,
+        )
+        self.store.add_event(
+            session_id, None, "created", {"by": caller.label, "model": picked, "remote": container}
+        )
+        return session_view(session, full=True)
+
+    # ---- 远程开发容器：登录、版本、就绪（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 9 节）----
+    async def _local_identity(self, slot: str) -> tuple[str | None, str | None]:
+        """管理器里这个平台登记的账号：(账号的哈希, 打码后的账号)；看不到具体账号时都是 None。"""
+        account = await self.account(slot)
+        if account.get("state") != "logged_in" or not account.get("identity_label"):
+            return None, None
+        return account.get("identity_hash"), account.get("identity_label")
+
+    async def remote_platform(self, container: str, slot: str) -> Row:
+        """远程容器里这个平台能不能用。
+
+        state：injected（凭据随回合注入）/ ready / needs_login / mismatch。"""
+        driver = self._driver(slot)
+        if driver.remote_credentials():
+            return {
+                "state": "injected",
+                "detail": "管理器用 API 密钥或长期令牌登录：每个回合随进程注入，不用在容器里登录",
+                "identity": None,
+                "can_login": False,
+            }
+        row = self.store.get_remote_login(container, slot)
+        can_login = slot in RECIPES
+        hint = NO_REMOTE_LOGIN.get(slot) or "请在开发环境里点“登录”，在远程容器里登录同一个账号"
+        if row is None or row["state"] not in ("ready", "mismatch"):
+            return {
+                "state": "needs_login",
+                "detail": hint,
+                "identity": None,
+                "can_login": can_login,
+            }
+        local_hash, local_label = await self._local_identity(slot)
+        if (
+            row["state"] == "ready"
+            and row["identity_hash"]
+            and local_hash
+            and local_label
+            and row["identity_hash"] != local_hash
+        ):
+            # 管理器里换了账号（“更换账号”之后）：容器里原来登录的那个不再算数
+            self.store.save_remote_login(
+                container,
+                slot,
+                state="mismatch",
+                detail=f"容器里登录的是另一个账号（{row['identity_label']}），"
+                f"这个管理器登记的是 {local_label}：请在容器里换成同一个账号重新登录",
+            )
+            row = self.store.get_remote_login(container, slot) or row
+        return {
+            "state": row["state"],
+            "detail": row["detail"],
+            "identity": row["identity_label"],
+            "can_login": can_login,
+        }
+
+    async def require_remote_ready(self, container: str, slot: str) -> None:
+        state = await self.remote_platform(container, slot)
+        label = SLOT_LABELS.get(slot, slot)
+        if state["state"] == "mismatch":
+            raise BridgeError("ACCOUNT_MISMATCH", f"{label}（远程容器）：{state['detail']}")
+        if state["state"] == "needs_login":
+            raise BridgeError(
+                "NOT_LOGGED_IN", f"{label} 还没有在这个远程容器里登录：{state['detail']}"
+            )
+
+    async def local_version(self, slot: str) -> str | None:
+        if slot not in self._local_versions:
+            self._local_versions[slot] = await self._driver(slot).version()
+        return self._local_versions[slot]
+
+    async def check_remote_versions(self, container: str, slot: str) -> None:
+        """容器里的命令行要和管理器里的一样：输出格式按管理器的版本解析（方案 5.2）。"""
+        mine = await self.local_version(slot)
+        if not mine:
+            return  # 查不到管理器自己的版本（开发、测试环境）：不拦
+        try:
+            theirs = (await self.remote.versions(container)).get(PROGRAMS[slot])
+        except DriverError as error:
+            raise BridgeError("UNAVAILABLE", f"远程容器暂时不可用：{error.message}") from None
+        if theirs != mine:
+            self.remote.drop_versions(container)
+            raise BridgeError(
+                "UNAVAILABLE",
+                f"远程容器里的 {PROGRAMS[slot]} 是 {theirs or '没装'}，这个管理器用的是 {mine}："
+                "请在开发环境里点“更新镜像”",
+            )
+
+    async def remote_container(self, container: str) -> Row:
+        """一个远程容器在管理器这边的情况：各平台能不能用、正在进行的登录。"""
+        platforms: Row = {}
+        for slot in sorted({c.slot for c in self.channels if c.slot in PROGRAMS}):
+            if slot not in self.drivers or not self.slot_enabled(slot):
+                continue
+            view = await self.remote_platform(container, slot)
+            challenge = self.remote_logins.state(container, slot)
+            view["login"] = _challenge_row(challenge) if challenge is not None else None
+            platforms[slot] = view
+        return {"container": container, "platforms": platforms}
+
+    async def remote_login(self, container: str, slot: str, action: str, code: str | None) -> Row:
+        self._driver(slot)
+        try:
+            if action == "start":
+                challenge = await self.remote_logins.start(container, slot)
+            elif action == "code":
+                challenge = await self.remote_logins.submit_code(container, slot, code or "")
+            else:
+                await self.remote_logins.cancel(container, slot)
+                return {"login": None}
+        except DriverError as error:
+            raise from_driver(error) from error
+        return {"login": _challenge_row(challenge)}
+
+    def remote_login_state(self, container: str, slot: str) -> Row:
+        self._driver(slot)
+        challenge = self.remote_logins.state(container, slot)
+        return {"login": _challenge_row(challenge) if challenge is not None else None}
+
+    async def forget_remote_container(self, container: str) -> None:
+        """容器删掉了：取消进行中的登录，忘掉容器里的登录记录。"""
+        for slot in list(PROGRAMS):
+            await self.remote_logins.cancel(container, slot)
+        self.store.forget_remote_container(container)
+        self.remote.drop_versions(container)
 
     def _need(self, caller: Caller, scope: str) -> None:
         if not caller.can(scope):
@@ -1007,6 +1247,15 @@ class Engine:
             session_id=session["id"], statuses=("queued", "running"), limit=1000
         ):
             await self._cancel_turn(turn, session)
+        target = self._remote_target(session) if session["origin"] == "bridge" else None
+        if target is not None:
+            # 远程会话：删掉容器里的工作目录（官方程序的会话记录留在容器的配置目录里）
+            with contextlib.suppress(DriverError):
+                await self.remote.helper(
+                    target.container, "remove_session", session_id=session["id"]
+                )
+            self.store.update_session(session["id"], status="archived")
+            return
         if remote and session["native_id"]:
             with contextlib.suppress(DriverError):
                 await self._driver(session["slot"]).archive(session["native_id"])
@@ -1273,6 +1522,18 @@ class Engine:
                 )
                 return
         spec = self._spec(session)
+        if spec.remote is not None:
+            # 远程会话：容器里的命令行版本、这个平台在容器里的登录都要对（方案 5.2、第 9 节）
+            try:
+                await self.check_remote_versions(spec.remote.container, session["slot"])
+                await self.require_remote_ready(spec.remote.container, session["slot"])
+            except BridgeError as error:
+                kind = "not_logged_in" if error.code == "NOT_LOGGED_IN" else "unavailable"
+                self.store.add_event(session_id, turn_id, "failed", {"kind": kind})
+                self._finish(
+                    turn_id, status="failed", error_kind=kind, error_message=redact(error.message)
+                )
+                return
 
         text = turn["text"]
         first = self.store.user_message(turn_id)
@@ -1292,7 +1553,21 @@ class Engine:
                     if files.is_image(a["media_type"])
                 ),
             )
-            placed = self._place_files(spec.workdir, inputs)
+            try:
+                placed = (
+                    await self._place_remote_files(spec.remote, inputs)
+                    if spec.remote is not None
+                    else self._place_files(spec.workdir, inputs)
+                )
+            except DriverError as error:
+                self.store.add_event(session_id, turn_id, "failed", {"kind": error.kind})
+                self._finish(
+                    turn_id,
+                    status="failed",
+                    error_kind=error.kind,
+                    error_message=redact(f"附件没能放进远程容器：{error.message}"),
+                )
+                return
             if placed:
                 text += f"\n\n（随这条消息带来的文件已放在工作目录里：{'、'.join(placed)}）"
 
@@ -1328,6 +1603,11 @@ class Engine:
                 return
             if kind == "image":  # 模型画的图：收进附件，事件里只留名字
                 self._collect_output(session, turn_id, Path(str(payload.get("path"))), image=True)
+                return
+            if kind == "native_session":  # 第一回合才知道的原生会话号（远程 Codex）
+                native = str(payload.get("native_id") or "")
+                if native and self.store.session_by_native(session["slot"], native) is None:
+                    self.store.update_session(session_id, native_id=native)
                 return
             if kind == "compacted":  # 平台压缩了上下文：会话上记一次，内容里留一步（分隔线）
                 self._note_compaction(session_id, payload)
@@ -1406,7 +1686,7 @@ class Engine:
         if outcome.context is not None:
             fields["context"] = self._merged_context(session_id, outcome.context)
         self.store.update_session(session_id, **fields)
-        if session["mode"] == "dev":  # 开发会话里改动、新建的文件收进附件
+        if session["mode"] == "dev" and spec.remote is None:  # 开发会话里改动、新建的文件收进附件
             for path in list(dict.fromkeys(outcome.files))[: files.MAX_OUTPUT_PER_TURN]:
                 self._collect_output(session, turn_id, Path(path))
             await self._collect_patch(session, turn_id)
@@ -1847,16 +2127,24 @@ class Engine:
         )
         out = []
         for row in rows:
-            try:
-                workfiles.session_root(self.settings.work_dir, row)
-                browsable = True
-            except workfiles.FileError:
-                browsable = False
+            if parse_workdir(row.get("workdir")) is not None:
+                # 远程会话的目录在容器里，由工作台经容器服务器浏览（归档后目录已删）
+                browsable = row["status"] == "active"
+            else:
+                try:
+                    workfiles.session_root(self.settings.work_dir, row)
+                    browsable = True
+                except workfiles.FileError:
+                    browsable = False
             out.append(self.admin_session_view(row, busy) | {"browsable": browsable})
         return out
 
     def _in_workdir(self, session_id: str, action: Any, path: str) -> Any:
         session = self._required_session(session_id)
+        if parse_workdir(session.get("workdir")) is not None:
+            raise BridgeError(
+                "REMOTE_SESSION", "这个会话的工作目录在远程开发容器里，由工作台经容器服务器浏览"
+            )
         try:
             root = workfiles.session_root(self.settings.work_dir, session)
             return action(root, path)
@@ -2119,6 +2407,18 @@ class Engine:
             placed.append(f"attachments/{target.name}")
         return placed
 
+    async def _place_remote_files(self, target: RemoteTarget, inputs: list[Row]) -> list[str]:
+        """远程会话：不是图片的附件写进容器里工作目录的 attachments/ 下（图片随提问交给模型）。"""
+        items: list[tuple[str, bytes]] = []
+        for attachment in inputs:
+            if files.is_image(attachment["media_type"]):
+                continue
+            name = f"attachments/{attachment['id'][-6:]}-{attachment['name']}"
+            items.append((name, (self.attachment_root / attachment["path"]).read_bytes()))
+        if items:
+            await self.remote.put_files(target.container, target.session_id, items)
+        return [name for name, _ in items]
+
     def _collect_output(
         self, session: Row, turn_id: str, path: Path, *, image: bool = False
     ) -> None:
@@ -2238,6 +2538,7 @@ class Engine:
             try:
                 self.purge_expired()
                 self.longrun.purge_logs()
+                self.remote.purge()
             except Exception:
                 logger.exception("按保留期清理对话内容失败")
             await asyncio.sleep(RETENTION_CHECK_SECONDS)
@@ -2833,7 +3134,7 @@ class Engine:
         # 新的官方会话从空的上下文开始：用量清零
         # （窗口大小、压缩过几次留着，纪要按次数判断有没有新的压缩）
         context = {k: v for k, v in (session.get("context") or {}).items() if k != "used"}
-        self.store.update_session(session_id, native_id=native, context=context)
+        self.store.update_session(session_id, native_id=native or None, context=context)
         # 被额度打断、等着自动继续的回合：上下文已经没了，再发“继续”没有意义
         for turn in self.store.pending_resumes(session["platform"]):
             if turn["session_id"] == session_id:
@@ -3275,6 +3576,10 @@ def env_view(env: Row) -> Row:
         "network": bool(config.get("network", False)),
         "description": config.get("description", ""),
         "turn_timeout_seconds": config.get("turn_timeout_seconds"),
+        # 运行位置（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md）：local 是管理器自己的容器
+        "location": config.get("location") or "local",
+        "remote_container": config.get("remote_container"),
+        "remote_label": config.get("remote_label"),
     }
 
 
@@ -3317,6 +3622,8 @@ def session_view(session: Row, *, full: bool = False) -> Row:
         options.pop("pinned", None)
         view["options"] = options
         view["context"] = context_view(session)
+        found = parse_workdir(session.get("workdir"))
+        view["remote"] = {"container": found[0], "path": found[1]} if found else None
     return view
 
 
