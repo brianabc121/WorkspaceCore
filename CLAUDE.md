@@ -5,7 +5,9 @@
 ### 当前必须执行的协作规则
 
 人类已批准 [D-0008](.collab/decisions/D-0008-stable-pr-integration.md)，并明确要求告知 Claude 按此执行。
-开工和每次准备合并前，必须读取 [README 首页协作规则](README.md)、D-0008 与
+人类 2026-11-18 又批准了 [D-0009](.collab/decisions/D-0009-batch-integration-train.md)（D-0008 的补充：批量车次集成、测过即发布、停线），
+步骤见[版本更新执行手册](docs/guides/integration-runbook.md)。
+开工和每次准备合并前，必须读取 [README 首页协作规则](README.md)、D-0008、D-0009 与
 [执行通知 / 人工集成队列 #235](https://github.com/brianabc121/WorkspaceCore/issues/235)。
 在 #235 记录“已读并按 D-0008 执行”和集成会话 / 分支标识；发布通知不代表你已经读过。
 
@@ -19,7 +21,8 @@
 - 你的协作身份是 `claude`：所有命令写 `python3 scripts/collab.py <命令> --as claude`。
 - 云端会话会分配一个 `claude/...` 分支，它就是你本次的工作分支；`start`/`handoff` 会自动把它记进任务的 `branch` 字段。
 - 完成任务后创建 PR：标题 `[T-xxxx] 简述`，正文按 PR 模板填写；订阅事件、固定验证提交，准备就绪后在 #235 排队。
-- 合并按 D-0008：只有当前登记的集成会话领取窗口，检查最终候选及相关必需结果后用 merge commit 发布，并验证必要的主干检查、释放窗口。
+- 合并按 D-0008 / D-0009：只有当前登记的集成会话领取窗口，把已就绪的 PR 组成车次跑一次全套 CI，用 merge commit 发布；
+  main 的内容就是测过的内容时立即释放窗口，main 的全套检查在后台跑，变红就停线。作者的 PR 上车后不再推送。
   其他 PR 可继续开发，不能插队改变正在验证的 main；未授权的人类例外仍需决定，已获授权事项不重复询问。
 - Codex 的 PR 默认由 Claude 审查；本次人类授权的规则启动发布例外见 D-0008。意见留在对应行，不往 Codex 分支推送；有阻塞问题交还作者。
 - Docker 只用本会话自己的环境，不与 codex 共用同一个 Docker daemon（D-0006）；不停止或删除不认识的容器、网络与数据卷。
