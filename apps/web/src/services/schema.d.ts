@@ -13584,7 +13584,7 @@ export interface components {
             image?: string | null;
             /**
              * Image Kind
-             * @description builtin：内置“大模型开发环境”；template：容器服务器上的模板再加一层命令行；custom：自定义镜像再加一层命令行（要求 glibc、有 /bin/sh 和 setsid）
+             * @description builtin：内置“大模型开发环境”；template：容器服务器上的模板再加一层命令行；custom：自定义镜像再加一层命令行（要求 glibc、有 /bin/sh；缺 coreutils、findutils、util-linux 里的基础命令时，构建时用镜像自带的包管理器补装）
              * @default builtin
              * @enum {string}
              */

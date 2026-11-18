@@ -45,9 +45,47 @@ BUILTIN_DESCRIPTION = (
 )
 
 
+# 托管进程的外壳（wc、tail、head、mv、mkfifo、setsid）、辅助命令（timeout、date）、文件浏览
+# （realpath、stat、base64、find -printf）要用的基础命令。内置镜像里都有；自定义镜像或模板的基础镜像
+# 缺了，构建时用它自带的包管理器补装：只装缺的那几个包（例如 ubi-minimal 自带 coreutils-single，
+# 再装 coreutils 会冲突）。装完再查一遍，还缺就让构建失败、写明原因（人类 2026-11-18 要求）。
+BASE_TOOLS = (
+    "timeout", "realpath", "stat", "base64", "head", "tail", "wc", "mv", "date", "mkfifo",
+    "setsid", "find",
+)  # fmt: skip
+TOOLS_SCRIPT = (
+    "set -e; "
+    "missing() { m=; for c in " + " ".join(BASE_TOOLS) + "; do "
+    'command -v "$c" >/dev/null 2>&1 || m="$m $c"; done; '
+    "find / -maxdepth 0 -printf '' >/dev/null 2>&1 || m=\"$m find-printf\"; echo $m; }; "
+    'miss=$(missing); if [ -z "$miss" ]; then exit 0; fi; '
+    "pkgs=; for c in $miss; do case $c in "
+    "find|find-printf) p=findutils;; setsid) p=util-linux;; *) p=coreutils;; esac; "
+    'case " $pkgs " in *" $p "*) ;; *) pkgs="$pkgs $p";; esac; done; '
+    'echo "基础镜像缺这些命令：$miss；补装：$pkgs"; '
+    "if command -v apt-get >/dev/null 2>&1; then apt-get update "
+    "&& apt-get install -y --no-install-recommends $pkgs && rm -rf /var/lib/apt/lists/*; "
+    "elif command -v dnf >/dev/null 2>&1; then dnf install -y $pkgs && dnf clean all; "
+    "elif command -v microdnf >/dev/null 2>&1; then "
+    "microdnf install -y $pkgs && microdnf clean all; "
+    "elif command -v yum >/dev/null 2>&1; then yum install -y $pkgs && yum clean all; "
+    "elif command -v zypper >/dev/null 2>&1; then zypper -n install $pkgs && zypper clean -a; "
+    "elif command -v apk >/dev/null 2>&1; then apk add --no-cache $pkgs; "
+    'else echo "没有能补装的包管理器（apt-get、dnf、microdnf、yum、zypper、apk），'
+    '请换一个带这些命令的基础镜像" >&2; exit 1; fi; '
+    'left=$(missing); if [ -n "$left" ]; then echo "补装之后还缺：$left" >&2; exit 1; fi'
+)
+
+
 def derived_steps(cli_image: str) -> list[str]:
-    """在别的镜像上加一层命令行：从内置镜像拷整个命令行目录（自带 Node 运行时）。"""
-    return [f"COPY --from={cli_image} {CLI_DIR} {CLI_DIR}", f"ENV PATH={PATH_ENV}"]
+    """在别的镜像上加一层命令行：先补装缺的基础命令（用 root 装；容器照常按设定的用户运行），
+    再从内置镜像拷整个命令行目录（自带 Node 运行时）。"""
+    return [
+        "USER root",
+        f"RUN {TOOLS_SCRIPT}",
+        f"COPY --from={cli_image} {CLI_DIR} {CLI_DIR}",
+        f"ENV PATH={PATH_ENV}",
+    ]
 
 
 # 资源预设（方案 5.3）

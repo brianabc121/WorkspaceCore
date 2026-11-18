@@ -19,6 +19,7 @@ import importlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import uuid
@@ -587,3 +588,79 @@ async def test_remote_environment_end_to_end(rig: Rig) -> None:
     deleted = await rig.api("DELETE", f"/bridges/{rig.bridge_id}/containers/{container_id}")
     assert deleted.status_code == 204, deleted.text
     assert version >= 1
+
+
+# ---- 派生镜像补装基础命令（人类 2026-11-18：“可以 给我安装上”）----
+
+
+def _tools_env(tmp_path: Path, drop: set[str], manager: str | None, fixes: bool) -> Path:
+    """一个只有指定命令的 PATH：drop 里的命令故意不放；manager 是假的包管理器（记下参数，
+    fixes=True 时把缺的命令补上）；rm 也是假的，免得测试动到本机的 /var/lib/apt/lists。"""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    for name in cfg.BASE_TOOLS:
+        real = shutil.which(name)
+        if name not in drop and real:
+            (bin_dir / name).symlink_to(real)
+    log = tmp_path / "calls.log"
+    (bin_dir / "rm").write_text(f'#!/bin/sh\necho "rm $*" >> "{log}"\n')
+    if manager is not None:
+        restore = "".join(
+            f'"{shutil.which("ln")}" -sf "{shutil.which(name)}" "{bin_dir}/{name}"\n'
+            for name in sorted(drop)
+        )
+        (bin_dir / manager).write_text(
+            f'#!/bin/sh\necho "{manager} $*" >> "{log}"\n'
+            + (f'case "$*" in *install*) {restore};; esac\n' if fixes else "")
+        )
+    for path in bin_dir.iterdir():
+        if not path.is_symlink():
+            path.chmod(0o755)
+    return bin_dir
+
+
+def _run_tools(bin_dir: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - 跑工作台自己写死的脚本
+        ["/bin/sh", "-c", cfg.TOOLS_SCRIPT],
+        env={"PATH": str(bin_dir)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+
+def test_derived_images_install_only_the_missing_base_tools(tmp_path: Path) -> None:
+    steps = cfg.derived_steps("myworkspace/tpl-0123:1")
+    assert steps[0] == "USER root" and steps[1] == f"RUN {cfg.TOOLS_SCRIPT}"
+    assert steps[2].startswith("COPY --from=myworkspace/tpl-0123:1 ")
+
+    # 都有：什么也不装
+    done = _run_tools(_tools_env(tmp_path / "all", set(), "apt-get", fixes=True))
+    assert done.returncode == 0, done.stderr
+    assert not (tmp_path / "all" / "calls.log").exists()
+
+    # 缺 timeout 和 setsid：只装 coreutils、util-linux，装完再查一遍
+    done = _run_tools(_tools_env(tmp_path / "apt", {"timeout", "setsid"}, "apt-get", fixes=True))
+    assert done.returncode == 0, done.stderr
+    calls = (tmp_path / "apt" / "calls.log").read_text().splitlines()
+    assert calls[:2] == [
+        "apt-get update",
+        "apt-get install -y --no-install-recommends coreutils util-linux",
+    ]
+    assert len(calls) == 3 and calls[2].startswith("rm -rf /var/lib/apt/lists/")
+
+    # dnf 系：缺 find 只装 findutils（不碰 coreutils，免得和 coreutils-single 冲突）
+    done = _run_tools(_tools_env(tmp_path / "dnf", {"find"}, "microdnf", fixes=True))
+    assert done.returncode == 0, done.stderr
+    calls = (tmp_path / "dnf" / "calls.log").read_text().splitlines()
+    assert calls == ["microdnf install -y findutils", "microdnf clean all"]
+
+    # 没有包管理器：构建失败，写明缺什么
+    done = _run_tools(_tools_env(tmp_path / "none", {"timeout"}, None, fixes=False))
+    assert done.returncode == 1 and "没有能补装的包管理器" in done.stderr
+    assert "timeout" in done.stdout
+
+    # 包管理器“装了”但还是没有：也失败
+    done = _run_tools(_tools_env(tmp_path / "broken", {"realpath"}, "apt-get", fixes=False))
+    assert done.returncode == 1 and "补装之后还缺：realpath" in done.stderr
