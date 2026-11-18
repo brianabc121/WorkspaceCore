@@ -384,6 +384,16 @@ async function main() {
     const offered = (await form.locator('.lb-plat-card').allInnerTexts()).map((t) => t.trim())
     check(offered.join() === 'Claude,CodeBuddy', `1 号新增环境时只应能选 Claude / CodeBuddy：${offered}`)
     await form.getByRole('radio', { name: 'Claude' }).check()
+    // 运行位置（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 10.1）：默认 MCP 管理器容器；选云端远程容器时展开“远程容器”一节，
+    // 访问权限默认“可执行命令”，没有“允许联网”开关；这套验收环境没有容器服务器，写明先去添加一台
+    await form.getByRole('radio', { name: /MCP 管理器容器/ }).isChecked().then((on) => check(on, '运行位置默认应是 MCP 管理器容器'))
+    await form.getByRole('radio', { name: /云端远程容器/ }).check()
+    const remoteSection = form.getByRole('region', { name: '远程容器' })
+    await remoteSection.waitFor()
+    await remoteSection.getByText(/容器服务器/).first().waitFor()
+    check((await form.getByLabel('访问权限').inputValue()) === 'exec', '远程容器的访问权限默认应是“可执行命令”')
+    check((await form.getByText('允许联网').count()) === 0, '远程容器不显示“允许联网”开关（网络在容器上设）')
+    await form.getByRole('radio', { name: /MCP 管理器容器/ }).check()
     await form.getByLabel('访问权限').selectOption({ label: '可执行命令' })
     await form.getByRole('note').filter({ hasText: '没有操作系统级沙箱' }).waitFor()
     await form.getByLabel('访问权限').selectOption({ label: '可写工作区' })
@@ -406,7 +416,7 @@ async function main() {
     await page.getByRole('form', { name: '修改开发环境' }).getByRole('button', { name: '删除环境' }).click()
     await page.getByText('已删除环境「验收环境」。').waitFor()
     await page.getByText('还没有开发环境。').waitFor()
-    step('开发环境：新增在弹窗里，平台只能选 1 号控制的 Claude / CodeBuddy；“可执行命令”有风险提示；非 https 的仓库地址被拦下；新增后列出（还没有会话），在“环境设置”里删除后消失')
+    step('开发环境：新增在弹窗里，平台只能选 1 号控制的 Claude / CodeBuddy；运行位置默认 MCP 管理器容器，选云端远程容器时展开远程容器一节、访问权限默认可执行命令；“可执行命令”有风险提示；非 https 的仓库地址被拦下；新增后列出（还没有会话），在“环境设置”里删除后消失')
 
     // ---------------------------------------------------------------- 会话
     await tab(page, '会话').click()
