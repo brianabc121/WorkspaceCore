@@ -2,8 +2,8 @@
 import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { CheckCircle2, ChevronDown, CircleAlert, CircleDashed, CodeXml, FilePlus2, Info, LoaderCircle, MessageSquare, Minimize2, X } from '@lucide/vue'
-import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, credits, originName, platformName, quotaKind, recentUse, seconds, sourceTasks, type Quota, type QuotaWindow } from '../api'
-import { DIGEST_REASON, DIGEST_STATE, TURN_KIND, TURN_STATUS, contextText, ownerText, turnTime, type ChatDigest, type ChatMessage, type ChatSession } from './chatApi'
+import { CHAT_NO_TOOLS, MODES, NO_QUOTA, SANDBOX, credits, originName, platformName, quotaKind, recentUse, resetText, seconds, sourceTasks, type Quota, type QuotaWindow } from '../api'
+import { DIGEST_REASON, DIGEST_STATE, TURN_KIND, TURN_STATUS, contextText, ownerText, sessionState, turnTime, type ChatDigest, type ChatMessage, type ChatSession } from './chatApi'
 import ChatPlatformIcon from './ChatPlatformIcon.vue'
 
 // 会话详情（效果图第二张）：“概览”里是会话（平台与用法）、开发环境、上下文用量、这个平台的账号额度、会话纪要（开关）、基本信息，
@@ -24,7 +24,8 @@ const turnIcon = (status?: string | null) => (status === 'completed' ? CheckCirc
 // 出处：智能体建这个会话时正在执行的任务（工作台记的，不保证就是引起这个会话的那一个）
 const tasks = computed(() => sourceTasks(props.session.source))
 const sandbox = (id: string) => (SANDBOX as Record<string, string>)[id] ?? id
-const state = computed(() => (props.session.status === 'archived' ? { key: 'archived', text: '已归档' } : props.session.busy ? { key: 'busy', text: '正在回答' } : { key: 'active', text: '进行中' }))
+// 状态和会话列表里的一样：回合在回答或排队时“进行中”，做完了“已完成”（T-0288：原来没在回答也写“进行中”）
+const state = computed(() => sessionState(props.session))
 const external = computed(() => props.session.origin === 'external')
 const mode = computed(() => `${MODES[props.session.mode] ?? props.session.mode}模式`)
 const env = computed(() => props.session.environment)
@@ -47,13 +48,6 @@ function usedText(w: QuotaWindow) {
   if (w.reset_passed) return '已过重置时间'
   const n = used(w)
   return n == null ? (w.status === 'exceeded' ? '已用完' : '没有给出用量') : `已用 ${n}%`
-}
-function resetText(at: number, now = new Date()) {
-  const when = new Date(at * 1000), pad = (n: number) => String(n).padStart(2, '0')
-  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
-  const diff = Math.round((day(when) - day(now)) / 86400000)
-  const date = diff === 0 ? '今日' : diff === 1 ? '明日' : `${when.getMonth() + 1}月${when.getDate()}日`
-  return `${date} ${pad(when.getHours())}:${pad(when.getMinutes())} 重置`
 }
 // token 数：10 万以内留一位小数（29.7k），更多的取整
 function fine(n: number) {
@@ -124,7 +118,7 @@ const recent = computed(() => {
         <div v-for="w in quota.windows" v-else :key="w.kind" class="lc-quota-row">
           <div class="lc-quota-top"><b>{{ windowName(w.kind) }}</b><span>{{ usedText(w) }}</span></div>
           <span class="lc-bar" :class="{ 'is-warn': (used(w) ?? 0) >= 80 }" aria-hidden="true"><span :style="{ width: `${used(w) ?? 0}%` }" /></span>
-          <span class="lc-sec-note">{{ w.resets_at ? resetText(w.resets_at) : '平台没有给出重置时间' }}</span>
+          <span class="lc-sec-note">{{ resetText(w.resets_at) }}</span>
         </div>
         <p class="lc-sec-note lc-sec-info" :title="recentUse(quota)"><Info aria-hidden="true" />{{ recent }}</p>
       </section>

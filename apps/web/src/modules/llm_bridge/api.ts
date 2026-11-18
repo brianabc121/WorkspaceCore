@@ -1,4 +1,4 @@
-import { computed, type Ref } from 'vue'
+import { computed, ref, type Ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError, dataOf, errorMessage, type Schema } from '../../services/api'
@@ -25,6 +25,10 @@ export type LoginBody = Schema['LlmBridgeLoginIn']
 export type LoginMethod = LoginBody['method']
 export type LoginState = Schema['LlmBridgeLoginOut']
 export type Environment = Schema['LlmBridgeEnvironmentOut']
+/** 开发会话工作目录里的文件（T-0289） */
+export type EnvSession = Schema['LlmBridgeEnvSessionOut']
+export type WorkEntry = Schema['LlmBridgeFileEntryOut']
+export type WorkFile = Schema['LlmBridgeFileOut']
 export type EnvironmentBody = Schema['LlmBridgeEnvironmentIn']
 export type Grant = Schema['LlmBridgeGrantOut']
 export type IndexSession = Schema['LlmBridgeIndexSessionOut']
@@ -125,6 +129,15 @@ export function quotaUsage(w: QuotaWindow) {
   const used = Math.min(100, Math.max(0, Math.round(w.used_percent)))
   return `已用 ${used}%，剩余 ${100 - used}%`
 }
+/** 额度什么时候重置：“今日 02:49 重置”“明日 …”“11月20日 …”；平台没给时照实写（会话详情、账号卡片共用） */
+export function resetText(at: number | null | undefined, now = new Date()) {
+  if (!at) return '平台没有给出重置时间'
+  const when = new Date(at * 1000), pad = (n: number) => String(n).padStart(2, '0')
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const diff = Math.round((day(when) - day(now)) / 86400000)
+  const date = diff === 0 ? '今日' : diff === 1 ? '明日' : `${when.getMonth() + 1}月${when.getDate()}日`
+  return `${date} ${pad(when.getHours())}:${pad(when.getMinutes())} 重置`
+}
 /** 平台的官方程序不给额度时（CodeBuddy）页面上的说明：不显示猜的数字 */
 export const NO_QUOTA = '这个平台的官方程序不提供剩余积分和重置时间（CodeBuddy 按积分计费），这里显示不了；每个回合消耗的积分在回答下面，剩余积分请到平台官网的账号页面查看。'
 /** 积分：最多两位小数，不带多余的 0 */
@@ -133,6 +146,11 @@ export const credits = (n: number) => n.toLocaleString(undefined, { maximumFract
 export function recentUse(quota: { tokens_5h: number; credits_5h?: number | null }) {
   const spent = typeof quota.credits_5h === 'number' ? `、消耗 ${credits(quota.credits_5h)} 积分` : ''
   return `最近 5 小时经这个管理器用掉 ${quota.tokens_5h.toLocaleString()} 个 token${spent}（管理器自己记的，不含别处用的）。`
+}
+/** 账号卡片底部的短写法：“近 5 小时 · 17,052 token”（报积分的平台再加积分）；完整说明放在悬停提示里（recentUse） */
+export function recentShort(quota: { tokens_5h: number; credits_5h?: number | null }) {
+  const spent = typeof quota.credits_5h === 'number' ? ` · ${credits(quota.credits_5h)} 积分` : ''
+  return `近 5 小时 · ${quota.tokens_5h.toLocaleString()} token${spent}`
 }
 /** 一段时间有多长：秒数 → “45 秒”“3 分 20 秒”“1 小时 5 分” */
 export function duration(total: number) {
@@ -198,6 +216,25 @@ export function useLlmBridge(scope: string) {
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/status', { params: at(id.value!), signal })) }),
     useEnvironments: (id: Ref<string>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'environments')), enabled: computed(active),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/environments', { params: at(id.value), signal })).environments }),
+    // 开发会话工作目录里的文件（T-0289）：环境下的会话、文件夹的内容、文件的预览（已脱敏）；只读
+    useEnvSessions: (id: Ref<string>, env: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'env-sessions', env.value)), enabled: computed(() => active() && !!env.value),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/environments/{env_id}/sessions', { params: { header, path: { bridge_id: id.value, env_id: env.value! } }, signal })).sessions }),
+    useWorkFiles: (id: Ref<string>, session: Ref<string | null>, path: Ref<string>, enabled: Ref<boolean> = ref(true)) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'work-files', session.value, path.value)), enabled: computed(() => active() && !!session.value && enabled.value),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files', { params: { header, path: { bridge_id: id.value, session_id: session.value! }, query: { path: path.value } }, signal })) }),
+    useWorkFile: (id: Ref<string>, session: Ref<string | null>, path: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'work-file', session.value, path.value)), enabled: computed(() => active() && !!session.value && path.value != null),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files/content', { params: { header, path: { bridge_id: id.value, session_id: session.value! }, query: { path: path.value! } }, signal })) }),
+    /** 下载原文件（要带工作空间请求头，所以不能直接当链接用）；工作台会记一条审计 */
+    async workFileBlob(id: string, session: string, path: string): Promise<Blob> {
+      const url = `${window.location.origin}/api/v1/llm_bridge/bridges/${encodeURIComponent(id)}/sessions/${encodeURIComponent(session)}/files/download?${new URLSearchParams({ path })}`
+      let response: Response
+      try { response = await fetch(new Request(url, { credentials: 'same-origin', headers: header })) } catch { throw new ApiError(0, 'NETWORK_ERROR', '网络连接失败') }
+      if (!response.ok) {
+        let detail: Partial<Schema['ErrorBody']> = {}
+        try { detail = ((await response.json()) as Schema['ErrorResponse']).error ?? {} } catch { /* 网关返回的不是 JSON */ }
+        throw new ApiError(response.status, detail.code ?? 'HTTP_ERROR', detail.message ?? '下载失败', detail.request_id ?? null)
+      }
+      return response.blob()
+    },
     useSessions: (id: Ref<string>, offset: Ref<number>, limit: number) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'sessions', offset.value, limit)), enabled: computed(active),
       queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions', { params: { ...at(id.value), query: { limit, offset: offset.value } }, signal })) }),
     useTurns: (id: Ref<string>, session: Ref<string | null>) => useQuery({ queryKey: computed(() => key(user, scope, 'bridge', id.value, 'turns', session.value)), enabled: computed(() => active() && !!session.value),

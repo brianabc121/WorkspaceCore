@@ -3573,6 +3573,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/environments/{env_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 用这个开发环境建的会话（admin；最近活动的在前） */
+        get: operations["llm_bridge_environment_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/quota": {
         parameters: {
             query?: never;
@@ -3645,6 +3662,60 @@ export interface paths {
          * @description sync=true 时先把官方程序里有、会话桥没登记的会话登记进来。
          */
         get: operations["llm_bridge_list_sessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 会话工作目录里一个文件夹的内容（admin）
+         * @description 只浏览管理器建的会话目录；不能跳出工作目录。官方程序里同步来的会话 422。
+         */
+        get: operations["llm_bridge_session_files"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 预览会话工作目录里的一个文件（admin；开头 512 KB，已脱敏） */
+        get: operations["llm_bridge_session_file"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 下载会话工作目录里的一个文件（admin；原文件，最多 50 MB，记审计） */
+        get: operations["llm_bridge_session_file_download"];
         put?: never;
         post?: never;
         delete?: never;
@@ -12184,6 +12255,51 @@ export interface components {
              */
             enabled: boolean;
         };
+        /** LlmBridgeEnvSessionList */
+        LlmBridgeEnvSessionList: {
+            /** Sessions */
+            sessions: components["schemas"]["LlmBridgeEnvSessionOut"][];
+        };
+        /** LlmBridgeEnvSessionOut */
+        LlmBridgeEnvSessionOut: {
+            /**
+             * Browsable
+             * @description 工作目录还在、是管理器建的：能浏览里面的文件
+             * @default false
+             */
+            browsable: boolean;
+            /**
+             * Busy
+             * @description 有回合正在回答或排队
+             * @default false
+             */
+            busy: boolean;
+            /** Created At */
+            created_at: number;
+            /** Mode */
+            mode: string;
+            /** Model */
+            model: string | null;
+            /** Origin */
+            origin: string;
+            /** Owner */
+            owner: string | null;
+            /** Platform */
+            platform: string;
+            /** Session Id */
+            session_id: string;
+            /** Status */
+            status: string;
+            /** Title */
+            title: string;
+            /**
+             * Turns
+             * @default 0
+             */
+            turns: number;
+            /** Updated At */
+            updated_at: number;
+        };
         /** LlmBridgeEnvironmentIn */
         LlmBridgeEnvironmentIn: {
             /** Branch */
@@ -12255,6 +12371,78 @@ export interface components {
             repo_url: string | null;
             /** Sandbox */
             sandbox: string;
+        };
+        /** LlmBridgeFileEntryOut */
+        LlmBridgeFileEntryOut: {
+            /**
+             * Kind
+             * @description dir 文件夹；file 文件；link 指向工作目录以外的符号链接（打不开）
+             * @enum {string}
+             */
+            kind: "dir" | "file" | "link";
+            /**
+             * Modified
+             * @description 修改时间（Unix 秒）
+             */
+            modified: number;
+            /** Name */
+            name: string;
+            /**
+             * Size
+             * @description 文件的字节数；文件夹为空
+             */
+            size?: number | null;
+        };
+        /** LlmBridgeFileList */
+        LlmBridgeFileList: {
+            /**
+             * Entries
+             * @description 文件夹在前，按名字排
+             */
+            entries: components["schemas"]["LlmBridgeFileEntryOut"][];
+            /**
+             * Path
+             * @description 相对工作目录的路径；根目录为空
+             */
+            path: string;
+            /**
+             * Total
+             * @description 这个文件夹里一共有几项（只列前 1000 项）
+             */
+            total: number;
+        };
+        /** LlmBridgeFileOut */
+        LlmBridgeFileOut: {
+            /**
+             * Binary
+             * @description 二进制或不是 UTF-8 的文字：不给内容
+             */
+            binary: boolean;
+            /**
+             * Downloadable
+             * @description 不超过下载上限（50 MB）
+             */
+            downloadable: boolean;
+            /** Media Type */
+            media_type: string;
+            /** Modified */
+            modified: number;
+            /** Name */
+            name: string;
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+            /**
+             * Text
+             * @description 开头一段文字，已脱敏（看起来像密钥、令牌的换成 ***）
+             */
+            text: string;
+            /**
+             * Truncated
+             * @description 文件比预览长：只给了开头一段（512 KB）
+             */
+            truncated: boolean;
         };
         /** LlmBridgeGrantIn */
         LlmBridgeGrantIn: {
@@ -37898,6 +38086,77 @@ export interface operations {
             };
         };
     };
+    llm_bridge_environment_sessions: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                env_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeEnvSessionList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_bridge_bridge_quota: {
         parameters: {
             query?: {
@@ -38166,6 +38425,228 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LlmBridgeSessionList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_session_files: {
+        parameters: {
+            query?: {
+                /** @description 相对会话工作目录的路径；根目录不填 */
+                path?: string;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeFileList"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_session_file: {
+        parameters: {
+            query: {
+                /** @description 相对会话工作目录的路径；根目录不填 */
+                path: string;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeFileOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_session_file_download: {
+        parameters: {
+            query: {
+                /** @description 相对会话工作目录的路径；根目录不填 */
+                path: string;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 原文件，按附件下载 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
                 };
             };
             /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */

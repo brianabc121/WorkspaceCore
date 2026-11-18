@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { ArrowLeft, Plus, X } from '@lucide/vue'
 import { ApiError } from '../../../services/api'
 import { MODES, SANDBOX, bridgeError, platformName, type Bridge, type LlmBridgeApi, type Platform } from '../api'
-import { GROUP_TARGETS, chatError, newRequestId, platformChoices, type ChatTarget, type LlmChatApi } from './chatApi'
+import { GROUP_TARGETS, chatError, effortName, newRequestId, platformChoices, type ChatTarget, type LlmChatApi } from './chatApi'
 import ChatLocalFiles from './ChatLocalFiles.vue'
 import { uploadAll, useLocalFiles } from './useLocalFiles'
 
@@ -16,8 +16,9 @@ interface Chosen extends ChatTarget { key: number; label: string }
 const targets = ref<Chosen[]>([])
 let nextKey = 1, touched = false
 const nameOf = (id: string) => props.bridges.find(b => b.id === id)?.name ?? '已删除的管理器'
-const label = (t: ChatTarget) => `${platformName(t.platform)} · ${t.mode === 'dev' ? '开发 · ' : ''}${t.model || '默认模型'} · ${nameOf(t.bridge_id)}`
-const same = (a: ChatTarget, b: ChatTarget) => a.bridge_id === b.bridge_id && a.platform === b.platform && a.mode === b.mode && (a.model ?? '') === (b.model ?? '') && (a.environment ?? '') === (b.environment ?? '')
+// 推理强度也写上、也算进“是不是同一个”：同一个模型可以用不同的强度同问（T-0288）
+const label = (t: ChatTarget) => `${platformName(t.platform)} · ${t.mode === 'dev' ? '开发 · ' : ''}${t.model || '默认模型'}${t.effort ? ` · ${effortName(t.effort)}` : ''} · ${nameOf(t.bridge_id)}`
+const same = (a: ChatTarget, b: ChatTarget) => a.bridge_id === b.bridge_id && a.platform === b.platform && a.mode === b.mode && (a.model ?? '') === (b.model ?? '') && (a.effort ?? '') === (b.effort ?? '') && (a.environment ?? '') === (b.environment ?? '')
 
 // ---- 添加一个模型 ----
 const manager = ref(props.managerId)
@@ -148,7 +149,7 @@ async function submit() {
         </div>
         <div v-if="efforts.length" class="form-field">
           <label for="lc-pick-effort">推理强度</label>
-          <select id="lc-pick-effort" v-model="effort"><option value="">默认</option><option v-for="e in efforts" :key="e" :value="e">{{ e }}</option></select>
+          <select id="lc-pick-effort" v-model="effort"><option value="">默认</option><option v-for="e in efforts" :key="e" :value="e">{{ effortName(e) }}</option></select>
         </div>
         <div v-if="mode === 'dev'" class="form-field">
           <label for="lc-pick-env">开发环境</label>

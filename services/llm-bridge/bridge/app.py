@@ -19,10 +19,10 @@ import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
@@ -541,6 +541,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             filename=row["name"],
             content_disposition_type="inline" if inline else "attachment",
             headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+        )
+
+    # 开发会话工作目录里的文件（T-0289）：只读；下载给原文件，太大的不给
+    @app.get("/admin/environments/{env_id}/sessions")
+    async def admin_environment_sessions(
+        request: Request, env_id: str, _: Admin, limit: int = 50
+    ) -> dict[str, Any]:
+        return {"sessions": engine_of(request).environment_sessions(env_id, limit)}
+
+    @app.get("/admin/sessions/{session_id}/files")
+    async def admin_session_files(
+        request: Request, session_id: str, _: Admin, path: str = ""
+    ) -> dict[str, Any]:
+        return engine_of(request).work_files(session_id, path)
+
+    @app.get("/admin/sessions/{session_id}/files/content", response_model=None)
+    async def admin_session_file(
+        request: Request, session_id: str, _: Admin, path: str, download: bool = False
+    ) -> dict[str, Any] | StreamingResponse:
+        engine = engine_of(request)
+        if not download:
+            return engine.work_file(session_id, path)
+        # 从检查时打开的同一个文件发送，不按路径重新打开（T-0289 审查：防止中途换成指出去的链接）
+        found = engine.work_file_download(session_id, path)
+        quoted = quote(found.name)
+        disposition = (
+            f"attachment; filename*=utf-8''{quoted}"
+            if quoted != found.name
+            else f'attachment; filename="{found.name}"'
+        )
+        return StreamingResponse(
+            found.chunks(),
+            media_type="application/octet-stream",
+            headers={
+                "Content-Length": str(found.size),
+                "Content-Disposition": disposition,
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+            },
         )
 
     @app.get("/admin/sessions/{session_id}/queue")

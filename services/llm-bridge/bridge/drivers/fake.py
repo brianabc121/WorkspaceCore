@@ -72,7 +72,11 @@ class FakeDriver(Driver):
         return AccountStatus(self.identity is not None, self.identity, "api_key")
 
     async def models(self, mode: Mode) -> list[ModelInfo]:
-        return [ModelInfo("fake-1", "Fake 1", default=True), ModelInfo("fake-2", "Fake 2")]
+        # fake-2 有推理强度（校验推理强度用）
+        return [
+            ModelInfo("fake-1", "Fake 1", default=True),
+            ModelInfo("fake-2", "Fake 2", efforts=("low", "high")),
+        ]
 
     async def create(self, spec: SessionSpec) -> str:
         native = str(uuid.uuid4())

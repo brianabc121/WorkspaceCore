@@ -1260,3 +1260,59 @@ async def test_chat_only_grant_stays_away_from_codex_dev_sessions(rig: Rig) -> N
         await call(env, former, "llm_bridge_session_create", {**dev_args, "request_id": "d3"})
     )
     assert (made_dev["platform"], made_dev["mode"]) == ("codex", "dev")
+
+
+async def test_dev_session_files_can_be_browsed_previewed_and_downloaded(rig: Rig) -> None:
+    """开发环境里浏览会话的工作目录（T-0289）：admin 能看文件夹和文件，预览脱敏；
+    下载给原文件并记审计；跳不出工作目录；官方程序里同步来的会话不能浏览。"""
+    made = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/environments",
+        json={"platform": "claude", "name": "仓库", "sandbox": "workspace_write"},
+    )
+    assert made.status_code == 201, made.text
+    env_id = made.json()["id"]
+    engine = rig.bridge_app.state.engine
+    caller = importlib.import_module("bridge.engine").Caller("u-1", "管理员", frozenset({"write"}))
+    session = await engine.create_session(caller, platform="claude", mode="dev", environment=env_id)
+    session_id = session["session_id"]
+    workdir = Path(engine.store.get_session(session_id)["workdir"])
+    secret = "sk-" + "Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0Fe9Dc8"
+    (workdir / "docs").mkdir()
+    (workdir / "docs" / "说明.md").write_text(f"# 说明\n令牌 {secret}\n", encoding="utf-8")
+
+    base = f"/bridges/{rig.bridge_id}"
+    listed = (await rig.api("GET", f"{base}/environments/{env_id}/sessions")).json()["sessions"]
+    assert [(s["session_id"], s["browsable"]) for s in listed] == [(session_id, True)]
+    top = (await rig.api("GET", f"{base}/sessions/{session_id}/files")).json()
+    assert top["path"] == "" and top["entries"][0]["name"] == "docs"
+    inner = await rig.api("GET", f"{base}/sessions/{session_id}/files", params={"path": "docs"})
+    assert [e["name"] for e in inner.json()["entries"]] == ["说明.md"]
+    preview = await rig.api(
+        "GET", f"{base}/sessions/{session_id}/files/content", params={"path": "docs/说明.md"}
+    )
+    assert preview.status_code == 200 and "# 说明" in preview.json()["text"]
+    assert secret not in preview.text
+    download = await rig.api(
+        "GET", f"{base}/sessions/{session_id}/files/download", params={"path": "docs/说明.md"}
+    )
+    assert download.status_code == 200 and secret in download.text
+    assert download.headers["content-type"] == "application/octet-stream"
+    assert download.headers["content-disposition"].startswith("attachment; filename*=UTF-8''")
+    assert download.headers["x-content-type-options"] == "nosniff"
+    logs = (await rig.env.get("/api/v1/audit-logs", limit=20))["items"]
+    entry = next(e for e in logs if e["action"] == "llm_bridge.work_file_downloaded")
+    assert entry["action_label"] == "下载开发会话工作目录里的文件"
+    assert entry["metadata"]["path"] == "docs/说明.md" and secret not in str(entry)
+
+    # 跳不出工作目录；路径过长被拦下
+    escape = await rig.api("GET", f"{base}/sessions/{session_id}/files", params={"path": "../.."})
+    assert escape.status_code == 422
+    too_long = await rig.api(
+        "GET", f"{base}/sessions/{session_id}/files", params={"path": "a" * 1001}
+    )
+    assert too_long.status_code == 422
+    missing = await rig.api(
+        "GET", f"{base}/sessions/{session_id}/files/content", params={"path": "没有.txt"}
+    )
+    assert missing.status_code == 404

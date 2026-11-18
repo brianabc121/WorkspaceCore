@@ -112,6 +112,17 @@ async function manage(page, name) {
   if ((await menu.count()) && (await menu.getAttribute('aria-expanded')) !== 'true') await menu.click()
   return own
 }
+// “平台与账号”下面的“连接诊断”默认收起（T-0289）：各平台的连通性详情和通道表在里面
+async function openDiag(page) {
+  const head = page.getByRole('button', { name: /^连接诊断/ })
+  if ((await head.getAttribute('aria-expanded')) !== 'true') await head.click()
+}
+// 账号卡片的“…”：退出登录、更换账号、向平台查一次（T-0289）
+async function cardMenu(page, label) {
+  const more = account(page, label).getByRole('button', { name: `${label}的更多操作` })
+  if ((await more.getAttribute('aria-expanded')) !== 'true') await more.click()
+  return account(page, label).getByRole('group', { name: `更多操作：${label}` })
+}
 async function platformsOn(page, name) {
   const list = card(page, name).getByRole('list', { name: `${name}控制的平台` })
   await list.waitFor({ timeout: 60000 })
@@ -211,13 +222,14 @@ async function main() {
     for (const [name, on] of [['Codex', false], ['Claude', true], ['CodeBuddy', true]]) {
       check((await control(page).getByLabel(name, { exact: true }).isChecked()) === on, `1 号“控制的平台”里 ${name} 的勾选不对`)
     }
+    await openDiag(page)
     const channels = page.getByRole('table', { name: '通道' })
     await channels.getByRole('row').filter({ hasText: 'Claude' }).filter({ hasText: '对话' }).getByText('可用', { exact: true }).waitFor()
     const cloud = channels.getByRole('row').filter({ hasText: 'Claude' }).filter({ hasText: '云端' })
     await cloud.getByText('不可用').waitFor()
     await cloud.getByText('接口桩').waitFor()
     check(await channels.getByRole('row').filter({ hasText: 'Codex' }).count() === 0, '通道表不应列出 1 号不控制的平台')
-    await page.getByRole('group', { name: '运行概览' }).getByText('排队中 0').waitFor()
+    await page.getByRole('group', { name: '运行概览' }).filter({ hasText: /排队中\s*0\s*个回合/ }).waitFor()
     const refusedLogin = await api(page, workspace, 'POST', `/api/v1/llm_bridge/bridges/${oneId}/accounts/openai/login`, { method: 'api_key', api_key: FAKE_KEY })
     check(refusedLogin.status === 409, `1 号不控制 Codex，后端也要拒绝在它上面登录：${JSON.stringify(refusedLogin)}`)
     step(`1 号的“平台与账号”：只有 Claude（${claudeState.trim()}）和 CodeBuddy 的账号与通道；不控制的平台后端也拒绝登录`)
@@ -237,6 +249,7 @@ async function main() {
       check(onTwo.length === 3 && onTwo[0].startsWith('Codex') && onTwo[1].startsWith('Claude') && onTwo[2].startsWith('CodeBuddy'), `2 号卡片上控制的平台不对：${onTwo}`)
       check((await card(page, TWO).getAttribute('aria-current')) === 'true', '添加后应选中新的管理器')
       await account(page, 'Codex').getByText('未登录').waitFor({ timeout: 60000 })
+      await openDiag(page)  // 换了管理器，“平台与账号”重新打开，连接诊断又是收起的
       await channels.getByRole('row').filter({ hasText: 'Codex' }).filter({ hasText: '开发' }).getByText('可用', { exact: true }).waitFor()
       await channels.getByRole('row').filter({ hasText: 'Codex' }).filter({ hasText: '对话' }).getByText('可用', { exact: true }).waitFor()
       check(await channels.getByRole('rowheader', { name: /ChatGPT/ }).count() === 0, '没有单独的 ChatGPT 通道：纯聊天就是 Codex 的对话')
@@ -271,12 +284,13 @@ async function main() {
       check(other.state === 'logged_out' && !other.registered, `2 号的 CodeBuddy 不应受 1 号影响：${JSON.stringify(other)}`)
     }
     acceptNext(page)
-    await account(page, WORKBUDDY).getByRole('button', { name: `退出登录${WORKBUDDY}` }).click()
+    await (await cardMenu(page, WORKBUDDY)).getByRole('button', { name: `退出登录${WORKBUDDY}` }).click()
     await page.getByText(`已退出「${WORKBUDDY}」的登录。`).waitFor()
     await account(page, WORKBUDDY).getByText('未登录').waitFor()
     // 退出后登记还在：提示“要换成别的账号先点更换账号”，但不再显示登录方式
     await account(page, WORKBUDDY).getByText('这个管理器登记过这个平台的账号').waitFor()
-    await account(page, WORKBUDDY).getByRole('button', { name: `更换账号${WORKBUDDY}` }).waitFor()
+    await (await cardMenu(page, WORKBUDDY)).getByRole('button', { name: `更换账号${WORKBUDDY}` }).waitFor()
+    await page.keyboard.press('Escape')
     check(await account(page, WORKBUDDY).locator('dd', { hasText: 'API 密钥' }).count() === 0, '退出登录后不应再显示登录方式')
     step(`各自一套账号：在 1 号用 API 密钥登录 CodeBuddy（密钥不回显）${two ? '，2 号的 CodeBuddy 仍是未登录' : ''}；退出后回到未登录，登记保留`)
 
@@ -349,10 +363,10 @@ async function main() {
     await tab(page, '运行设置').click()
     form = page.getByRole('form', { name: 'MCP 管理器设置' })
     await form.getByText('已确认').waitFor()
-    await form.getByLabel('每个平台同时进行的会话数').fill('99')
+    await form.getByLabel('每个平台并行会话').fill('99')
     await form.getByRole('button', { name: '保存设置' }).click()
-    await page.getByText('「每个平台同时进行的会话数」要填 1–16 之间的整数。').waitFor()
-    await form.getByLabel('每个平台同时进行的会话数').fill('4')
+    await page.getByText('「每个平台并行会话」要填 1–16 之间的整数。').waitFor()
+    await form.getByLabel('每个平台并行会话').fill('4')
     await form.getByRole('button', { name: '保存设置' }).click()
     await page.getByText('设置已保存。').waitFor()
     await page.reload()
@@ -365,28 +379,34 @@ async function main() {
     await tab(page, '开发环境').click()
     await page.getByText('还没有开发环境。').waitFor()
     await page.getByRole('button', { name: '新增环境' }).click()
+    // 新增环境在弹窗里（T-0289）：平台是卡片（只列这个管理器控制的），访问权限、允许联网、启用环境
     form = page.getByRole('form', { name: '新增开发环境' })
-    const offered = await form.getByLabel('平台').locator('option').allInnerTexts()
+    const offered = (await form.locator('.lb-plat-card').allInnerTexts()).map((t) => t.trim())
     check(offered.join() === 'Claude,CodeBuddy', `1 号新增环境时只应能选 Claude / CodeBuddy：${offered}`)
-    await form.getByLabel('平台').selectOption({ label: 'Claude' })
-    await form.getByLabel('权限').selectOption({ label: '可执行命令' })
+    await form.getByRole('radio', { name: 'Claude' }).check()
+    await form.getByLabel('访问权限').selectOption({ label: '可执行命令' })
     await form.getByRole('note').filter({ hasText: '没有操作系统级沙箱' }).waitFor()
-    await form.getByLabel('权限').selectOption({ label: '可写工作区' })
-    await form.getByLabel('名字').fill('验收环境')
-    await form.getByLabel('代码仓库地址（可不填）').fill('http://example.com/a.git')
-    await form.getByRole('button', { name: '保存' }).click()
+    await form.getByLabel('访问权限').selectOption({ label: '可写工作区' })
+    await form.getByLabel(/^环境名称/).fill('验收环境')
+    await form.getByLabel('仓库地址').fill('http://example.com/a.git')
+    await form.getByRole('button', { name: '创建环境' }).click()
     await page.getByText('代码仓库地址只支持 https:// 开头的地址。').waitFor()
-    await form.getByLabel('代码仓库地址（可不填）').fill('')
-    await form.getByRole('button', { name: '保存' }).click()
+    await form.getByLabel('仓库地址').fill('')
+    await form.getByRole('button', { name: '创建环境' }).click()
     await page.getByText('已新增环境「验收环境」。').waitFor()
-    const envRow = page.getByRole('table', { name: '开发环境' }).getByRole('row').filter({ hasText: '验收环境' })
-    await envRow.getByText('可写工作区').waitFor()
-    await envRow.getByText('不联网').waitFor()
+    const envItem = page.getByRole('navigation', { name: '开发环境列表' }).getByRole('button', { name: /验收环境/ })
+    await envItem.waitFor()
+    const envTitle = await envItem.getAttribute('title')
+    check(/可写工作区/.test(envTitle) && /不联网/.test(envTitle), `环境列表应写明权限和不联网：${envTitle}`)
+    // 还没有会话：工作目录那里写明“还没有会话”
+    await page.getByText('这个环境还没有会话。', { exact: false }).waitFor()
+    // 删除在“环境设置”的弹窗里
+    await page.getByRole('button', { name: '环境设置：验收环境' }).click()
     acceptNext(page)
-    await envRow.getByRole('button', { name: '删除环境验收环境' }).click()
+    await page.getByRole('form', { name: '修改开发环境' }).getByRole('button', { name: '删除环境' }).click()
     await page.getByText('已删除环境「验收环境」。').waitFor()
     await page.getByText('还没有开发环境。').waitFor()
-    step('开发环境：平台只能选 1 号控制的 Claude / CodeBuddy；“可执行命令”有风险提示；非 https 的仓库地址被拦下；新增后列出，删除后消失')
+    step('开发环境：新增在弹窗里，平台只能选 1 号控制的 Claude / CodeBuddy；“可执行命令”有风险提示；非 https 的仓库地址被拦下；新增后列出（还没有会话），在“环境设置”里删除后消失')
 
     // ---------------------------------------------------------------- 会话
     await tab(page, '会话').click()
@@ -542,6 +562,7 @@ async function main() {
     check(net.status === 200 && net.body.supported === true, `应能检测平台连通性：${JSON.stringify(net).slice(0, 300)}`)
     check(net.body.slots.claude?.targets.length === 2 && net.body.slots.openai?.targets.length === 3, `每个平台应逐个地址给出结果：${JSON.stringify(net.body.slots).slice(0, 400)}`)
     check(net.body.slots.claude.targets.every((t) => ['ok', 'blocked', 'unreachable'].includes(t.state) && (t.state === 'unreachable') === (t.latency_ms === null)), `状态只有三种；连不上的没有延迟，别的都有：${JSON.stringify(net.body.slots.claude.targets)}`)
+    await openDiag(page)
     await page.getByRole('group', { name: /^平台连通性：/ }).first().waitFor({ timeout: 30000 })
     const twice = await api(page, workspace, 'POST', '/api/v1/llm_bridge/local', { platforms: ['claude'] })
     check(twice.status === 409 && twice.body.error.code === 'LOCAL_EXISTS', `本机的管理器只能添加一次：${JSON.stringify(twice)}`)

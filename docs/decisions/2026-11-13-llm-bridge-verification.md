@@ -72,6 +72,27 @@
 
 `claude --cloud`：没有非交互的列表和结果接口，`claude.cloud` 是接口桩。
 
+**模型与推理强度（T-0288，2026-11-17）**。核验方式：从 npm 下载锁定版本的 `@anthropic-ai/claude-code-linux-x64@2.1.323`，
+只解包、不运行，在二进制里读帮助文本和内置配置。
+
+- `--model <model>` 的帮助原文：“Model for the current session. Provide an alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name.”
+  也就是说，别名和完整模型名都可以填。
+- `--effort <level>` 的帮助原文：“Effort level for the current session”，可选值 `low, medium, high, xhigh, max`。
+  - 不认识的值会打印警告 “Unknown --effort value … ignoring it and using the default effort”，然后照常运行；
+  - 模型不支持所选的强度时，官方程序会静默降级（会话状态里的说明是 “after any silent downgrade for the selected model”）。
+- 模型菜单取自内置的 `model_selector_config` 里 `id: "cc"` 那一份：
+  - 常用（`section: main`）：`claude-opus-5-5`（Opus 5.5）、`claude-sonnet-5-5`（Sonnet 5.5）、`claude-fable-5-2`（Fable 5.2）、`claude-haiku-5-5`（Haiku 5.5），`effort_levels` 都是 low 到 max，默认 medium。
+  - 更多（`section: overflow`）：Fable 5.1、Opus 5、Sonnet 5、Fable 5、Opus 4.8、Opus 4.7 都是 low 到 max；Opus 4.6、Sonnet 4.6 没有 xhigh；
+    Haiku 4.5（`claude-haiku-4-5-20251001`）、Opus 4.1（`claude-opus-4-1-20250805`）是 `thinking: none`，不支持推理强度。
+- 驱动的做法（`bridge/drivers/cli_stream.py` 的 `CLAUDE_MODELS`）：
+  - 页面上先列四个别名（sonnet、opus、fable、haiku），再列上面这些完整模型名，各自带可选的强度；
+  - 选了推理强度就加 `--effort <level>`；
+  - 管理器新建会话时检查强度是不是所选模型支持的。
+- CodeBuddy Code 没有核对推理强度的参数，带了也不传。
+
+没能核验的：用真实账号跑带 `--effort` 的回合（本会话不调用真实的 Claude 登录，原因见上面的说明）；
+账号能不能用某个模型由平台决定，用不了时官方程序会报错，错误照常显示在回合里。
+
 ## 4. CodeBuddy Code（WorkBuddy 通道）
 
 核验方式：对真实程序实测 `codebuddy -p "你好" -y --output-format stream-json --session-id cb-test-1 --tools ""`（未登录）。

@@ -84,7 +84,7 @@ const turn = (id = T2, state = 'queued'): Schema['LlmChatTurnOut'] => ({ turn_id
 const event = (id: number, kind: string, over: Partial<Schema['LlmChatEventOut']> = {}): Schema['LlmChatEventOut'] => ({ id, turn_id: T2, kind, at: now(), ...over })
 const composer = () => screen.findByRole('textbox', { name: '消息内容' })
 // 只数消息本身：回答里“过程”的每一步也是列表项
-/** 会话列表“更多”菜单里的一项（多模型同问、同步官方会话、看已归档的会话 / 回到进行中的会话） */
+/** 会话列表“更多”菜单里的一项（多模型同问、同步官方会话、看已归档的会话 / 回到未归档的会话） */
 async function listAction(name: string | RegExp) {
   const side = await screen.findByRole('complementary', { name: '会话列表' })
   const more = within(side).getByRole('button', { name: '会话列表的更多操作' })
@@ -147,7 +147,9 @@ describe('大模型聊天', () => {
     expect(theirs).toHaveTextContent('研究员 · 登录页点了没反应，帮我看看')
     expect(theirs).not.toHaveTextContent('Codex · 开发')
     expect(theirs).toHaveAttribute('title', 'Codex · 开发 · 研究员建的')
-    expect(within(yesterday).getByText('回答中')).toBeVisible()
+    // 第二行右边是状态（T-0288）：有回合在回答是“进行中”，做完了是“已完成”
+    expect(within(theirs).getByText('进行中')).toHaveAttribute('data-state', 'busy')
+    expect(within(today).getByRole('button', { name: /周报怎么写/ })).toHaveTextContent('已完成')
     // 列表里的时间：昨天的写“昨天 几点几分”；标题旁写着读到了几个；管理器那一栏写着连接状态
     expect(theirs).toHaveTextContent(/昨天 \d\d:\d\d/)
     expect(within(side).getByRole('heading', { level: 2 })).toHaveTextContent('会话3')
@@ -172,7 +174,7 @@ describe('大模型聊天', () => {
     await fireEvent.click(archived)
     await waitFor(() => expect(listRequests(requests).some(r => query(r).get('status') === 'archived')).toBe(true))
     expect(within(side).getByText(/正在看已归档的会话/)).toBeVisible()
-    expect(await listAction('回到进行中的会话')).toHaveAttribute('aria-pressed', 'true')
+    expect(await listAction('回到未归档的会话')).toHaveAttribute('aria-pressed', 'true')
 
     await fireEvent.click(await listAction('同步官方会话'))
     expect(await within(side).findByText('已同步；这些平台的会话读不到：workbuddy')).toBeVisible()
@@ -212,7 +214,9 @@ describe('大模型聊天', () => {
     const chips = screen.getByRole('list', { name: '会话的平台、模型与用法' })
     expect(chips).toHaveTextContent('Claude · 对话模式')
     expect(chips).toHaveTextContent('sonnet-5')
-    expect(within(info).getByText('进行中')).toBeVisible()
+    // 回合已经做完：写“已完成”，不是“进行中”（T-0288）
+    expect(within(info).getByText('已完成')).toBeVisible()
+    expect(within(info).queryByText('进行中')).not.toBeInTheDocument()
     await fireEvent.click(within(info).getByRole('tab', { name: '执行记录' }))
     expect(within(info).getByRole('tab', { name: '执行记录' })).toHaveAttribute('aria-selected', 'true')
     expect(within(info).getByText('执行记录（1）')).toBeVisible()
@@ -1192,7 +1196,10 @@ describe('大模型聊天', () => {
 
     await fireEvent.update(within(form).getByLabelText('开发环境'), ENV)
     await fireEvent.update(within(form).getByLabelText('模型'), 'gpt-5')
-    await fireEvent.update(await within(form).findByLabelText('推理强度'), 'high')
+    // 推理强度按所选模型支持的列出，写中文名（T-0288）
+    const strength = await within(form).findByLabelText('推理强度')
+    expect(within(strength).getAllByRole('option').map(o => o.textContent)).toEqual(['默认', '低', '高'])
+    await fireEvent.update(strength, 'high')
     await fireEvent.click(within(form).getByRole('button', { name: '新建并发送' }))
     expect(await screen.findByRole('heading', { level: 2, name: '修一下测试' })).toBeVisible()
     expect(bodies).toEqual([{ platform: 'codex', mode: 'dev', title: '', model: 'gpt-5', effort: 'high', environment: ENV, text: '修一下测试', request_id: expect.stringMatching(/^web-/), pinned_notes: [] }])

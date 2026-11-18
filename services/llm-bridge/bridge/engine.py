@@ -27,7 +27,7 @@ from typing import Any
 
 from bridge import attachments as files
 from bridge import connectivity as net
-from bridge import quota
+from bridge import quota, workfiles
 from bridge.channels import SLOT_LABELS, Channel, canonical, find
 from bridge.config import Settings
 from bridge.drivers.base import (
@@ -605,6 +605,20 @@ class Engine:
             raise BridgeError("VALIDATION_FAILED", f"没有这个模型，可选：{', '.join(ids)}")
         return model
 
+    async def _check_effort(self, channel: Channel, model: str | None, effort: str) -> None:
+        """推理强度要是这个模型支持的；列表里没有的完整模型名（命令行类平台接受），按这个平台所有模型支持的算。
+        不支持推理强度的模型不接受强度。"""
+        models = await self.models(channel.platform, channel.mode)
+        listed = next((m for m in models if m["id"] == model), None)
+        allowed = (
+            list(listed["efforts"])
+            if listed is not None
+            else sorted({e for m in models for e in m["efforts"]})
+        )
+        if effort not in allowed:
+            hint = f"，可选：{', '.join(allowed)}" if allowed else "：这个模型不支持推理强度"
+            raise BridgeError("VALIDATION_FAILED", f"推理强度不对{hint}")
+
     async def _clone(self, config: Row, workdir: Path) -> None:
         url = str(config.get("repo_url") or "")
         if not url:
@@ -721,6 +735,8 @@ class Engine:
         if held is not None:
             options["pinned"], options["pinned_titles"] = held
         picked = await self._pick_model(channel, model)
+        if effort:
+            await self._check_effort(channel, picked, effort)
         from bridge.store import new_id
 
         session_id = new_id("bs")
@@ -1733,6 +1749,46 @@ class Engine:
         if session is None:
             raise BridgeError("NOT_FOUND", "没有这个会话")
         return session
+
+    # ---- 开发会话工作目录里的文件（T-0289，页面上“开发环境”里浏览；只读）----
+    def environment_sessions(self, env_id: str, limit: int = 50) -> list[Row]:
+        """用这个开发环境建的会话（最近活动的在前），带上工作目录还能不能浏览。"""
+        if self.store.get_environment(env_id) is None:
+            raise BridgeError("NOT_FOUND", "没有这个环境")
+        busy = self.store.busy_sessions()
+        rows = self.store.list_sessions(
+            include_archived=True, environment_id=env_id, limit=min(max(limit, 1), 200)
+        )
+        out = []
+        for row in rows:
+            try:
+                workfiles.session_root(self.settings.work_dir, row)
+                browsable = True
+            except workfiles.FileError:
+                browsable = False
+            out.append(self.admin_session_view(row, busy) | {"browsable": browsable})
+        return out
+
+    def _in_workdir(self, session_id: str, action: Any, path: str) -> Any:
+        session = self._required_session(session_id)
+        try:
+            root = workfiles.session_root(self.settings.work_dir, session)
+            return action(root, path)
+        except workfiles.FileError as error:
+            raise BridgeError(error.code, error.message) from None
+
+    def work_files(self, session_id: str, path: str) -> Row:
+        """会话工作目录里一个文件夹的内容（文件夹在前，按名字排）。"""
+        return dict(self._in_workdir(session_id, workfiles.list_dir, path))
+
+    def work_file(self, session_id: str, path: str) -> Row:
+        """一个文件的信息和开头一段文字（脱敏）。"""
+        return dict(self._in_workdir(session_id, workfiles.preview, path))
+
+    def work_file_download(self, session_id: str, path: str) -> workfiles.Download:
+        """下载用的原文件：已经打开并检查过，调用方发完会关掉。"""
+        download: workfiles.Download = self._in_workdir(session_id, workfiles.download, path)
+        return download
 
     # ---- 连不连得上各平台（T-0240）----
     async def connectivity(self, refresh: bool = False) -> Row:

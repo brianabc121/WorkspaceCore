@@ -781,6 +781,10 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `GET .../accounts/{slot}/login` | 登录进行到哪一步：`pending` / `done` / `failed` / `none`；`needs_code` 表示在等授权码 |
 | `POST .../accounts/{slot}/refresh` / `logout` / `reset` | 重新检查状态；退出登录；更换账号（归档这个槽位的全部会话，返回 `archived_sessions`） |
 | `GET` / `POST /api/v1/llm_bridge/bridges/{id}/environments`，`PUT` / `DELETE .../environments/{env_id}` | 开发环境：`platform`、`name`、`repo_url`（只收 https）、`branch`、`sandbox`（`read_only` / `workspace_write` / `exec`）、`network`、`description`、`enabled` |
+| `GET .../environments/{env_id}/sessions` | 用这个开发环境建的会话（T-0289，最近活动的在前，最多 50 个）：会话的基本信息、`busy`、`browsable`（工作目录还在、是管理器建的） |
+| `GET .../sessions/{session_id}/files?path=` | 会话工作目录里一个文件夹的内容（T-0289，只读，admin）：`path`（相对工作目录，根目录为空）、`entries[]`（`name`、`kind`：`dir` / `file` / `link`（指向工作目录以外的符号链接，打不开）、`size`、`modified`；文件夹在前，最多 1000 项）、`total`。路径带 `..` 或超过 1000 字 `422`；跳出工作目录或不存在 `404`；官方程序里同步来的会话、目录已清理 `422` / `404` |
+| `GET .../sessions/{session_id}/files/content?path=` | 预览一个文件（T-0289）：`name`、`size`、`modified`、`media_type`、`binary`（二进制或不是 UTF-8 的不给内容）、`truncated`（只给开头 512 KB）、`text`（**已脱敏**）、`downloadable`（不超过 50 MB） |
+| `GET .../sessions/{session_id}/files/download?path=` | 下载原文件（T-0289，人类 2026-11-17 决定 owner / admin 可以下载原文件，不脱敏）：`application/octet-stream`、`Content-Disposition: attachment`、`nosniff`；最多 50 MB，超过 `422`；审计 `llm_bridge.work_file_downloaded`（记会话和路径，不记内容） |
 | `GET /api/v1/llm_bridge/bridges/{id}/sessions?limit&offset&sync` | 会话桥上的会话；`sync=true` 先登记官方程序里有、桥里没有的会话 |
 | `GET .../sessions/{session_id}/turns` | 一个会话的回合（最新在前）：消息、状态、结果或失败原因 |
 | `GET /api/v1/llm_bridge/grants`，`PUT /api/v1/llm_bridge/grants/{instance_id}` | 每个实例的权限：`enabled`、`can_write`、`can_account`、`can_takeover`、`platforms`（空 = 全部；一项是平台，或 `codex:chat` = 只能和 Codex 对话、不能用开发模式，T-0280，由管理员选；收到旧名字 `chatgpt` 按整个 `codex` 处理，原来只给了 `chatgpt` 的授权迁移成 `codex`，迁移 0078 / T-0282）、`bridge_ids`（允许用的 MCP 管理器：`null` = 全部，包括以后添加的；空列表 = 一个都不能用；填了不存在的 id 时 `422`）。`enabled=false` 时三项权限一并收回，`platforms` 与 `bridge_ids` 保留 |

@@ -521,6 +521,15 @@ class LlmBridgeService:
         except ConnectorError as error:
             raise unavailable(error) from error
 
+    async def download(self, row: LlmBridge, path: str) -> Any:
+        """取会话桥上的一个文件：返回会话桥的响应（内容原样），失败按会话桥的错误抛出。"""
+        try:
+            return await (await self.client(row)).download(path)
+        except BridgeCallError as error:
+            raise from_bridge(error) from error
+        except ConnectorError as error:
+            raise unavailable(error) from error
+
     async def admin_write(
         self,
         access: WorkspaceAccess,

@@ -355,6 +355,19 @@ export function ownerText(session: Pick<ChatSession, 'owner_kind' | 'owner'>): s
   return session.owner || (session.owner_kind === 'agent' ? '智能体' : '别的管理员')
 }
 
+/**
+ * 会话的状态（T-0288）：有回合正在回答或排队时是“进行中”，否则是“已完成”（最近的回合做完了）；归档了是“已归档”。
+ * 会话列表和会话详情都用它。
+ */
+export function sessionState(session: Pick<ChatSession, 'status' | 'busy'>): { key: 'archived' | 'busy' | 'done'; text: string } {
+  if (session.status === 'archived') return { key: 'archived', text: '已归档' }
+  return session.busy ? { key: 'busy', text: '进行中' } : { key: 'done', text: '已完成' }
+}
+
+/** 推理强度的中文名（官方程序的 low / medium / high / xhigh / max；Codex 另有 minimal 等）；不认识的照原样写 */
+export const EFFORT_NAMES: Record<string, string> = { minimal: '最低', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最高' }
+export const effortName = (id: string) => EFFORT_NAMES[id] ?? id
+
 /** 列表和各处用的平台标记（两个字母以内） */
 export const PLATFORM_MARK: Record<string, string> = { codex: 'Cx', claude: 'Cl', workbuddy: 'W' }
 
