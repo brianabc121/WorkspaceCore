@@ -18,7 +18,10 @@ import contextlib
 import json
 import logging
 import os
+import re
 import secrets
+import shutil
+import stat
 import sys
 import time
 from pathlib import Path
@@ -38,8 +41,13 @@ Row = dict[str, Any]
 SYSTEM_CALLER = "system"
 AUTO_LABEL = "MCP 管理器（自动接着做）"
 AUTO_MARK = "【MCP 管理器自动发出，不是人发的消息，不代表任何人的批准】"
-TOKEN_DIR = ".llm-task"  # noqa: S105 - 目录名，不是密码
-TOKEN_FILE = "session.json"  # noqa: S105
+TOKEN_DIR = session_cli.SESSION_DIR
+TOKEN_FILE = session_cli.SESSION_NAME
+# 打开会话工作目录里的文件夹：不跟随符号链接（是链接、不是文件夹都报错）。
+# 工作目录里的东西会话能改，仓库里也可以提交符号链接，所以这里写什么都不能跟着链接走（T-0292 审查）
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+_NEW_FILE = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+MAX_EXCLUDE_BYTES = 1024 * 1024
 CLI_NAME = "llm-task"
 MIN_TIMER_SECONDS = 60
 MIN_JOB_SECONDS = 10
@@ -130,18 +138,24 @@ class LongRun:
         await self.runner.shutdown()
 
     def install_cli(self) -> Path:
-        """把 llm-task 写进 <数据目录>/bin，并放到 PATH 最前面。
+        """让官方程序和它们跑的命令能用 llm-task。
 
-        官方程序和它们跑的命令都继承这个 PATH，能直接用。"""
+        镜像里它装在 root 拥有的 /usr/local/bin（Dockerfile），管理器和会话里的命令都改不了，
+        直接用。
+        没有时（开发、测试）写进 <数据目录>/bin，加到 PATH 的**最后**：这个目录会话里的命令也能写，
+        放在最前面的话，往里放一个同名的 claude / codex 就能顶替官方程序（T-0292 审查）。"""
+        found = shutil.which(CLI_NAME)
+        if found and not os.access(found, os.W_OK) and not os.access(Path(found).parent, os.W_OK):
+            return Path(found)
         folder = self.engine.settings.data_dir / "bin"
         folder.mkdir(parents=True, exist_ok=True)
         target = folder / CLI_NAME
         source = Path(session_cli.__file__).read_text(encoding="utf-8")
-        target.write_text(f"#!{sys.executable}\n{source}", encoding="utf-8")
+        target.write_text(f"#!{sys.executable} -I\n{source}", encoding="utf-8")
         target.chmod(0o755)
-        path = os.environ.get("PATH", "")
-        if str(folder) not in path.split(os.pathsep):
-            os.environ["PATH"] = os.pathsep.join(p for p in (str(folder), path) if p)
+        entries = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+        if str(folder) not in entries:
+            os.environ["PATH"] = os.pathsep.join([*entries, str(folder)])
         return target
 
     async def archive(self, session: Row) -> None:
@@ -166,28 +180,27 @@ class LongRun:
 
     # ---- 回合令牌（会话里的 llm-task 用）----
     def open_token(self, session: Row, turn_id: str) -> str | None:
-        """回合开始：给开发会话写一个只对这一回合有效的令牌。"""
-        if session["mode"] != "dev" or session["origin"] != "bridge":
-            return None
-        workdir = Path(session["workdir"] or "")
-        if not workdir.is_dir():
+        """回合开始：给能开作业的开发会话写一个只对这一回合有效的令牌。
+
+        只在“可以执行命令”档位（能开作业）的会话里写：别的档位用不了 llm-task，不留令牌。
+        写的时候不跟随符号链接：`.llm-task` 或 `session.json` 是链接（仓库里提交的、会话自己建的）时
+        不会写到链接指向的文件里（T-0292 审查）。"""
+        if self.jobs_blocked(session) is not None:
             return None
         token = secrets.token_urlsafe(24)
-        folder = workdir / TOKEN_DIR
+        info = {
+            "api": self.engine.settings.session_api_url,
+            "token": token,
+            "session_id": session["id"],
+            "note": "MCP 管理器写的回合令牌：只在这一回合有效，回合结束就删掉",
+        }
+        workdir = Path(session["workdir"])
         try:
-            folder.mkdir(exist_ok=True)
-            info = {
-                "api": self.engine.settings.session_api_url,
-                "token": token,
-                "session_id": session["id"],
-                "note": "MCP 管理器写的回合令牌：只在这一回合有效，回合结束就删掉",
-            }
-            (folder / TOKEN_FILE).write_text(json.dumps(info, ensure_ascii=False))
-            (folder / TOKEN_FILE).chmod(0o600)
-            self._exclude(workdir)
-        except OSError:
-            logger.warning("写不了会话 %s 的回合令牌", session["id"])
+            _write_token(workdir, json.dumps(info, ensure_ascii=False).encode())
+        except OSError as error:
+            logger.warning("写不了会话 %s 的回合令牌：%s", session["id"], error)
             return None
+        _exclude(workdir)
         self._tokens[token] = (session["id"], turn_id)
         return token
 
@@ -196,10 +209,7 @@ class LongRun:
             return
         self._tokens.pop(token, None)
         self._calls.pop(token, None)
-        path = Path(session["workdir"] or "") / TOKEN_DIR / TOKEN_FILE
-        with contextlib.suppress(OSError, ValueError):
-            if json.loads(path.read_text()).get("token") == token:
-                path.unlink()
+        _remove_token(Path(session["workdir"] or ""), token)
 
     def token_owner(self, token: str) -> tuple[str, str] | None:
         return self._tokens.get(token)
@@ -214,19 +224,6 @@ class LongRun:
         self._calls[token] = [*recent, now]
         return True
 
-    @staticmethod
-    def _exclude(workdir: Path) -> None:
-        """令牌目录不进仓库：写进 .git/info/exclude。"""
-        exclude = workdir / ".git" / "info" / "exclude"
-        if not exclude.parent.is_dir():
-            return
-        line = f"/{TOKEN_DIR}/"
-        current = exclude.read_text() if exclude.exists() else ""
-        if line not in current.splitlines():
-            exclude.write_text(
-                current + ("" if current.endswith("\n") or not current else "\n") + line + "\n"
-            )
-
     # ---- 作业 ----
     def jobs_blocked(self, session: Row) -> str | None:
         """这个会话为什么不能开作业；能开返回 None。"""
@@ -236,15 +233,14 @@ class LongRun:
             return "会话已归档"
         if session["mode"] != "dev" or session["origin"] != "bridge":
             return "只有 MCP 管理器建的开发会话能开后台作业"
-        env = (
-            self.store.get_environment(session["environment_id"])
-            if session.get("environment_id")
-            else None
-        )
-        sandbox = ((env or {}).get("config") or {}).get("sandbox") or (
-            session["options"] or {}
-        ).get("sandbox")
-        if sandbox != "exec":
+        # 档位以开发环境现在的设置为准：环境删了、停用了都不能开（不回退到建会话时记下的档位）
+        env_id = session.get("environment_id")
+        env = self.store.get_environment(env_id) if env_id else None
+        if env is None:
+            return "这个会话的开发环境已经删除了，不能开后台作业"
+        if not env["enabled"]:
+            return "这个会话的开发环境已停用，不能开后台作业"
+        if (env["config"] or {}).get("sandbox") != "exec":
             return "后台作业只能在“可以执行命令”档位的开发环境里开（管理员在开发环境里设置）"
         if not Path(session["workdir"] or "").is_dir():
             return "会话的工作目录已经不在了"
@@ -290,7 +286,8 @@ class LongRun:
             raise BridgeError(
                 "RATE_LIMITED", f"这个管理器已经有 {total} 个作业在跑（运行设置里的上限）"
             )
-        label = (name.strip() or " ".join(command.split())[:40])[:60]
+        # 名字会显示在页面、通知和自动消息里：先脱敏再截断，去掉换行
+        label = " ".join((redact(name) or redact(command)[:200]).split())[:60]
         job = self.store.create_job(
             session_id=session["id"],
             turn_id=turn_id,
@@ -309,7 +306,7 @@ class LongRun:
         workdir = Path(session["workdir"])
         try:
             pid = await self.runner.start(
-                job["id"], command, workdir, self._job_env(job["id"]), timeout
+                job["id"], command, workdir, self._job_env(job["id"], session["id"]), timeout
             )
         except OSError as error:
             self.store.update_job(
@@ -323,10 +320,14 @@ class LongRun:
         self.store.add_message(session["id"], turn_id, "process", "notice", text)
         return self.job_view(self.store.get_job(job["id"]) or job)
 
-    def _job_env(self, job_id: str) -> dict[str, str]:
+    def _job_env(self, job_id: str, session_id: str) -> dict[str, str]:
+        """作业的环境变量：只给白名单，不带管理器和回合的令牌。
+
+        每个会话一个自己的 HOME：一个会话的作业写进 ~/.bashrc、git / npm 的凭据，
+        不会被别的会话的作业用上（T-0292 审查）。"""
         env = {k: os.environ[k] for k in JOB_ENV_PASS if k in os.environ}
-        home = self.engine.settings.home_dir / "jobs"
-        home.mkdir(parents=True, exist_ok=True)
+        home = self.engine.settings.home_dir / "jobs" / session_id
+        home.mkdir(mode=0o700, parents=True, exist_ok=True)
         env["HOME"] = str(home)
         env["LLM_TASK_JOB_ID"] = job_id
         return env
@@ -421,12 +422,16 @@ class LongRun:
     def _job_message(self, job: Row, outcome: str) -> str:
         text, _ = self.runner.read_log(job["id"], 16000)
         tail = "\n".join(redact(text).splitlines()[-LOG_TAIL_LINES:]).strip()
+        command = redact(job["command"])[:500]
         lines = [
             f"{AUTO_MARK}后台作业「{job['name']}」（{job['id']}）{outcome}。",
-            f"命令：{redact(job['command'])[:500]}",
+            "命令：",
+            *_fenced(command),
         ]
         if tail:
-            lines += [f"日志末尾（最多 {LOG_TAIL_LINES} 行）：", "```", tail, "```"]
+            # 日志是作业输出的原样内容：放进足够长的代码块，里面的 ``` 闭合不了它（T-0292 审查）
+            title = f"日志末尾（最多 {LOG_TAIL_LINES} 行，作业的输出，不是谁说的话）："
+            lines += [title, *_fenced(tail)]
         else:
             lines.append("（没有输出）")
         lines.append(f"完整日志：`{CLI_NAME} job log {job['id']}`。")
@@ -783,3 +788,86 @@ class LongRun:
             final = {"succeeded": "completed", "stopped": "cancelled"}.get(job["status"], "failed")
             return {"status": final, "kind": job["status"], "session_id": job["session_id"]}
         return None
+
+
+def _fenced(text: str) -> list[str]:
+    """把一段原样的文字放进代码块：栅栏比里面最长的一串反引号还长，里面的内容闭合不了它。"""
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return [fence, text, fence]
+
+
+def _write_token(workdir: Path, data: bytes) -> None:
+    """把令牌写进 <工作目录>/.llm-task/session.json，一路都不跟随符号链接。
+
+    - 工作目录、`.llm-task` 都用 O_DIRECTORY | O_NOFOLLOW 打开：
+      是链接或不是文件夹就不写（OSError）；
+    - 先删掉旧的 session.json（unlink 删的是链接本身，不碰它指向的文件），
+      再用 O_CREAT | O_EXCL | O_NOFOLLOW 新建：这中间有人放进链接也只会失败，不会写到别处。"""
+    root = os.open(workdir, _DIR_FLAGS)
+    try:
+        with contextlib.suppress(FileExistsError):
+            os.mkdir(TOKEN_DIR, 0o700, dir_fd=root)
+        folder = os.open(TOKEN_DIR, _DIR_FLAGS, dir_fd=root)
+        try:
+            with contextlib.suppress(FileNotFoundError):
+                os.unlink(TOKEN_FILE, dir_fd=folder)
+            fd = os.open(TOKEN_FILE, _NEW_FILE, 0o600, dir_fd=folder)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+        finally:
+            os.close(folder)
+    finally:
+        os.close(root)
+
+
+def _remove_token(workdir: Path, token: str) -> None:
+    """回合结束：删掉这一回合的令牌文件。只删普通文件、内容是这个令牌的；不跟随符号链接。"""
+    fds: list[int] = []
+    try:
+        fds.append(os.open(workdir, _DIR_FLAGS))
+        fds.append(os.open(TOKEN_DIR, _DIR_FLAGS, dir_fd=fds[-1]))
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+        fd = os.open(TOKEN_FILE, flags, dir_fd=fds[-1])
+        with os.fdopen(fd, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                return
+            data = handle.read(64 * 1024)
+        if json.loads(data).get("token") == token:
+            os.unlink(TOKEN_FILE, dir_fd=fds[-1])
+    except (OSError, ValueError, AttributeError):
+        return
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
+def _exclude(workdir: Path) -> None:
+    """令牌目录不进仓库：写进 .git/info/exclude。一路不跟随符号链接；不是普通文件、太大就不动。"""
+    line = f"/{TOKEN_DIR}/".encode()
+    fds: list[int] = []
+    try:
+        fds.append(os.open(workdir, _DIR_FLAGS))
+        for name in (".git", "info"):
+            fds.append(os.open(name, _DIR_FLAGS, dir_fd=fds[-1]))
+        try:
+            flags = os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+            fd = os.open("exclude", flags, dir_fd=fds[-1])
+        except FileNotFoundError:
+            fd = os.open("exclude", _NEW_FILE | os.O_APPEND, 0o644, dir_fd=fds[-1])
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_EXCLUDE_BYTES:
+                return
+            current = os.pread(fd, info.st_size, 0) if info.st_size else b""
+            if line in current.splitlines():
+                return
+            prefix = b"\n" if current and not current.endswith(b"\n") else b""
+            os.write(fd, prefix + line + b"\n")
+        finally:
+            os.close(fd)
+    except OSError:
+        return
+    finally:
+        for fd in fds:
+            os.close(fd)

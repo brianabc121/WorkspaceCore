@@ -1467,6 +1467,20 @@ async def test_agent_timers_jobs_and_chain_wake_it_up_and_are_audited(rig: Rig) 
         json={"text": secret, "after_seconds": 600},
     )
     assert leaky.status_code == 422
+    # 页面上开作业：命令里像有密钥的拒绝；审计只记脱敏后的作业名（T-0292 审查）
+    leaky_job = await rig.api(
+        "POST",
+        f"{base}/sessions/{dev['session_id']}/jobs",
+        json={"command": f"curl -H 'Authorization: Bearer {secret}' x", "follow_up": False},
+    )
+    assert leaky_job.status_code == 422
+    page_job = await rig.api(
+        "POST",
+        f"{base}/sessions/{dev['session_id']}/jobs",
+        json={"command": "sleep 30", "name": "页面开的", "follow_up": False},
+    )
+    assert page_job.status_code == 200 and page_job.json()["job"]["origin"] == "admin"
+    await rig.api("POST", f"{base}/jobs/{page_job.json()['job']['id']}/stop", json={})
     paused = await rig.api(
         "POST", f"{base}/sessions/{dev['session_id']}/chain", json={"action": "stop"}
     )
@@ -1486,6 +1500,8 @@ async def test_agent_timers_jobs_and_chain_wake_it_up_and_are_audited(rig: Rig) 
     assert actions["llm_bridge.agent_job_started"] == "智能体给大模型会话开后台作业"
     assert actions["llm_bridge.job_stopped"] == "停掉大模型会话的后台作业"
     assert actions["llm_bridge.timer_created"] == "预约给大模型会话发消息"
+    started_page = next(e for e in logs if e["action"] == "llm_bridge.job_started")
+    assert started_page["metadata"]["name"] == "页面开的"
     assert actions["llm_bridge.chain_controlled"] == "恢复或停止大模型会话的自动接着做"
     # 审计里不记令牌、不记命令原文以外的密钥
     dumped = str([e for e in logs if e["action"].startswith("llm_bridge.")])

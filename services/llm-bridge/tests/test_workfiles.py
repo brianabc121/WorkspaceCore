@@ -214,3 +214,24 @@ def test_download_reads_the_file_it_checked(tmp_path: Path) -> None:
     (root / "dir").symlink_to(tmp_path)
     with pytest.raises(workfiles.FileError):
         workfiles.preview(root, "dir/secret.txt")
+
+
+def test_token_folder_is_hidden(tmp_path: Path) -> None:
+    # 回合令牌所在的 .llm-task 不列出、不能预览或下载，经链接绕进去也不行（T-0292 审查）
+    root = tmp_path / "w"
+    root.mkdir()
+    (root / ".llm-task").mkdir()
+    (root / ".llm-task" / "session.json").write_text('{"token": "t"}')
+    (root / "alias").symlink_to(".llm-task/session.json")
+    (root / "a.txt").write_text("hi")
+    listed = workfiles.list_dir(root, "")
+    assert ".llm-task" not in {e["name"] for e in listed["entries"]} and listed["total"] == 2
+    for rel in (".llm-task", ".llm-task/session.json", "alias", "a.txt/../.llm-task/session.json"):
+        with pytest.raises(workfiles.FileError) as refused:
+            workfiles.preview(root, rel)
+        assert refused.value.code in ("NOT_FOUND", "VALIDATION_FAILED"), rel
+        with pytest.raises(workfiles.FileError):
+            workfiles.download(root, rel)
+    with pytest.raises(workfiles.FileError) as refused:
+        workfiles.list_dir(root, ".llm-task")
+    assert refused.value.code == "NOT_FOUND"

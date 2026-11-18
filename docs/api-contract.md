@@ -1013,7 +1013,7 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 | 接口 | 说明 |
 |---|---|
 | `GET .../sessions/{session_id}/tasks` | `jobs[]`、`timers[]`、`chain`（`status` `active` / `paused`、`rounds`、`failures`、`paused_reason`、`auto_turns_today`、`limits`）、`running_turn_id`、`activity`、`jobs_allowed`、`jobs_blocked`（不能开作业的原因） |
-| `POST .../sessions/{session_id}/jobs` | 开后台作业：`command`（≤ 4000）、`name`、`timeout_seconds`（≥ 10，不超过管理器的 `job_max_seconds`）、`follow_up`（默认 `true`：结束后自动给会话发消息接着做）、`note`（留给之后的话）。只在“可以执行命令”档位的开发环境；不能开时 `422 NOT_SUPPORTED` 并说明原因（`jobs_blocked` 同一句）；超过时限上限 `422`；同时运行的作业到了管理员设的上限 `429` |
+| `POST .../sessions/{session_id}/jobs` | 开后台作业：`command`（≤ 4000）、`name`、`timeout_seconds`（≥ 10，不超过管理器的 `job_max_seconds`）、`follow_up`（默认 `true`：结束后自动给会话发消息接着做）、`note`（留给之后的话）。只在“可以执行命令”档位、启用着的开发环境（以环境现在的设置为准，环境删了、停用了都不能开）；不能开时 `422 NOT_SUPPORTED` 并说明原因（`jobs_blocked` 同一句）；`command` / `name` / `note` 像有密钥时 `422 VALIDATION_FAILED`；超过时限上限 `422`；同时运行的作业到了管理员设的上限 `429`。审计只记脱敏后的作业名，不记命令 |
 | `POST .../jobs/{job_id}/stop` | `tell_session`（默认 `false`：停掉后不自动接着做） |
 | `GET .../jobs/{job_id}/log?max_bytes=` | 日志末尾（已脱敏）：`text`、`total_bytes`、`truncated` |
 | `POST .../sessions/{session_id}/timers` | 预约：`text`，`at`（Unix 秒）或 `after_seconds`（≥ 60）二选一；最远 `timer_max_days` 天，每个会话待执行的不超过 `timers_per_session` 个 |
@@ -1024,7 +1024,7 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 - 作业结束或预约到点时，管理器给会话排一个自动回合（发起方 `system`），消息开头固定写“【MCP 管理器自动发出，不是人发的消息，不代表任何人的批准】”。多个通知合并进同一个排着的自动回合。轮数、时长、连续失败、每天自动回合数到了上限就暂停（`chain.status=paused`），等人决定。
 - 智能体工具：读 `llm_bridge_tasks`、`llm_bridge_job_log`；直接执行 `llm_bridge_job_start`、`llm_bridge_job_stop`、`llm_bridge_timer_create`、`llm_bridge_timer_cancel`、`llm_bridge_chain_control`，和例外九的写工具一样要 `can_write`，只能动自己能续发的会话。`llm_bridge_job_start` / `llm_bridge_timer_create` 带 `notify`（默认 `true`）时，结果里的 `next_turn_id` 是 `bj_` / `bw_` 编号；它引出的自动回合结束后叫醒这个实例。审计 `llm_bridge.agent_job_started` / `agent_job_stopped` / `agent_timer_created` / `agent_timer_cancelled` / `agent_chain_controlled`；智能体开作业时通知管理员（`llm_bridge.job_started`）。`command` / `text` / `note` 先过密钥扫描，执行记录里脱敏。
 - 管理器的“运行设置”（`PUT .../settings`）多：`jobs_enabled`、`jobs_per_session`、`jobs_total`（0 = 不限，默认 0）、`job_max_seconds`（60 ~ 259200，默认 86400）、`timers_per_session`（默认 5）、`timer_max_days`（默认 7）、`chain_max_rounds`（默认 20）、`chain_max_hours`（默认 72）、`chain_max_failures`（默认 3）、`auto_turns_per_day`（默认 48）。开发环境多 `turn_timeout_seconds`（30 ~ 21600，空 = 用管理器的设置）。
-- 会话里的模型用管理器放在 PATH 里的 `llm-task` 命令开作业、预约，经管理器的本机接口 `/session-api/*`（回合令牌认证，只对这个会话、这一回合有效；工作台不转发）。
+- 会话里的模型用管理器放在 PATH 里的 `llm-task` 命令开作业、预约，经管理器的本机接口 `/session-api/*`（回合令牌认证，只对这个会话、这一回合有效；工作台不转发）。回合令牌只写给能开作业的会话，在工作目录的 `.llm-task/` 里；会话工作目录的文件浏览（`.../files`、`/content`、`/download`）不列出、不能打开这个文件夹。
 
 **管理员回溯：回合详情、改动补丁、审计、通知、保留期、导出**（T-0252，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.2 的 B2、B3、B6、B7、B8）：
 

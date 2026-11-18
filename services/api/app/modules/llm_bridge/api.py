@@ -14,7 +14,7 @@ from fastapi import Depends, Path, Query, Response, status
 
 from app.api.deps import csrf_protected
 from app.core.errors import ApiError
-from app.domain import secret_scan
+from app.domain import agent_ops, secret_scan
 from app.models import User
 from app.modules.llm_bridge.client import LOGIN_READ_TIMEOUT
 from app.modules.llm_bridge.deps import Admin, Owner, Service, router
@@ -440,7 +440,11 @@ async def llm_bridge_session_tasks(
 async def llm_bridge_job_start(
     access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, body: LlmBridgeJobIn
 ) -> LlmBridgeJobResult:
+    if any(secret_scan.scan(text) for text in (body.command, body.name, body.note)):
+        raise ApiError(422, "VALIDATION_FAILED", "内容里像是有令牌、私钥一类的密钥，没有开作业")
     row = await service.bridge(access.workspace.id, bridge_id)
+    # 审计只记作业名：先脱敏再截断，不记命令原文（T-0292 审查）
+    label = " ".join(agent_ops.redact(body.name or body.command[:200]).split())[:40]
     data = await service.admin_write(
         access,
         row,
@@ -448,7 +452,7 @@ async def llm_bridge_job_start(
         "POST",
         f"/sessions/{session_id}/jobs",
         {**body.model_dump(), "by": await _by(access, service)},
-        {"session": session_id, "name": body.name or body.command[:40]},
+        {"session": session_id, "name": label},
     )
     return LlmBridgeJobResult(**data)
 

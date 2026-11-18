@@ -2,7 +2,8 @@
 
 见 docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.5。
 
-MCP 管理器启动时把这个文件写成 `<数据目录>/bin/llm-task`，放进官方程序的 PATH。
+镜像里它装在 root 拥有的 /usr/local/bin/llm-task（Dockerfile）；开发、测试时管理器启动时把它写成
+`<数据目录>/bin/llm-task`，加到 PATH 的最后（longrun.LongRun.install_cli）。
 只用标准库：在 Claude Code / Codex / CodeBuddy 跑命令的地方都能直接执行。
 
 它不认识人，只认回合令牌：管理器在每个回合开始时把令牌写进会话工作目录的
@@ -24,7 +25,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-SESSION_FILE = Path(".llm-task") / "session.json"
+SESSION_DIR = ".llm-task"  # 管理器在会话工作目录里写回合令牌的地方（只此一处定义）
+SESSION_NAME = "session.json"
+SESSION_FILE = Path(SESSION_DIR) / SESSION_NAME
 _DURATION = re.compile(r"^\+?(\d+(?:\.\d+)?)([smhd])$")
 _UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 HELP = """\

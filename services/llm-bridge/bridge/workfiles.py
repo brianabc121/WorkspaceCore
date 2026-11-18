@@ -26,12 +26,15 @@ from pathlib import Path, PurePosixPath
 from typing import IO, Any
 
 from bridge.redact import MASK, redact
+from bridge.session_cli import SESSION_DIR
 
 LIST_LIMIT = 1000
 PREVIEW_BYTES = 512 * 1024
 DOWNLOAD_BYTES = 50 * 1024 * 1024
 PATH_CHARS = 1000
 LINK_HOPS = 40  # 展开符号链接最多几次（和操作系统的上限一样），防止链接绕圈
+# 不给看的：回合令牌所在的文件夹（bridge/longrun.py），回合进行中里面有这一回合的令牌（T-0292 审查）
+HIDDEN = frozenset({SESSION_DIR})
 CHUNK = 64 * 1024
 
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
@@ -84,8 +87,13 @@ def _open(root: Path, rel: str) -> tuple[int, list[str]]:
     """打开工作目录里的一个文件或文件夹，返回它的文件描述符和它在工作目录里的真实路径（各级名字）。
 
     每一级都是相对上一级已经打开的文件夹、用 O_NOFOLLOW 打开的，所以不会被中途换掉的链接带出去；
-    走过的每一级都是真的文件夹，链接里的 .. 按走过的路径退一级就是它真正的上一级。"""
-    return _walk(root, _parts(rel))
+    走过的每一级都是真的文件夹，链接里的 .. 按走过的路径退一级就是它真正的上一级。
+    真实路径在 HIDDEN 里的（包括经链接绕进去的）当作没有。"""
+    fd, names = _walk(root, _parts(rel))
+    if names and names[0] in HIDDEN:
+        os.close(fd)
+        raise FileError("NOT_FOUND", _GONE)
+    return fd, names
 
 
 def _walk(root: Path, parts: list[str]) -> tuple[int, list[str]]:
@@ -180,6 +188,8 @@ def list_dir(root: Path, rel: str) -> dict[str, Any]:
         total = 0
         with os.scandir(fd) as found:
             for entry in found:
+                if not names and entry.name in HIDDEN:
+                    continue
                 total += 1
                 if len(entries) >= LIST_LIMIT:
                     continue

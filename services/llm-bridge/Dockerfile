@@ -34,6 +34,10 @@ COPY --from=cli /usr/local/bin/node /usr/local/bin/node
 COPY --from=cli --chown=root:root /opt/cli /opt/cli
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build --chown=root:root /app /app
+# llm-task：会话里的模型开后台作业、预约回来用的小命令（bridge/session_cli.py，只用标准库）。
+# 装在 root 拥有的目录：会话里的命令改不了它，也不能在 PATH 前面放同名程序顶替官方程序
+RUN { echo '#!/usr/local/bin/python3 -I'; cat /app/bridge/session_cli.py; } > /usr/local/bin/llm-task \
+    && chmod 0755 /usr/local/bin/llm-task
 ENV PATH=/opt/venv/bin:/opt/cli/node_modules/.bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -47,4 +51,6 @@ VOLUME /data
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=3).status == 200 else 1)"
-CMD ["uvicorn", "bridge.main:app", "--host", "0.0.0.0", "--port", "8787", "--no-access-log"]
+# 1 号进程是 bridge/pid1.py：回收孤儿进程（后台作业留下的不会变成僵尸），转发停止信号，
+# 不让同一个用户的进程读它的环境变量（里面有管理令牌）。不用 Docker 的 init: true，原因见 pid1.py
+CMD ["python", "-I", "/app/bridge/pid1.py", "uvicorn", "bridge.main:app", "--host", "0.0.0.0", "--port", "8787", "--no-access-log"]

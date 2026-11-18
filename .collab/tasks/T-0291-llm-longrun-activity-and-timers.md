@@ -42,3 +42,4 @@ updated: 2026-11-18
 - 2026-11-18 06:39 UTC · claude · 开始任务
 - 2026-11-18 06:49 UTC · claude · 做完第 1、2 期：回合进度 activity、Codex 与 Claude / CodeBuddy 的进度事件、开发环境单回合时限、预约与调度、工作台工具 llm_bridge_tasks / timer_create / timer_cancel、页面后台任务面板。本机检查：管理器 ruff / format / mypy 通过，pytest 139 passed / 4 skipped；工作台 ruff / format / mypy / export_openapi --check 通过，llm_bridge、契约、审计、工具相关 151 passed（Postgres 16 + Redis）；前端 lint / typecheck / build / check:api 通过，vitest 84 个文件 928 passed；collab check 通过。本机真实管理器经 HTTP 跑通 llm-task job start / at / status，作业结束后自动开回合，回合结束后令牌作废。没在真实账号上跑（方案 12.4）。
 - 2026-11-18 06:49 UTC · claude · status in_progress → done：验收标准全部勾选；和 T-0292 同一个 PR
+- 2026-11-18 08:03 UTC · claude · 随 T-0292 一起处理集成审查（PR #255）：第 8、9 条涉及自动消息与开发环境，见方案 12.5。

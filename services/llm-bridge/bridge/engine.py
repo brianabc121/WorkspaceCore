@@ -27,7 +27,7 @@ from typing import Any
 
 from bridge import attachments as files
 from bridge import connectivity as net
-from bridge import quota, workfiles
+from bridge import quota, session_cli, workfiles
 from bridge.activity import LIVE_ONLY, TurnActivity
 from bridge.channels import SLOT_LABELS, Channel, canonical, find
 from bridge.config import Settings
@@ -2130,6 +2130,8 @@ class Engine:
                 return
             if real.is_relative_to(self.attachment_root.resolve()):
                 return  # 附件目录里的不再收一遍
+            if not image and real.is_relative_to(root.resolve() / session_cli.SESSION_DIR):
+                return  # 回合令牌所在的文件夹不收（T-0292 审查）
             if real.stat().st_size > files.MAX_BYTES:
                 return
             data = real.read_bytes()

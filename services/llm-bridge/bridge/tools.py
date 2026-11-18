@@ -155,7 +155,7 @@ class TasksInput(_Input):
 class JobStartInput(_Input):
     session_id: str
     command: str = Field(
-        min_length=1, max_length=4000, description="在会话的工作目录里跑的命令（bash -lc）"
+        min_length=1, max_length=4000, description="在会话的工作目录里跑的命令（bash -c）"
     )
     name: str = Field(default="", max_length=60, description="作业的名字；不填用命令的开头")
     timeout_seconds: int | None = Field(
