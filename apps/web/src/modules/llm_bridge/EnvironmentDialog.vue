@@ -238,7 +238,7 @@ onUnmounted(() => { document.removeEventListener('keydown', keys); previous?.foc
                     <option value="custom">自定义镜像</option>
                   </select>
                   <input v-if="nc.image_kind !== 'builtin'" v-model="nc.image" :aria-label="nc.image_kind === 'template' ? '模板名称' : '镜像名称'" maxlength="300" :placeholder="nc.image_kind === 'template' ? '模板名称' : '例如 python:3.12-slim'" />
-                  <p class="form-help">{{ nc.image_kind === 'builtin' ? 'Node 22、Python 3、Git、构建工具，三家命令行和 MCP 管理器同版本。第一次构建要几分钟。' : '在它上面加一层命令行：要求是 glibc 的 Linux 镜像，有 /bin/sh 和 setsid。' }}</p>
+                  <p class="form-help">{{ nc.image_kind === 'builtin' ? 'Node 22、Python 3、Git、构建工具，三家命令行和 MCP 管理器同版本。第一次构建要几分钟。' : '在它上面加一层命令行：要求是 glibc 的 Linux 镜像，有 /bin/sh。缺 timeout、find 这类基础命令时，构建时会用镜像自带的包管理器自动补装。' }}</p>
                 </div>
               </div>
               <fieldset class="lb-place-cards lb-preset-cards">
