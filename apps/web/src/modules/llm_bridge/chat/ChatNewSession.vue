@@ -152,7 +152,7 @@ async function submit() {
             <label for="lc-new-env">开发环境</label>
             <select id="lc-new-env" v-model="environment" required>
               <option value="" disabled>选一个开发环境</option>
-              <option v-for="e in environments" :key="e.id" :value="e.id">{{ e.name }}（{{ sandbox(e.sandbox) }}{{ e.network ? '，可联网' : '' }}）</option>
+              <option v-for="e in environments" :key="e.id" :value="e.id">{{ e.name }}{{ e.location === 'remote' ? ' · 云端' : '' }}（{{ sandbox(e.sandbox) }}{{ e.location !== 'remote' && e.network ? '，可联网' : '' }}）</option>
             </select>
             <p class="form-help">开发环境由 owner 在“管理器与账号”里定好：用哪个仓库、能不能写、能不能执行命令。</p>
           </div>

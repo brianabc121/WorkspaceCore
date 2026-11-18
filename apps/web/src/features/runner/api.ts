@@ -103,6 +103,7 @@ export function runnerError(error: unknown): string {
     RUNNER_HAS_ENVIRONMENTS: '还有没删除的环境：先在“这台服务器上的容器”里删除，再移除容器服务器。',
     AGENT_INGRESS_NOT_CONFIGURED: '这个入口还没有配置（AGENT_INTRANET_URL / AGENT_PUBLIC_URL），不能接入容器服务器。',
     ENV_UNAVAILABLE: error.message || '环境现在的状态做不了这个操作。',
+    MANAGED_BY_MODULE: error.message || '这个容器由大模型客户端管理：请在 大模型客户端 → 开发环境 里删除。',
     SNAPSHOT_NOT_FOUND: '这个环境没有可用的快照了，不能恢复。',
     RUNNER_UNAVAILABLE: '容器服务器不在线。',
     TEMPLATE_NOT_READY: '模板还没有构建好。',
@@ -118,6 +119,15 @@ export const STATE: Record<RunnerEnv['state'], string> = {
   creating: '创建中', running: '运行中', stopped: '已停止', archived: '已归档', pending_delete: '待删除', deleted: '已删除', failed: '失败',
 }
 export const LIFETIME: Record<RunnerEnv['lifetime'], string> = { once: '一次性', session: '会话', persistent: '常驻' }
+/** 模块建的容器（例如 MCP 管理器的远程开发容器，docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 5.6）：不是智能体申请的，归模块管理 */
+export const isModuleOwned = (env: Pick<RunnerEnv, 'owner_kind'>) => (env.owner_kind ?? 'instance') !== 'instance'
+/** 申请方：智能体建的写智能体名（智能体删了写明）；模块建的写模块给的说明 */
+export function ownerText(env: Pick<RunnerEnv, 'owner_kind' | 'owner_label' | 'owner_instance_id' | 'owner'>) {
+  if (isModuleOwned(env)) return env.owner_label || '大模型客户端的远程开发容器'
+  return env.owner_instance_id ? env.owner : '原智能体已删除'
+}
+/** 模块建的容器在这里不能做的操作：在模块自己的页面上删除（后端同样拒绝，MANAGED_BY_MODULE） */
+export const MODULE_MANAGED_ACTIONS: readonly string[] = ['archive', 'delete', 'keep', 'restore']
 export const RUNTIME: Record<RunnerEnv['runtime'], string> = { gvisor: 'gVisor', runc: 'runc', kvm: 'runc + KVM' }
 export const USER: Record<RunnerEnv['user'], string> = { user: '普通用户', root: 'root' }
 export const NETWORK: Record<RunnerEnv['network'], string> = { none: '不联网', allowlist: '只放行名单', all: '全部外网' }

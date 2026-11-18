@@ -153,7 +153,7 @@ async function submit() {
         </div>
         <div v-if="mode === 'dev'" class="form-field">
           <label for="lc-pick-env">开发环境</label>
-          <select id="lc-pick-env" v-model="environment"><option value="" disabled>选一个开发环境</option><option v-for="e in environments" :key="e.id" :value="e.id">{{ e.name }}（{{ sandbox(e.sandbox) }}）</option></select>
+          <select id="lc-pick-env" v-model="environment"><option value="" disabled>选一个开发环境</option><option v-for="e in environments" :key="e.id" :value="e.id">{{ e.name }}{{ e.location === 'remote' ? ' · 云端' : '' }}（{{ sandbox(e.sandbox) }}）</option></select>
         </div>
         <div class="lc-picker-foot">
           <button type="button" class="secondary-button" :disabled="targets.length >= GROUP_TARGETS.max" @click="add"><Plus aria-hidden="true" />添加</button>

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { Bot, Box } from '@lucide/vue'
-import { LIFETIME, STATE, type RunnerEnv } from './api'
+import { Bot, Box, Server } from '@lucide/vue'
+import { LIFETIME, STATE, isModuleOwned, ownerText, type RunnerEnv } from './api'
 import { ago, cpuReading, memoryReading, shortId, STATE_TONE, volumeReading, type Reading } from './containerMetrics'
 
-// 容器表（T-0186，效果图中间的表格）：用途 + 短 ID、申请智能体、类别、状态、CPU 已用 / 上限、内存已用 / 上限、
+// 容器表（T-0186，效果图中间的表格）：用途 + 短 ID、申请方（智能体，或建它的模块，例如 MCP 管理器的远程开发容器）、类别、状态、CPU 已用 / 上限、内存已用 / 上限、
 // 数据卷占用、详情。行用完整 UUID 标识（同名用途不会串）；用途是智能体写的，只当文字显示。
 // 读数的口径与“未知 / 过期”在 containerMetrics.ts；这里只负责摆放。点行或“详情”发出 select。
 defineProps<{ items: RunnerEnv[]; selectedId: string | null }>()
@@ -25,7 +25,7 @@ function pick(env: RunnerEnv, event: Event) {
     <table class="ws-table asv-table cs-table">
       <thead>
         <tr>
-          <th scope="col">容器</th><th scope="col">申请智能体</th><th scope="col">类别</th><th scope="col">状态</th>
+          <th scope="col">容器</th><th scope="col">申请方</th><th scope="col">类别</th><th scope="col">状态</th>
           <th scope="col">CPU 已用 / 上限</th><th scope="col">内存 已用 / 上限</th><th scope="col">数据卷占用</th><th scope="col"><span class="sr-only">操作</span></th>
         </tr>
       </thead>
@@ -35,7 +35,7 @@ function pick(env: RunnerEnv, event: Event) {
             <span class="asv-name"><Box aria-hidden="true" /><span class="preserve-text cs-purpose">{{ env.untrusted.purpose }}</span></span>
             <span class="asv-sub cs-id" :title="env.id">{{ shortId(env.id) }}</span>
           </th>
-          <td data-label="申请智能体"><span class="cs-owner" :class="{ 'is-gone': !env.owner_instance_id }"><Bot aria-hidden="true" />{{ env.owner_instance_id ? env.owner : '原智能体已删除' }}</span></td>
+          <td data-label="申请方"><span class="cs-owner" :class="{ 'is-gone': !isModuleOwned(env) && !env.owner_instance_id, 'is-module': isModuleOwned(env) }"><component :is="isModuleOwned(env) ? Server : Bot" aria-hidden="true" />{{ ownerText(env) }}</span></td>
           <td data-label="类别"><span class="cs-chip" :class="`is-${env.lifetime}`">{{ LIFETIME[env.lifetime] }}</span><span v-if="env.pinned" class="cs-chip is-pinned">已保护</span></td>
           <td data-label="状态"><span class="asv-state" :class="`tone-${STATE_TONE[env.state] ?? 'muted'}`">{{ STATE[env.state] ?? '未知状态' }}</span></td>
           <td v-for="(r, i) in [cpuReading(env), memoryReading(env)]" :key="i" :data-label="i === 0 ? 'CPU 已用 / 上限' : '内存 已用 / 上限'" class="cs-meter-cell" :title="title(r, i === 0 ? 'CPU' : '内存')">
