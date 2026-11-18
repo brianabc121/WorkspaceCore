@@ -27,7 +27,7 @@ from app.core.config import Settings
 from app.domain import runner_specs as specs
 from app.domain.connectors import ConnectorRuntime
 from app.domain.runner import Runner, RunnerError
-from app.domain.runner_managed import ManagedRunner
+from app.domain.runner_managed import ManagedRunner, agent_outdated, require_agent
 from app.domain.sync import SyncContext
 from app.integrations.base import ConnectorError
 from app.integrations.http import CircuitBreaker
@@ -226,6 +226,9 @@ class RemoteContainers:
             raise RemoteError("NOT_SUPPORTED", "Kubernetes 类的容器服务器暂时不能放远程开发容器")
         if host.status == "disabled":
             raise RemoteError("RUNNER_UNAVAILABLE", "这台容器服务器已停用")
+        outdated = agent_outdated(host)
+        if outdated is not None:
+            raise RemoteError("AGENT_OUTDATED", outdated)
         exists = await self.db.scalar(
             select(LlmBridgeRemoteContainer.id).where(
                 LlmBridgeRemoteContainer.bridge_id == bridge.id,
@@ -835,6 +838,7 @@ def _exit_info(run: RunnerRun | None) -> dict[str, Any]:
 async def recreate(runner: Runner, env: RunnerEnvironment, template: RunnerTemplate) -> None:
     """按新镜像重建容器，数据卷保留（create_env 带 recreate，runner-agent 先删旧容器）。"""
     host = await runner.admit_restart(env)
+    require_agent(host)
     env.template_id = template.id
     env.template_revision = template.revision
     env.spec = {

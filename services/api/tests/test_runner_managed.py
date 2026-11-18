@@ -18,9 +18,11 @@ from sqlalchemy import select, update
 
 from app.domain import runner_reclaim
 from app.domain import runner_specs as specs
-from app.domain.runner_managed import ManagedRunner, proc_input_key
+from app.domain.runner import RunnerError
+from app.domain.runner_managed import ManagedRunner, agent_outdated, proc_input_key
 from app.models import RunnerCommand, RunnerEnvironment, RunnerHost, RunnerRun, RunnerTemplate
 from app.modules import registry
+from app.runner_agent import VERSION
 from tests.test_runner_api import (
     SETTINGS,
     add_host,
@@ -398,3 +400,31 @@ async def test_exit_output_is_redacted_and_expired_starts_end_as_unknown(
         stale = await db.get(RunnerRun, expired)
         assert stale is not None and stale.status == "unknown" and stale.finished_at is not None
     assert sink.exits[-1]["run_id"] == str(expired) and sink.exits[-1]["state"] == "lost"
+
+
+def test_agent_version_gate() -> None:
+    """托管进程的指令从 runner-agent 0.4.0 起才有：旧接入包要先重新部署。"""
+    assert agent_outdated(RunnerHost(agent_version=VERSION)) is None
+    assert agent_outdated(RunnerHost(agent_version="1.0")) is None
+    for old in ("0.3.0", "0.1.0", None, "dev"):
+        reason = agent_outdated(RunnerHost(agent_version=old))
+        assert reason is not None and "重新部署接入包" in reason
+
+
+async def test_old_agent_is_refused_before_any_command(env: Env) -> None:
+    _, env_id, host_id = await _setup(env)
+    app = app_of(env.client)
+    async with app.state.sessionmaker() as db:
+        await db.execute(
+            update(RunnerHost).where(RunnerHost.id == host_id).values(agent_version="0.3.0")
+        )
+        await db.commit()
+    with pytest.raises(RunnerError) as caught:
+        await _start(env, env_id)
+    assert caught.value.code == "AGENT_OUTDATED"
+    async with app.state.sessionmaker() as db:
+        kinds = set(
+            await db.scalars(select(RunnerCommand.kind).where(RunnerCommand.host_id == host_id))
+        )
+        assert "proc_start" not in kinds
+        assert not list(await db.scalars(select(RunnerRun).where(RunnerRun.kind == "proc")))

@@ -16,6 +16,7 @@ from sqlalchemy import select
 from app.api.deps import csrf_protected, get_redis
 from app.core.errors import ApiError
 from app.domain.runner import RunnerError
+from app.domain.runner_managed import agent_outdated
 from app.models import RunnerEnvironment, RunnerHost
 from app.modules.llm_bridge import remote_config as cfg
 from app.modules.llm_bridge.client import LOGIN_READ_TIMEOUT
@@ -55,6 +56,7 @@ _STATUS = {
     "TEMPLATE_NOT_READY": 409,
     "PLACEMENT_CONFLICT": 409,
     "RESOURCE_BUSY": 409,
+    "AGENT_OUTDATED": 409,
     "RUNNER_UNAVAILABLE": 503,
 }
 
@@ -134,6 +136,8 @@ async def llm_bridge_remote_targets(
             reason = "Kubernetes 类的容器服务器暂时不能放远程开发容器"
         elif host.status != "online":
             reason = "容器服务器不在线"
+        else:
+            reason = agent_outdated(host)
         out.append(
             LlmBridgeRemoteHostOut(
                 id=host.id,

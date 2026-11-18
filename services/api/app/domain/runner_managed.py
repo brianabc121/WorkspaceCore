@@ -43,6 +43,9 @@ SECRET_ENV_MAX = 8
 PROC_START_DEADLINE = 1800  # 容器停着要先启动、归档的要先重建
 SIGNALS = ("TERM", "KILL")
 _ENV_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+# 托管进程的三条指令（proc_start / proc_signal / proc_input）和 create_env 的 recreate
+# 从这个版本的 runner-agent 起才有；旧接入包会回“不支持的指令”，所以先拦下、提示重新部署
+MIN_AGENT_VERSION = (0, 4, 0)
 _PROXY_ENV = specs.RESERVED_ENV - {"HOME"}
 
 
@@ -86,6 +89,26 @@ async def take_proc_secrets(
     except (CredentialError, ValueError, UnicodeDecodeError):
         return []
     return [str(v) for v in values] if isinstance(values, list) else []
+
+
+def agent_outdated(host: RunnerHost) -> str | None:
+    """runner-agent 认不认得托管进程的指令：认得返回 None，否则返回给人看的原因。"""
+    try:
+        version = tuple(int(part) for part in (host.agent_version or "").split(".")[:3])
+    except ValueError:
+        version = ()
+    if version >= MIN_AGENT_VERSION:
+        return None
+    return (
+        f"这台容器服务器的 runner-agent 是旧版本（{host.agent_version or '未知'}），"
+        "不认得远程开发容器要用的指令：请在容器服务器页面重新部署接入包"
+    )
+
+
+def require_agent(host: RunnerHost) -> None:
+    reason = agent_outdated(host)
+    if reason is not None:
+        raise RunnerError("AGENT_OUTDATED", reason)
 
 
 def proc_dir(run_id: uuid.UUID) -> str:
@@ -220,6 +243,7 @@ class ManagedRunner:
         """从一个已经构建好的模板建常驻环境（不自动归档）。调用方提交。"""
         if owner_kind == OWNER_INSTANCE or not owner_ref:
             raise RunnerError("VALIDATION_FAILED", "模块建的环境要写明归属")
+        require_agent(host)
         if template.build_status != "ready" or not template.image_ref:
             raise RunnerError("TEMPLATE_NOT_READY", f"模板 {template.name} 还没有构建好")
         raw = dict(template.spec)
@@ -396,6 +420,7 @@ class ManagedRunner:
         host = await self.db.get(RunnerHost, env.host_id)
         if host is None:
             raise RunnerError("RUNNER_UNAVAILABLE", "容器服务器已移除")
+        require_agent(host)
         if not argv or len(argv) > 256 or any(not isinstance(a, str) or "\x00" in a for a in argv):
             raise RunnerError("VALIDATION_FAILED", "命令不合法")
         if sum(len(a) for a in argv) > 64 * 1024:

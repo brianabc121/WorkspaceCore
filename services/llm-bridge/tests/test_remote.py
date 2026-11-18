@@ -519,6 +519,10 @@ async def test_remote_jobs_run_in_the_container(
     assert job["argv"][:2] == ["bash", "-c"] and job["argv"][2].endswith(
         "echo hello; echo oops >&2"
     )
+    # 和本地作业一样只给白名单里的环境变量（T-0292 / T-0293）：没有管理令牌、回合令牌和平台凭据
+    assert set(job["env"]) <= {"HOME", "PATH", "LANG", "LLM_TASK_JOB_ID"}
+    assert not job["secret_env"]
+    assert ADMIN not in json.dumps(job) and "sk-test-key" not in json.dumps(job)
 
     async def finished() -> bool:
         row = bridge.engine.store.get_job(job_id)
@@ -543,6 +547,21 @@ async def test_remote_jobs_run_in_the_container(
             session, origin="session", caller_id="x", by="model", command="true"
         )
     assert caught.value.code == "NOT_SUPPORTED" and "llm-task" in caught.value.message
+    # 远程会话不写回合令牌：容器里连不到管理器，也就没有能被读走的令牌
+    assert bridge.engine.longrun.open_token(session, "turn-x") is None
+
+    # 档位照样管着：不是“可以执行命令”档的远程环境不能开作业
+    write_env = await _remote_env(bridge, name="远程-可写", sandbox="workspace_write")
+    made = await bridge.tool(
+        "oc-1",
+        "llm_session_create",
+        {"platform": "claude", "mode": "dev", "environment": write_env},
+    )
+    response = await bridge.admin(
+        "POST", f"/admin/sessions/{made['session_id']}/jobs", json={"command": "true"}
+    )
+    assert response.status_code == 422 and "可以执行命令" in response.text
+    assert len(workspace.started("job")) == 1
 
 
 # ---- 驱动级：直接对着 RemoteHub ----
