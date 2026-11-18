@@ -8,7 +8,7 @@ branch: wip/llm-client
 paths: apps/web/src/modules/llm_bridge,apps/web/src/services/schema.d.ts,apps/web/tests/llm_bridge.test.ts,services/llm-bridge/bridge/app.py,services/llm-bridge/bridge/engine.py,services/llm-bridge/bridge/store.py,services/llm-bridge/bridge/workfiles.py,services/llm-bridge/tests/test_workfiles.py,services/api/app/modules/llm_bridge,services/api/app/domain/audit_labels.py,services/api/openapi.json,services/api/tests/test_module_llm_bridge.py,tests/e2e/llm_bridge_browser.cjs,tests/e2e/llm_chat_browser.cjs,docs/api-contract.md,docs/v2/LLM_BRIDGE_PLAN.md,docs/guides/mcp-manager-deploy.md
 depends_on: T-0286
 created: 2026-11-17
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # T-0289 大模型客户端“管理器与账号”页按效果图改版（平台与账号、运行设置、新增环境弹窗），开发环境里浏览会话的工作目录
@@ -44,3 +44,4 @@ updated: 2026-11-17
 - 2026-11-17 18:01 UTC · claude · 开始任务
 - 2026-11-17 18:02 UTC · claude · 做完：运行概览放到标签上面、全部重新检查；平台与账号按效果图（网络提示条、账号卡片、连接诊断收起）；运行设置四张卡片与底部操作条；开发环境三栏（环境列表 + 文件夹树、会话工作目录的文件、预览与下载），新增 / 修改环境的弹窗。管理器新增 bridge/workfiles.py 与四个接口（只读、限定在会话工作目录、预览脱敏、下载 ≤ 50 MB），工作台转发接口与下载审计 llm_bridge.work_file_downloaded，重新生成 openapi.json / schema.d.ts。管理器 ruff、mypy、pytest 107 passed / 4 skipped；工作台 ruff、mypy、export_openapi --check、llm_bridge 四个测试文件与 test_audit_queries 58 passed；前端 lint、typecheck、vitest 84 个文件 924 个测试、build、check:api 通过。Vite + Playwright（模拟接口）截图核对 1920 / 1440 和弹窗。浏览器验收（llm_bridge_browser.cjs、llm_chat_browser.cjs）跟着改，以 CI 为准。待 #251、#252 合并后合进最新 main（和 #252 改了同样的文件）再推送。
 - 2026-11-17 18:02 UTC · claude · status in_progress → done：管理器与账号页按效果图改版、开发环境浏览文件完成，验收标准全部勾选（浏览器验收以 CI 为准）
+- 2026-11-18 01:58 UTC · claude · 合并 main 60cc147（含 #251、#252、#253）：cli_stream.py 同时保留推理强度和网页授权登录，BridgeAccounts.vue 按新布局接上 #252 的授权码输入；main 新增的连通性用例先展开“连接诊断”。合并后：管理器 ruff / mypy / pytest 116 passed 4 skipped；工作台 ruff / mypy / openapi 最新，Postgres 16 + Redis 上 llm_bridge 全部测试文件和 test_contract、test_audit_queries 126 passed；前端 lint、typecheck、vitest 84 个文件 926 个测试、build、check:api 通过；两个浏览器验收脚本 node --check 通过，实际运行以 CI 为准。
