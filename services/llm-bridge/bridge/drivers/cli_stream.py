@@ -28,6 +28,7 @@ from bridge import hooks, quota, remote
 from bridge.drivers import progress
 from bridge.drivers.base import (
     JOBS_INSTRUCTIONS,
+    PROGRAM_ENV_PASS,
     AccountStatus,
     ContextUsage,
     Driver,
@@ -46,20 +47,7 @@ from bridge.drivers.base import (
 from bridge.drivers.web_login import WebLogin
 from bridge.redact import mask_identity, redact
 
-_ENV_PASS = (
-    "PATH",
-    "LANG",
-    "LC_ALL",
-    "TZ",
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "NO_PROXY",
-    "https_proxy",
-    "http_proxy",
-    "no_proxy",
-    "SSL_CERT_FILE",
-    "NODE_EXTRA_CA_CERTS",
-)
+_ENV_PASS = PROGRAM_ENV_PASS
 _AUTH_HINTS = (
     "authentication required",
     "/login",

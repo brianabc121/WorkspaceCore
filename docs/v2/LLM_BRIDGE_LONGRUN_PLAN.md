@@ -276,6 +276,7 @@ MCP 工具作为以后的选项。
 - **只在“可以执行命令”档位的开发环境允许作业。** 否则“只读”和“只能改文件”的环境，会被作业绕过去跑命令。Codex 的作业不受 Codex 自己的沙箱约束，所以同样只在管理员明确打开的环境里允许。
 - 作业的环境变量只给白名单，不带管理器的令牌和回合令牌；日志和预览一样先脱敏；日志有大小上限；作业的工作目录限定在会话目录。
   - 作业和管理器是同一个用户，本来能读 `/proc/<管理器>/environ`。所以容器的 1 号进程（`bridge/pid1.py`）和管理器都设成不可转储（`PR_SET_DUMPABLE=0`），同一个用户的进程读不到它们的环境变量和内存（12.5）。
+  - 官方程序（Claude、CodeBuddy、Codex 的 app-server）只拿到白名单里的环境变量（`bridge/drivers/base.py` 的 `PROGRAM_ENV_PASS`），不带管理器的 `BRIDGE_*`。它们没有设成不可转储，而且它们跑的命令会继承它们的环境，所以这一条必须靠白名单。原来 Codex 拿的是完整的环境，合并后由集成会话发现，在 T-0293 修了（12.6）。
   - 每个会话的作业有自己的 HOME，用 `bash -c` 启动（不是登录 shell），一个会话写进启动文件、凭据文件的东西不会被别的会话的作业用上。
 - 会话工作目录里的东西会话能改，仓库里也能提交符号链接。管理器在工作目录里写令牌、改 `.git/info/exclude` 时一路不跟随符号链接（`O_NOFOLLOW`），不会被引着去覆盖别的文件（12.5）。
 - **自动回合的消息写明“不是人发的、不代表批准”**。工作台和外层智能体也不能把它当作人的指令（AGENTS.md 第 8 节的审批规则不变）。
@@ -381,4 +382,12 @@ MCP 工具作为以后的选项。
 镜像的冒烟检查（`infra/llm-bridge/smoke.sh`）加了三项，CI 在真实镜像里核对：1 号进程是 `pid1.py`；同一个用户读不到 1 号进程和管理器的环境变量；`llm-task` 在 `/usr/local/bin` 且不能改写。
 
 以后再做：作业用单独的用户或容器运行，从根上隔开数据卷（第 8 节的已知限制）。
+
+### 12.6 合并后补的一处（T-0293）
+
+集成会话合并 PR #255 后指出：`bridge/drivers/codex.py` 启动 `codex app-server` 时传的是完整的 `os.environ`，里面有 `BRIDGE_ADMIN_TOKEN`。这段代码在本方案之前就有。
+
+- 影响：app-server 没有设成不可转储，同一个用户的作业能读它的 `/proc/<pid>/environ`。更直接的是，Codex 在“可以执行命令”档位跑的命令继承 app-server 的环境，本身就带着管理令牌。12.5 的冒烟检查只查了 1 号进程和 uvicorn，app-server 要用到 Codex 才启动，所以没查到。
+- 改法：三家官方程序共用一份环境变量白名单（`PROGRAM_ENV_PASS`，原来是 `cli_stream.py` 的 `_ENV_PASS`）；Codex 另外只加 `CODEX_HOME` 和 `HOME`。
+- 测试：`test_official_programs_never_get_the_bridge_settings` 记下 Codex 和 Claude 实际收到的环境变量，确认没有 `BRIDGE_*`，在旧代码上失败。冒烟检查先列一次 Codex 的模型（启动真实的 app-server），再查容器里每个进程的环境变量都没有非空的管理令牌。
 

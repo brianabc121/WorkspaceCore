@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +24,33 @@ ErrorKind = Literal[
 ]
 
 Mode = Literal["chat", "dev", "cloud"]
+
+# 官方程序（Claude / CodeBuddy / Codex）从管理器那里只拿到这些环境变量，再加上各自的登录目录、密钥。
+# 管理器自己的 BRIDGE_*（里面有管理令牌）一个都不传：官方程序在“可以执行命令”档位跑的命令
+# 继承它们的环境，它们的 /proc/<pid>/environ 同一个用户也读得到（T-0293）
+PROGRAM_ENV_PASS = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "https_proxy",
+    "http_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "NODE_EXTRA_CA_CERTS",
+)
+
+
+def program_env(**extra: str) -> dict[str, str]:
+    """启动官方程序用的环境变量：白名单里的，加上 extra。"""
+    env = {k: os.environ[k] for k in PROGRAM_ENV_PASS if k in os.environ}
+    env.update(extra)
+    return env
+
+
 Sandbox = Literal["read_only", "workspace_write", "exec"]
 
 
