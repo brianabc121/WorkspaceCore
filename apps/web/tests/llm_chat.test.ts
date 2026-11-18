@@ -399,6 +399,77 @@ describe('大模型聊天', () => {
     await waitFor(() => expect(box).toHaveValue(''))
   })
 
+  it('shows the background tasks: what the turn is running, jobs, timers and the paused chain', async () => {
+    // 后台任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.9）：正在跑的命令、作业、预约、自动接着做；能停、能取消、能预约、能继续
+    const J1 = `bj_${'1'.repeat(20)}`, J2 = `bj_${'2'.repeat(20)}`, W1 = `bw_${'1'.repeat(20)}`
+    const tasksUrl = `/api/v1/llm_bridge/bridges/${ONE}/sessions/${S1}/tasks`
+    const job = (id: string, over: Partial<Schema['LlmBridgeJobOut']> = {}): Schema['LlmBridgeJobOut'] => ({
+      id, session_id: S1, name: '跑完整测试', command: 'make test', status: 'running', status_label: '运行中', origin: 'session', by: '会话里的模型',
+      follow_up: true, note: '', timeout_seconds: 86400, exit_code: null, log_bytes: 10, created_at: now() - 300, started_at: now() - 300,
+      finished_at: null, seconds: 300, quiet_seconds: 40, last_output_at: now() - 40, error: null, stopped_by: null, follow_turn_id: null, ...over,
+    })
+    const tasks: Schema['LlmBridgeTasksOut'] = {
+      session_id: S1, running_turn_id: T1, jobs_allowed: true, jobs_blocked: null,
+      activity: { last_event_at: now(), quiet_seconds: 0, current: { kind: 'command', text: 'gh run watch 123', started_at: now() - 125, seconds: 125 }, output_tail: '✓ build\n* test', background: [] },
+      jobs: [job(J1), job(J2, { name: '构建', status: 'failed', status_label: '失败', exit_code: 2, finished_at: now() - 10, seconds: 60, quiet_seconds: null })],
+      timers: [{ id: W1, session_id: S1, text: '去看 CI 结果', status: 'pending', status_label: '待发出', origin: 'caller', by: '研究员', run_at: now() + 3600, created_at: now(), fired_at: null, fired_turn_id: null, reason: null, in_seconds: 3600 }],
+      chain: { status: 'paused', status_label: '已暂停', rounds: 20, failures: 0, started_at: now() - 3600, paused_reason: '已经连续自动接着做了 20 轮（上限 20）', auto_turns_today: 20, limits: { rounds: 20, hours: 72, failures: 3, per_day: 48 } },
+    }
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const running = talk({ mode: 'dev', busy: true }, [asked('跑一下测试'), answered('', T1, { status: 'running' })])
+    const { requests } = setup('owner', { sessions: [session({ mode: 'dev', busy: true })], conversations: { [S1]: running }, events: [new Promise(() => {})] }, (r) => {
+      const p = path(r)
+      if (p === tasksUrl) return Response.json(tasks)
+      if (p === `/api/v1/llm_bridge/bridges/${ONE}/jobs/${J1}/stop`) return Response.json({ job: job(J1, { status: 'stopped', status_label: '已停止' }) })
+      if (p === `/api/v1/llm_bridge/bridges/${ONE}/jobs/${J2}/log`) return Response.json({ job_id: J2, status: 'failed', text: 'FAIL test_login', total_bytes: 15, truncated: false })
+      if (p === `/api/v1/llm_bridge/bridges/${ONE}/timers/${W1}/cancel`) return Response.json({ timer: { ...tasks.timers[0]!, status: 'cancelled', status_label: '已取消' } })
+      if (p === `/api/v1/llm_bridge/bridges/${ONE}/sessions/${S1}/timers`) return Response.json({ timer: { ...tasks.timers[0]!, text: '明早再看' } })
+      if (p === `/api/v1/llm_bridge/bridges/${ONE}/sessions/${S1}/chain`) return Response.json({ chain: { ...tasks.chain, status: 'active', status_label: '进行中', rounds: 0, paused_reason: null } })
+      return undefined
+    })
+    await openApp(`/llm_bridge?m=${ONE}&s=${S1}`)
+    const panel = await screen.findByRole('region', { name: '后台任务' })
+    // 有在跑的、暂停了的：默认展开；摘要里写清楚
+    expect(await within(panel).findByText('1 个作业运行中 · 1 个预约 · 自动接着做已暂停')).toBeVisible()
+    const now_ = within(panel).getByRole('status', { name: '正在运行' })
+    expect(now_).toHaveTextContent('gh run watch 123')
+    expect(now_).toHaveTextContent('已 2 分钟')
+    expect(within(panel).getByRole('alert')).toHaveTextContent('自动接着做已暂停：已经连续自动接着做了 20 轮（上限 20）')
+    const runningJobs = within(panel).getByRole('list', { name: '运行中的后台作业' })
+    expect(runningJobs).toHaveTextContent('跑完整测试')
+    expect(runningJobs).toHaveTextContent('已 5 分钟 · 40 秒没有输出 · 会话里的模型 · 结束后自动接着做')
+    expect(within(panel).getByRole('list', { name: '待发出的预约' })).toHaveTextContent('去看 CI 结果')
+
+    await fireEvent.click(within(panel).getByRole('button', { name: '停止作业：跑完整测试' }))
+    await waitFor(() => expect(writes(requests).some(r => path(r).endsWith(`/jobs/${J1}/stop`))).toBe(true))
+    const cancelTimer = within(panel).getByRole('button', { name: /^取消预约/ })
+    await waitFor(() => expect(cancelTimer).toBeEnabled())  // 上一个操作做完、刷新完才能点
+    await fireEvent.click(cancelTimer)
+    await waitFor(() => expect(writes(requests).some(r => path(r).endsWith(`/timers/${W1}/cancel`))).toBe(true))
+    const resume = within(panel).getByRole('button', { name: '继续自动接着做' })
+    await waitFor(() => expect(resume).toBeEnabled())
+    await fireEvent.click(resume)
+    await waitFor(() => expect(writes(requests).some(r => path(r).endsWith('/chain'))).toBe(true))
+    const chainCall = writes(requests).find(r => path(r).endsWith('/chain'))!
+    expect(await chainCall.clone().json()).toEqual({ action: 'resume' })
+
+    // 已完成的作业：看日志
+    await fireEvent.click(within(panel).getByText('已完成'))
+    await fireEvent.click(within(panel).getByRole('button', { name: '看日志：构建' }))
+    const logBox = await within(panel).findByLabelText('日志：构建')
+    await waitFor(() => expect(logBox).toHaveTextContent('FAIL test_login'))
+
+    // 人预约一条消息
+    await fireEvent.click(within(panel).getByRole('button', { name: '预约一条消息' }))
+    const form = within(panel).getByRole('form', { name: '预约一条消息' })
+    await fireEvent.update(within(form).getByRole('textbox', { name: '到时候发给会话的话' }), '明早再看')
+    await fireEvent.update(within(form).getByRole('combobox', { name: '什么时候发' }), '86400')
+    await fireEvent.click(within(form).getByRole('button', { name: '预约' }))
+    await waitFor(() => expect(writes(requests).some(r => path(r).endsWith(`/sessions/${S1}/timers`))).toBe(true))
+    const planned = writes(requests).find(r => path(r).endsWith(`/sessions/${S1}/timers`))!
+    expect(await planned.clone().json()).toEqual({ text: '明早再看', after_seconds: 86400 })
+  })
+
   it('stops a running turn, renames and archives the session', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true)
     const running = [asked('跑一下测试'), answered('', T1, { status: 'running' })]
