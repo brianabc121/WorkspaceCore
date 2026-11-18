@@ -26,7 +26,7 @@
 | 反向代理安全头 | CSP、HSTS、请求体限制 | Caddy 设置 CSP、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`、COOP，去掉 `Server` 头，请求体上限 10 MB；HSTS 需在启用 HTTPS 后加入（见 deployment.md 第 6 节） |
 | API 文档暴露 | — | `APP_ENV=production` 时关闭 OpenAPI 与文档页 |
 | 就绪接口泄露内部状态 | `/readyz` 仅内部使用（规范第 6.1 节） | Caddy 只把内网来源的 `/readyz` 转发给 api，公网来源返回 404；响应只含 ok / error |
-| 依赖与镜像漏洞、密钥进入仓库 | 安全扫描（规范第 12 节） | `ci-security.yml`：依赖（pip-audit、npm audit）有高危就失败；gitleaks 扫描整个 git 历史，误报按指纹登记；本仓库构建的镜像有已修复的高危漏洞就失败，第三方镜像只报告、发布前跟进（T-0044）。所有镜像按 tag + digest 锁定（`docs/versions.md`） |
+| 依赖与镜像漏洞、密钥进入仓库 | 安全扫描（规范第 12 节） | `ci-security.yml`：依赖（pip-audit、npm audit）有高危就失败（没有修复版本、又只经开发工具引入的 npm 公告可以登记带到期日的临时例外，T-0290）；gitleaks 扫描整个 git 历史，误报按指纹登记；本仓库构建的镜像有已修复的高危漏洞就失败，第三方镜像只报告、发布前跟进（T-0044）。所有镜像按 tag + digest 锁定（`docs/versions.md`） |
 | 数据丢失 | 加密备份、异地、定期恢复演练（规范 11.4） | `make backup`：restic 加密仓库，按 7 / 30 / 90 日保留；`make restore-verify` 在隔离环境恢复并做冒烟与迁移检查，CI 每次都演练（A15，T-0042）。`.env` 与备份分开保存 |
 | 默认弱密码 / 抢注管理员 | 不提供硬编码默认密码 | `make env` 为数据库密码、会话密钥、安装凭据、凭证加密密钥生成随机值；`.env` 权限 600 且被 git 忽略；首次安装必须提供 `SETUP_TOKEN` 且只能成功一次 |
 | **V2：实例凭证泄露** | 只存哈希、绑定入口、外网加双向证书、一键停用 | 实例令牌只存 SHA-256，绑定登记时的入口（内网 / 外网），用错入口一律 401；外网模式还要客户端证书（工作台内部 CA 签发，90 天），吊销按证书指纹立即生效、不依赖 CRL；重新生成接入包时旧凭证再保留 24 小时；停用实例或关掉工作空间的总开关后，认证立即失败并强制 IM 下线；最近使用时间与 IP 可查；外网入口按 IP 限制认证失败次数。端到端场景 6、7 |

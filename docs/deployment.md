@@ -531,7 +531,7 @@ S3 仓库的凭据（`AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_DEFAUL
 
 | 子命令 | 内容 | 什么时候失败 |
 |---|---|---|
-| `scripts/security-scan.sh deps` | pip-audit（按 `services/api/uv.lock`）与 npm audit（`apps/web`、`tests/e2e` 的锁文件），都包含开发依赖 | 有高危或严重漏洞；中低危只报告 |
+| `scripts/security-scan.sh deps` | pip-audit（按 `services/api/uv.lock`）与 npm audit（`apps/web`、`tests/e2e` 的锁文件），都包含开发依赖 | 有高危或严重漏洞；中低危只报告。npm 的公告逐条判定：登记在 `scripts/security-exceptions.txt`、还没到期的临时例外不算失败（见 `docs/decisions/2026-11-18-npm-audit-picomatch-exception.md`） |
 | `scripts/security-scan.sh secrets` | gitleaks 扫描整个 git 历史 | 有任何发现。已知误报按指纹登记在 `.gitleaksignore`，每条写明理由 |
 | `scripts/security-scan.sh images` | trivy 扫描已有修复版本的高危 / 严重漏洞 | 本仓库构建的镜像（api、web）有就失败；第三方锁定镜像只报告 |
 

@@ -4,7 +4,9 @@
 #
 # 用法：scripts/security-scan.sh [deps|secrets|images|all]   默认 all，可以写多个
 #   deps     Python（pip-audit，按 services/api/uv.lock）与 npm（npm audit，按各 package-lock.json）依赖，
-#            都包含开发依赖：有高危或严重漏洞就失败，中低危只报告
+#            都包含开发依赖：有高危或严重漏洞就失败，中低危只报告。
+#            npm 的公告按条看：登记在 scripts/security-exceptions.txt、还没到期的例外不算失败（T-0290），
+#            到期后自动失效、照常失败
 #   secrets  gitleaks 扫描整个 git 历史：有任何发现就失败；已知误报按指纹登记在 .gitleaksignore
 #   images   trivy 扫描已有修复版本的高危 / 严重漏洞：
 #            - 本仓库构建的镜像（my-workspace-api:local、my-workspace-web:local）有就失败，要先构建（make up）
@@ -27,6 +29,7 @@ GITLEAKS_IMAGE="zricethezav/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16
 TRIVY_IMAGE="aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c"
 OWN_IMAGES=(my-workspace-api:local my-workspace-web:local)
 NPM_PROJECTS=(apps/web tests/e2e)
+NPM_EXCEPTIONS="$ROOT/scripts/security-exceptions.txt"
 
 failed=()
 reports=""   # 临时目录：pip-audit 的输入与 trivy 的 JSON 报告；退出时删除
@@ -43,9 +46,61 @@ scan_deps() {
 
   local dir
   for dir in "${NPM_PROJECTS[@]}"; do
-    section "npm 依赖：npm audit（$dir/package-lock.json，含开发依赖，高危及以上失败）"
-    (cd "$dir" && npm audit --audit-level=high) || failed+=("npm 依赖（$dir）")
+    section "npm 依赖：npm audit（$dir/package-lock.json，含开发依赖，高危及以上失败；例外见 scripts/security-exceptions.txt）"
+    npm_audit "$dir" || failed+=("npm 依赖（$dir）")
   done
+}
+
+# 一个 npm 项目的审计：按 npm audit --json 的结果逐条看公告（T-0290）。
+# 高危及以上、又不在有效例外里的公告算失败；npm audit 本身出错（例如连不上公告库）也算失败。
+npm_audit() {
+  local json="$reports/npm-audit-${1//\//_}.json"
+  # 有漏洞时 npm audit 退出码不是 0：以它输出的 JSON 为准
+  (cd "$1" && npm audit --json > "$json") || true
+  python3 - "$json" "$NPM_EXCEPTIONS" <<'PY'
+import datetime
+import json
+import sys
+
+try:
+    report = json.load(open(sys.argv[1], encoding="utf-8"))
+except (OSError, ValueError) as error:
+    sys.exit(f"npm audit 没有给出可读的结果：{error}")
+if "error" in report or "vulnerabilities" not in report:
+    sys.exit(f"npm audit 出错：{json.dumps(report.get('error', report), ensure_ascii=False)[:500]}")
+today = datetime.datetime.now(datetime.timezone.utc).date()
+exceptions = {}
+for line in open(sys.argv[2], encoding="utf-8"):
+    line = line.strip()
+    if line and not line.startswith("#"):
+        advisory, until = line.split()[:2]
+        exceptions[advisory] = datetime.date.fromisoformat(until)
+failed, waived, reported = {}, {}, set()
+for name, item in report["vulnerabilities"].items():
+    for via in item.get("via", []):
+        if not isinstance(via, dict):
+            continue  # 字符串是“经由别的包”：那个包自己的公告会单独列出
+        advisory = str(via.get("url", "")).rstrip("/").rsplit("/", 1)[-1]
+        if via.get("severity") not in ("high", "critical"):
+            reported.add(f"{via.get('severity')} {name} {advisory} {via.get('title', '')}")
+            continue
+        until = exceptions.get(advisory)
+        key = (advisory, name)
+        if until is not None and today <= until:
+            waived[key] = until
+        else:
+            note = f"（例外 {until} 已到期）" if until is not None else ""
+            failed[key] = f"{via.get('severity')} {name} {advisory} {via.get('title', '')}{note}"
+counts = report.get("metadata", {}).get("vulnerabilities", {})
+print("公告数（按包算，含经由别的包）：", ", ".join(f"{k} {v}" for k, v in counts.items()))
+for line in sorted(reported):
+    print(f"只报告：{line}")
+for (advisory, name), until in sorted(waived.items()):
+    print(f"例外（到 {until} 为止）：{advisory} {name}")
+for line in sorted(failed.values()):
+    print(f"高危及以上：{line}")
+sys.exit(1 if failed else 0)
+PY
 }
 
 scan_secrets() {
