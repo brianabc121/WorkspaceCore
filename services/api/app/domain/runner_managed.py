@@ -54,6 +54,40 @@ def _context(command_id: uuid.UUID) -> str:
     return f"runner-proc-input:{command_id}"
 
 
+def proc_secrets_key(run_id: uuid.UUID) -> str:
+    return f"runner:proc-secrets:{run_id}"
+
+
+async def remember_proc_secrets(
+    redis: Redis | None, settings: Settings, run_id: uuid.UUID, values: list[str], ttl: int
+) -> None:
+    """托管进程注入的凭据值：进程结束时用来给错误输出脱敏（加密放 Redis，不落库，结束后删除）。"""
+    if redis is None or not values:
+        return
+    box = CredentialBox.from_settings(settings)
+    sealed = box.seal(json.dumps(values), context=f"runner-proc-secrets:{run_id}")
+    await redis.set(proc_secrets_key(run_id), sealed, ex=ttl)
+
+
+async def take_proc_secrets(
+    redis: Redis | None, settings: Settings, run_id: uuid.UUID
+) -> list[str]:
+    if redis is None:
+        return []
+    raw = await redis.getdel(proc_secrets_key(run_id))
+    if not raw:
+        return []
+    try:
+        text = raw.decode() if isinstance(raw, bytes) else str(raw)
+        opened = CredentialBox.from_settings(settings).resolve(
+            text, context=f"runner-proc-secrets:{run_id}"
+        )
+        values = json.loads(opened.get_secret_value())
+    except (CredentialError, ValueError, UnicodeDecodeError):
+        return []
+    return [str(v) for v in values] if isinstance(values, list) else []
+
+
 def proc_dir(run_id: uuid.UUID) -> str:
     return f"{PROC_ROOT}/{run_id}"
 
@@ -412,6 +446,13 @@ class ManagedRunner:
             self.settings,
             command.id,
             {"stdin_b64": base64.b64encode(stdin).decode(), "secret_env": secret},
+        )
+        await remember_proc_secrets(
+            self.redis,
+            self.settings,
+            run.id,
+            list(secret.values()),
+            timeout + PROC_START_DEADLINE + extra + 3600,
         )
         await self.runner.touch(env)
         return run

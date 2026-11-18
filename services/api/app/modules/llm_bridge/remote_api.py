@@ -97,7 +97,7 @@ async def container_out(
         idle_stop_minutes=int(settings.get("idle_stop_minutes") or 0),
         cli_versions={str(k): str(v) for k, v in (row.cli_versions or {}).items()},
         versions_ok=dict(row.cli_versions or {}) == cfg.CLI_VERSIONS,
-        updating_image=bool(settings.get("pending_image")),
+        updating_image=bool(settings.get("pending_image") or settings.get("recreating")),
         image_error=settings.get("image_error"),
         last_used_at=env.last_used_at if env is not None else None,
         created_at=row.created_at,

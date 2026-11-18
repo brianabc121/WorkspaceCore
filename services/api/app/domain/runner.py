@@ -1924,12 +1924,17 @@ class Runner:
                 run.status = "running"
                 run.started_at = run.started_at or specs.now()
             return
+        from app.domain.runner_procs import notify_exit, redaction_values
+
+        env = await self.db.get(RunnerEnvironment, run.environment_id)
+        reason = _redact(
+            (error or "托管进程没有起来")[:2000],
+            await redaction_values(self.db, self.settings, self.redis, run, env),
+        )
         run.status = "failed"
         run.finished_at = specs.now()
-        run.output = f"[工作台] {(error or '托管进程没有起来')[:2000]}"
-        from app.domain.runner_procs import notify_exit
-
-        await notify_exit(self.db, self.settings, run, "failed", error or "托管进程没有起来")
+        run.output = f"[工作台] {reason}"
+        await notify_exit(self.db, self.settings, run, "failed", reason)
 
     async def _keep_snapshots(self, env: RunnerEnvironment) -> None:
         """环境删除后，它的快照再保留 archive_retention_days 天（可以从页面恢复）。"""

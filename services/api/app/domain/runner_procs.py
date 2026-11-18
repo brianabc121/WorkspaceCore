@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import ApiError
 from app.domain import runner_specs as specs
+from app.domain.runner import _redact
 from app.domain.runner_managed import proc_dir
 from app.models import RunnerEnvironment, RunnerHost, RunnerRun
 from app.modules import registry
@@ -105,8 +106,11 @@ async def accept_exit(
         return False
     run.finished_at = specs.now()
     run.started_at = run.started_at or run.finished_at
-    tail = body.stderr_tail[-STDERR_KEEP:]
-    note = f"\n[工作台] {body.error}" if body.error else ""
+    # 落库前脱敏：这个进程注入的凭据值、环境的密钥值，再按密钥样式（和普通执行一样）
+    secrets = await redaction_values(db, settings, redis, run, env)
+    tail = _redact(body.stderr_tail[-STDERR_KEEP:], secrets)
+    error = _redact(body.error, secrets) if body.error else None
+    note = f"\n[工作台] {error}" if error else ""
     run.output = (tail + note)[-specs.OUTPUT_LIMIT :]
     if body.state == "exited":
         run.exit_code = body.exit_code
@@ -122,10 +126,27 @@ async def accept_exit(
     sink = _sink(run)
     if sink is not None:
         try:
-            await sink.exit(db, settings, run, body.model_dump(), runtime=runtime)
+            info = {**body.model_dump(), "stderr_tail": tail, "error": error}
+            await sink.exit(db, settings, run, info, runtime=runtime)
         except Exception:  # 模块转不出去时由它自己的对账补发
             logger.exception("托管进程 %s 的结束交给模块失败", run.id)
     return True
+
+
+async def redaction_values(
+    db: AsyncSession,
+    settings: Settings,
+    redis: Redis | None,
+    run: RunnerRun,
+    env: RunnerEnvironment | None,
+) -> list[str]:
+    from app.domain.runner import Runner
+    from app.domain.runner_managed import take_proc_secrets
+
+    values = await take_proc_secrets(redis, settings, run.id)
+    if env is not None:
+        values += await Runner(db, settings, redis).secrets_for(env)
+    return values
 
 
 async def notify_exit(

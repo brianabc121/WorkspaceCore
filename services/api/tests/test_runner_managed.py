@@ -341,3 +341,60 @@ async def test_reclaim_and_admin_treat_module_environments_specially(
         headers=env.headers(write=True),
     )
     assert started.status_code == 200, started.text
+
+
+async def test_exit_output_is_redacted_and_expired_starts_end_as_unknown(
+    env: Env, sink: FakeSink
+) -> None:
+    rtoken, env_id, _ = await _setup(env)
+    app = app_of(env.client)
+    plain = "cbk_plainvalue_" + "q" * 20  # 不像任何已知格式的凭据：靠注入时记下的值脱敏
+    async with app.state.sessionmaker() as db:
+        target = await db.get(RunnerEnvironment, env_id)
+        assert target is not None
+        run = await ManagedRunner(db, app.state.settings, app.state.redis).start_proc(
+            target,
+            owner_kind="llm_bridge",
+            owner_ref="container-1",
+            label="turn · workbuddy · bs_test0002",
+            argv=["/opt/mw/cli/bin/codebuddy", "-p"],
+            cwd="/workspace/sessions/bs_test0002",
+            secret_env={"CODEBUDDY_API_KEY": plain},
+            timeout_seconds=600,
+        )
+        await db.commit()
+        run_id = run.id
+    command = await next_command(env, rtoken, "proc_start")
+    assert await report_result(env, rtoken, command["id"], {"started": True, "pgid": 3})
+    exited = await env.client.post(
+        f"/runner-api/v1/procs/{run_id}/exit",
+        json={
+            "exit_code": 1,
+            "state": "exited",
+            "stderr_tail": f"auth failed for {plain} and {SECRET}",
+            "error": f"bad key {plain}",
+        },
+        headers=runner_headers(rtoken),
+    )
+    assert exited.status_code == 200, exited.text
+    async with app.state.sessionmaker() as db:
+        stored = await db.get(RunnerRun, run_id)
+        assert stored is not None
+        assert plain not in stored.output and SECRET not in stored.output
+        assert "***" in stored.output
+    assert plain not in json.dumps(sink.exits) and SECRET not in json.dumps(sink.exits)
+
+    # 起进程的指令过期（runner-agent 没回报）：运行记成结果未知，并告诉模块
+    expired = await _start(env, env_id)
+    async with app.state.sessionmaker() as db:
+        await db.execute(
+            update(RunnerCommand)
+            .where(RunnerCommand.run_id == expired, RunnerCommand.kind == "proc_start")
+            .values(deadline_at=specs.now() - timedelta(seconds=1))
+        )
+        await db.commit()
+        await runner_reclaim.tick(db, app.state.settings, app.state.redis)
+        await db.commit()
+        stale = await db.get(RunnerRun, expired)
+        assert stale is not None and stale.status == "unknown" and stale.finished_at is not None
+    assert sink.exits[-1]["run_id"] == str(expired) and sink.exits[-1]["state"] == "lost"

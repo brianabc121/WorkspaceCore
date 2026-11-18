@@ -459,10 +459,13 @@ class RemoteContainers:
                 if host is None or env is None or env.state in ("deleted", "pending_delete"):
                     raise RemoteError("ENV_UNAVAILABLE", "容器还没建好")
                 await self._start_build(row, host, row.created_by)
-                row.cli_versions = dict(cfg.CLI_VERSIONS)
+                # 版本等容器按新镜像重建成功后才改（remote_tick）：
+                # 失败时页面仍显示版本不一致，可以再点
                 settings = dict(row.settings or {})
                 settings.pop("image_error", None)
+                settings.pop("recreating", None)
                 settings["pending_image"] = True
+                settings["pending_versions"] = dict(cfg.CLI_VERSIONS)
                 row.settings = settings
             else:
                 raise RemoteError("VALIDATION_FAILED", "不认识的操作")
@@ -929,22 +932,51 @@ async def _housekeeping(context: SyncContext) -> None:
             except Exception:
                 await db.rollback()
                 logger.exception("远程容器 %s 没建成", row.id)
-            # 管理器升级后：新镜像好了就按新镜像重建容器（数据卷保留）
+            # 管理器升级后：新镜像好了就按新镜像重建容器（数据卷保留）；重建好了才改记下的版本
             settings = row.settings or {}
-            if settings.get("pending_image"):
+            if settings.get("recreating"):
+                template = await remote.template_of(row)
+                env = await remote.env_of(row)
+                if env is not None and template is not None and env.template_id == template.id:
+                    if env.state in ("running", "stopped"):
+                        row.cli_versions = dict(settings.get("pending_versions") or {})
+                        row.settings = {
+                            k: v
+                            for k, v in settings.items()
+                            if k not in ("recreating", "pending_versions")
+                        }
+                        await db.commit()
+                    elif env.state == "failed":
+                        row.settings = {
+                            **{
+                                k: v
+                                for k, v in settings.items()
+                                if k not in ("recreating", "pending_versions")
+                            },
+                            "image_error": (env.state_reason or "按新镜像重建容器失败")[:300],
+                        }
+                        await db.commit()
+            elif settings.get("pending_image"):
                 template = await remote.template_of(row)
                 env = await remote.env_of(row)
                 if template is not None and template.build_status == "ready" and env is not None:
                     try:
                         await recreate(remote.runner(), env, template)
-                        row.settings = {k: v for k, v in settings.items() if k != "pending_image"}
+                        row.settings = {
+                            **{k: v for k, v in settings.items() if k != "pending_image"},
+                            "recreating": True,
+                        }
                         await db.commit()
                     except RunnerError as error:
                         await db.rollback()
                         logger.info("远程容器 %s 更新镜像没成：%s", row.id, error.message)
                 elif template is not None and template.build_status == "failed":
                     row.settings = {
-                        **{k: v for k, v in settings.items() if k != "pending_image"},
+                        **{
+                            k: v
+                            for k, v in settings.items()
+                            if k not in ("pending_image", "pending_versions")
+                        },
                         "image_error": (template.build_error or "镜像构建失败")[:300],
                     }
                     await db.commit()

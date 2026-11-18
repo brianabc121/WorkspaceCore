@@ -165,6 +165,14 @@ async def _expire_commands(
         )
         if command.kind == "exec" and command.run_id is not None:
             await _run_unknown(db, command.run_id)
+        elif command.kind == "proc_start" and command.run_id is not None:
+            # 托管进程没回报“起来了”：结果未知，告诉建它的模块（模块自己的对账也会补发）
+            from app.domain.runner_procs import notify_exit
+
+            await _run_unknown(db, command.run_id)
+            run = await db.get(RunnerRun, command.run_id)
+            if run is not None and run.status == "unknown":
+                await notify_exit(db, runner.settings, run, "lost", command.error)
         elif command.kind == "create_env" and env is not None and env.state == "creating":
             env.state = "failed"
             env.state_reason = "创建超时：容器服务器在时限内没有回报"

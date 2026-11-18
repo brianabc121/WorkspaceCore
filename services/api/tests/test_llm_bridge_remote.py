@@ -35,6 +35,7 @@ from sqlalchemy import select
 from app.models import RunnerCommand, RunnerEnvironment
 from app.modules.llm_bridge import remote as remote_module
 from app.modules.llm_bridge import remote_config as cfg
+from app.modules.llm_bridge.models import LlmBridgeRemoteContainer
 from app.modules.llm_bridge.remote import RemoteContainers, RemoteError, parse_versions
 from app.modules.llm_bridge.remote_files import redact_preview
 from tests.test_mcp_api import call, issue_token, new_instance
@@ -124,6 +125,7 @@ class FakeAgent:
     token: str
     home: Path
     started: list[dict[str, Any]] = field(default_factory=list)
+    recreated: list[dict[str, Any]] = field(default_factory=list)
     files: dict[str, bytes] = field(default_factory=dict)
     stop: bool = False
 
@@ -242,6 +244,8 @@ class FakeAgent:
                 elif kind == "exec":
                     await self.run_exec(command)
                 elif kind in ("create_env", "start_env", "stop_env", "delete_env"):
+                    if command["payload"].get("recreate"):
+                        self.recreated.append(command["payload"])
                     await self.post(
                         f"/commands/{command['id']}/result",
                         {"status": "done", "result": {"seconds": 1.0}, "error": None},
@@ -512,6 +516,32 @@ async def test_remote_environment_end_to_end(rig: Rig) -> None:
         relay.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await relay
+
+    # 更新镜像：重建好了才改记下的版本；中间显示“正在更新”，版本仍算不一致
+    async with app.state.sessionmaker() as db:
+        row = await db.get(LlmBridgeRemoteContainer, uuid.UUID(container_id))
+        assert row is not None
+        row.cli_versions = {**row.cli_versions, "claude": "2.1.300"}
+        await db.commit()
+    current = (await rig.api("GET", f"/bridges/{rig.bridge_id}/containers")).json()["containers"][0]
+    assert current["versions_ok"] is False
+    updated = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/containers/{container_id}/actions",
+        json={"action": "update_image", "version": current["version"]},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["versions_ok"] is False and updated.json()["updating_image"] is True
+
+    async def updated_image() -> bool:
+        await remote_module._housekeeping(sync)
+        item = (await rig.api("GET", f"/bridges/{rig.bridge_id}/containers")).json()["containers"][
+            0
+        ]
+        return bool(item["versions_ok"] and not item["updating_image"])
+
+    await _until(updated_image)
+    assert any(p.get("recreate") for p in rig.agent.recreated)
 
     # 还有环境用这个容器时不能删；删掉环境之后可以
     containers = (await rig.api("GET", f"/bridges/{rig.bridge_id}/containers")).json()
