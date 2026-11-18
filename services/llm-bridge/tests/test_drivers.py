@@ -786,3 +786,105 @@ async def test_cli_hooks_hand_back_the_platform_summary(tmp_path: Path) -> None:
     )
     assert hooks.PRESERVE in summary["summary"]  # 压缩前的说明并进了压缩说明
     assert driver.take_summaries(spec.native_id or "") == []
+
+
+async def test_claude_web_login_hands_the_code_to_the_official_program(tmp_path: Path) -> None:
+    """网页授权登录（T-0287）：管理器运行官方程序的 `auth login`，给出网址；
+    人登录授权后把授权码交回来，官方程序完成登录，账号由它自己报告。授权码不进运行信息。"""
+    driver = _cli(tmp_path)
+    assert driver.login_methods[0] == "web"
+    challenge = await driver.login("web", {})
+    assert challenge.state == "pending" and challenge.needs_code
+    assert (challenge.verification_url or "").startswith("https://claude.com/cai/oauth/authorize")
+    status = {s["key"]: s["status"] for s in challenge.steps}
+    assert status == {
+        "start": "done",
+        "request_url": "done",
+        "wait_user": "running",
+        "submit_code": "pending",
+        "finish": "pending",
+    }
+    # 少了 # 的授权码：不交给官方程序（交过去它只会一直等），直接说明
+    with pytest.raises(DriverError) as caught:
+        await driver.submit_code("good")
+    assert caught.value.kind == "invalid" and "#" in caught.value.message
+    submitted = await driver.submit_code("  good#state  ")
+    assert not submitted.needs_code
+    assert driver._code_task is not None
+    await driver._code_task
+    done = await driver.login_state()
+    assert done is not None and done.state == "done"
+    assert [s["status"] for s in done.steps] == ["done"] * 5
+    assert done.steps[-1]["detail"] == "已登录：s***@example.com"
+    assert "good#state" not in "\n".join(done.log)
+    account = await driver.status()
+    assert (account.logged_in, account.identity, account.method) == (
+        True,
+        "sub@example.com",
+        "web",
+    )
+    # 登录已经结束：再交授权码是冲突
+    with pytest.raises(DriverError) as again:
+        await driver.submit_code("good#state")
+    assert again.value.kind == "conflict"
+
+
+async def test_claude_web_login_explains_a_refused_code_and_a_missing_url(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """授权码被拒绝：失败在“完成登录”这一步，说明要重新开始；官方程序不给网址：卡在“取得网址”；
+    一直没人交回授权码：到时间停止这次登录。"""
+    from bridge.drivers import cli_stream
+
+    driver = _cli(tmp_path)
+    await driver.login("web", {})
+    await driver.submit_code("wrong#state")
+    assert driver._code_task is not None
+    await driver._code_task
+    refused = await driver.login_state()
+    assert refused is not None and refused.state == "failed"
+    failed = next(s for s in refused.steps if s["status"] == "failed")
+    assert failed["key"] == "submit_code" and "授权码没有被接受" in refused.detail
+    assert not (await driver.status()).logged_in  # 原来没登录，失败了也还是没登录
+
+    config = tmp_path / "home" / "cfg"
+    (config / "no-url").write_text("1")
+    monkeypatch.setattr(cli_stream, "CODE_URL_SECONDS", 0.5)
+    with pytest.raises(DriverError) as slow:
+        await driver.login("web", {})
+    assert slow.value.kind == "timeout"
+    stuck = await driver.login_state()
+    assert stuck is not None and stuck.state == "failed"
+    assert next(s for s in stuck.steps if s["status"] == "failed")["key"] == "request_url"
+
+    (config / "no-url").unlink()
+    (config / "exit-early").write_text("1")
+    with pytest.raises(DriverError) as early:
+        await driver.login("web", {})
+    assert early.value.kind == "platform_error" and "Couldn't start" in early.value.message
+    (config / "exit-early").unlink()
+
+    monkeypatch.setattr(cli_stream, "CODE_WAIT_SECONDS", 1.0)
+    await driver.login("web", {})
+    assert driver._code_task is not None
+    await driver._code_task
+    late = await driver.login_state()
+    assert late is not None and late.state == "failed" and "已停止这次登录" in late.detail
+    assert next(s for s in late.steps if s["status"] == "failed")["key"] == "wait_user"
+    with pytest.raises(DriverError) as gone:
+        await driver.submit_code("good#state")
+    assert gone.value.kind == "conflict"
+
+
+async def test_a_new_web_login_keeps_the_old_login_until_it_succeeds(tmp_path: Path) -> None:
+    """已经用令牌登录：开始网页授权登录、但没完成时，原来的登录照常可用；完成后改用新的登录。"""
+    driver = _cli(tmp_path)
+    await driver.login("oauth_token", {"oauth_token": "tok"})
+    await driver.login("web", {})
+    assert (await driver.status()).method == "api_key"  # 仿制程序把令牌报告成 api_key
+    await driver.submit_code("good#state")
+    assert driver._code_task is not None
+    await driver._code_task
+    assert (await driver.status()).method == "web"
+    await driver.logout()
+    assert await driver.login_state() is None

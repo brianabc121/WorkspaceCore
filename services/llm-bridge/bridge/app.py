@@ -175,6 +175,11 @@ class LoginBody(_Body):
     oauth_token: str | None = None
 
 
+class LoginCodeBody(_Body):
+    # 授权页上显示的授权码（code#state）；只转交给官方程序，不记日志
+    code: str = Field(min_length=1, max_length=4096)
+
+
 class EnvironmentBody(_Body):
     platform: Annotated[str, AfterValidator(canonical)]
     mode: Literal["dev", "cloud"]
@@ -315,6 +320,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             k: v for k, v in (("api_key", body.api_key), ("oauth_token", body.oauth_token)) if v
         }
         return await engine_of(request).login(slot_of(request, slot), body.method, payload)
+
+    @app.post("/admin/accounts/{slot}/login/code")
+    async def admin_login_code(
+        request: Request, slot: str, body: LoginCodeBody, _: Admin
+    ) -> dict[str, Any]:
+        return await engine_of(request).submit_login_code(slot_of(request, slot), body.code)
 
     @app.get("/admin/accounts/{slot}/login")
     async def admin_login_state(request: Request, slot: str, _: Admin) -> dict[str, Any]:

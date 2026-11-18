@@ -488,6 +488,68 @@ describe('大模型客户端管理', () => {
     expect(polls).toBe(seen)
   })
 
+  it('logs Claude in through web authorization: a link, each step, then the code pasted back', { timeout: 30000 }, async () => {
+    // T-0287：管理器替人运行官方程序的 auth login；拿到网址后等人把授权页显示的授权码粘贴回来
+    const cl = account({ slot: 'claude', label: 'Claude', login_methods: ['web', 'api_key', 'oauth_token', 'existing'] })
+    const url = 'https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=s1'
+    const step = (key: string, status: string, detail = '') => ({ key, status, detail, started_at: null, finished_at: null })
+    const started = '2026-11-17T03:00:00.000+00:00'
+    const waiting = { state: 'pending', started_at: started, detail: '', verification_url: url, needs_code: true, steps: [step('start', 'done', '官方程序已启动'), step('request_url', 'done', '已取得登录网址'), step('wait_user', 'running', '在浏览器里登录并授权'), step('submit_code', 'pending'), step('finish', 'pending')], log: ['03:00:01 启动 Claude 官方程序：auth login --claudeai'] }
+    let progress: Record<string, unknown> = { state: 'none' }
+    let loggedIn = false
+    const requests = setup('owner', async r => {
+      if (path(r) === `${base}/status`) return Response.json(status({ settings: { ...settings, claude_subscription_ack: true }, accounts: [cl.state === 'logged_in' || loggedIn ? { ...cl, state: 'logged_in', identity: 's***@example.com', method: 'web' } : cl] }))
+      if (path(r) === `${base}/accounts/claude/login/code`) {
+        progress = { ...waiting, needs_code: false, steps: [step('start', 'done'), step('request_url', 'done'), step('wait_user', 'done', '已收到授权码'), step('submit_code', 'running', '官方程序用授权码换取登录'), step('finish', 'pending')] }
+        return Response.json(progress)
+      }
+      if (path(r) !== `${base}/accounts/claude/login`) return undefined
+      if (r.method === 'POST') { progress = waiting; return Response.json(waiting) }
+      return Response.json(progress)
+    })
+    await openApp('/llm_bridge?view=manage')
+    const card = await screen.findByRole('article', { name: '账号：Claude' })
+    await fireEvent.click(within(card).getByRole('button', { name: '登录Claude' }))
+    const form = within(card).getByRole('form', { name: '登录Claude' })
+    // 默认就是网页授权登录，不用填任何东西
+    expect(within(form).getByLabelText('网页授权登录（推荐）')).toBeChecked()
+    expect(within(form).queryByRole('textbox')).not.toBeInTheDocument()
+    await fireEvent.click(within(form).getByRole('button', { name: '获取登录网址' }))
+
+    const panel = await screen.findByRole('region', { name: '登录「Claude」的进度' })
+    expect(panel).toHaveTextContent('MCP 管理器「主账号」 · 网页授权登录')
+    const open = await within(panel).findByRole('group', { name: '登录 Claude 并交回授权码' })
+    expect(within(open).getByRole('link', { name: url })).toHaveAttribute('href', url)
+    expect(open).toHaveTextContent('授权后页面会显示一段授权码（中间有一个 #）')
+    const items = within(panel).getAllByRole('listitem').filter(li => li.hasAttribute('data-status'))
+    expect(items.map(li => li.getAttribute('data-status'))).toEqual(['done', 'done', 'done', 'running', 'pending', 'pending'])
+    expect(items[3]).toHaveTextContent('等你在自己的浏览器里登录并授权，再把授权码粘贴到下面')
+    expect(items[4]).toHaveTextContent('官方程序用授权码完成登录')
+    expect(items[5]).toHaveTextContent('确认登录结果（官方程序报告的账号）')
+
+    // 不完整的授权码：页面先拦下，不发给管理器
+    const box = within(open).getByLabelText('授权码')
+    await fireEvent.update(box, 'abc')
+    await fireEvent.click(within(open).getByRole('button', { name: '提交授权码' }))
+    expect(await within(open).findByText(/授权码不完整/)).toBeVisible()
+    expect(writes(requests).filter(r => path(r).endsWith('/login/code'))).toHaveLength(0)
+
+    await fireEvent.update(box, '  abc#def  ')
+    await fireEvent.click(within(open).getByRole('button', { name: '提交授权码' }))
+    expect(await within(panel).findByText('已把授权码交给官方程序，正在完成登录…')).toBeVisible()
+    const sent = writes(requests).filter(r => path(r).endsWith('/login/code'))
+    expect(await sent[0]!.clone().json()).toEqual({ code: 'abc#def' })
+    expect(within(panel).queryByLabelText('授权码')).not.toBeInTheDocument()
+
+    // 官方程序完成登录
+    loggedIn = true
+    progress = { ...waiting, state: 'done', needs_code: false, finished_at: '2026-11-17T03:01:00.000+00:00', steps: [step('start', 'done'), step('request_url', 'done'), step('wait_user', 'done'), step('submit_code', 'done', '官方程序报告登录成功'), step('finish', 'done', '已登录：s***@example.com')] }
+    await waitFor(() => expect(panel).toHaveAttribute('data-status', 'succeeded'), { timeout: 5000 })
+    expect(within(panel).getByText('「Claude」已登录。')).toBeVisible()
+    expect(document.body.innerHTML).not.toContain('abc#def')
+    expect(await within(card).findByText('s***@example.com')).toBeVisible()
+  })
+
   it('blocks Claude subscription logins until the risk is acknowledged, then sends the token once and clears it', async () => {
     let ack = false, rejectOnce = true
     const requests = setup('owner', async r => {
@@ -509,6 +571,11 @@ describe('大模型客户端管理', () => {
     expect(within(form).queryByRole('group', { name: 'Claude 订阅登录的风险确认' })).not.toBeInTheDocument()
 
     await fireEvent.click(within(form).getByLabelText('订阅令牌', { selector: 'input[type="radio"]' }))
+    // 订阅令牌怎么拿：分步写清楚（T-0287）
+    const guide = within(form).getByRole('list', { name: '订阅令牌怎么拿' })
+    expect(guide).toHaveTextContent('claude setup-token')
+    expect(within(guide).getByRole('link', { name: 'Claude 官方说明' })).toHaveAttribute('href', 'https://code.claude.com/docs/en/cli-reference')
+    expect(within(guide).getAllByRole('listitem')).toHaveLength(4)
     const risk = within(form).getByRole('group', { name: 'Claude 订阅登录的风险确认' })
     expect(within(risk).getByText(/Anthropic 要求开发者用 API 密钥接入；把订阅账号的登录用于自动化处在灰区，账号可能被限制。详见方案第 6\.3 节/)).toBeVisible()
     expect(within(form).getByRole('button', { name: '登录' })).toBeDisabled()
@@ -1128,7 +1195,9 @@ describe('大模型客户端管理', () => {
         ok('claude.ai', 'Claude（订阅登录）', timings(null, 110, 28, 150), { address: null, via_proxy: true }),
       ] },
     } }
-    setup('owner', r => (path(r) === `${base}/connectivity` ? Response.json(data) : undefined))
+    // 账号还没登录：检测没连上就是用不了（登录了的情况见下一个用例）
+    const loggedOut = status({ accounts: [account({}), account({ slot: 'claude', label: 'Claude' })] })
+    setup('owner', r => (path(r) === `${base}/connectivity` ? Response.json(data) : path(r) === `${base}/status` ? Response.json(loggedOut) : undefined))
     await openApp('/llm_bridge?view=manage')
     await openDiag()
     const openai = await screen.findByRole('group', { name: '平台连通性：Codex' })
@@ -1140,7 +1209,7 @@ describe('大模型客户端管理', () => {
     expect(steps).toHaveTextContent('连接 2 ms')
     expect(steps).toHaveTextContent('加密握手 9 ms')
     expect(steps).toHaveTextContent('平台应答 380 ms')
-    expect(steps).toHaveTextContent('IP 162.159.140.245')
+    expect(steps).toHaveTextContent('IPv4 162.159.140.245')
     expect(within(steps).getByText('解析 4012 ms')).toHaveClass('is-slow')
     expect(within(steps).getByText('连接 2 ms')).not.toHaveClass('is-slow')
     // 卡在哪一步写清楚
@@ -1163,6 +1232,45 @@ describe('大模型客户端管理', () => {
     expect(viaProxy).not.toHaveTextContent('解析 ')
     expect(within(claude).queryByText(/域名解析慢/)).not.toBeInTheDocument()
     expect(within(screen.getByRole('article', { name: '账号：Claude' })).getByText('网络正常 · 110 ms')).toBeVisible()
+  })
+
+  it('lists the addresses it tried, explains an IPv6 that does not answer and trusts a working login', async () => {
+    // T-0284：管理器像官方程序一样，一个地址 0.25 秒没连上就试下一个；这里列出每个地址，
+    // IPv6 不通、IPv4 通时说明官方程序照常能用；账号已经登录时不再断言“登录和对话都会失败”
+    type Target = Schema['LlmBridgeConnectivityTargetOut']
+    const timings = (dns_ms: number | null, connect_ms: number | null, tls_ms: number | null, response_ms: number | null) => ({ dns_ms, connect_ms, tls_ms, response_ms })
+    const failed = (host: string, label: string, dns: number, attempts: Target['attempts']): Target => ({ host, label, ok: false, state: 'unreachable', latency_ms: null, http_status: null, error: '建立连接超时：平台的服务器没有回应（共等了 12 秒）', timings: timings(dns, null, null, null), stage: 'connect', address: null, via_proxy: false, attempts })
+    const data: Schema['LlmBridgeConnectivityOut'] = { supported: true, slots: {
+      openai: { ok: false, need: 'all', checked_at: 1794528000, targets: [
+        { host: 'chatgpt.com', label: 'ChatGPT（订阅登录、对话）', ok: true, state: 'ok', latency_ms: 2, http_status: 403, error: null, timings: timings(4060, 255, 9, 300), stage: null, address: '104.18.32.47', via_proxy: false,
+          attempts: [{ address: '2606:4700::6812:202f', family: 6, ms: 253, error: '没有回应' }, { address: '104.18.32.47', family: 4, ms: 2, error: null }] },
+        failed('api.openai.com', 'OpenAI API（API 密钥）', 8068, [{ address: '2606:4700::6810:7b60', family: 6, ms: 3932, error: '没有回应' }]),
+      ] },
+      claude: { ok: false, need: 'all', checked_at: 1794528000, targets: [
+        failed('api.anthropic.com', 'Anthropic API', 8072, [{ address: '160.79.104.10', family: 4, ms: 3928, error: '没有回应' }]),
+      ] },
+    } }
+    setup('owner', r => (path(r) === `${base}/connectivity` ? Response.json(data) : undefined))
+    await openApp('/llm_bridge?view=manage')
+    await openDiag()
+    const openai = await screen.findByRole('group', { name: '平台连通性：Codex' })
+    const tried = await within(openai).findByLabelText('试过的地址：chatgpt.com')
+    expect(within(tried).getByText('IPv6 2606:4700::6812:202f 0.3 秒没有回应')).toHaveClass('is-slow')
+    expect(within(tried).getByText('IPv4 104.18.32.47 连上 2 ms')).not.toHaveClass('is-slow')
+    // 延迟只算连上的那个地址；IP 已经在“试过的地址”里，不再单独写
+    expect(within(openai).getAllByRole('listitem')[0]).toHaveTextContent('2 ms')
+    expect(within(openai).getByLabelText('每一步的用时：chatgpt.com')).not.toHaveTextContent('104.18.32.47')
+    expect(within(openai).getByLabelText('试过的地址：api.openai.com')).toHaveTextContent('IPv6 2606:4700::6810:7b60 3.9 秒没有回应')
+    expect(within(openai).getByText(/这台服务器连平台的 IPv6 地址没有回应，IPv4 是通的/)).toBeVisible()
+    // Codex 已经登录：以对话为准，不说“登录和对话都会失败”
+    expect(within(openai).getByText(/检测没连上Codex，但这个账号已经登录。对话照常能用的话以对话为准/)).toBeVisible()
+    expect(within(openai).queryByRole('alert')).not.toBeInTheDocument()
+    expect(within(openai).getByText(/域名解析慢/)).toHaveTextContent('建立连接最多只用了 2 ms，网络本身不慢。')
+    // Claude 没登录、一个地址都没连上：照常说用不了；没有连上过的地址，不写“建立连接最多只用了 0 ms”
+    const claude = screen.getByRole('group', { name: '平台连通性：Claude' })
+    expect(within(claude).getByRole('alert')).toHaveTextContent('这个 MCP 管理器所在的服务器现在用不了Claude')
+    expect(within(claude).getByText(/域名解析慢/)).not.toHaveTextContent('建立连接最多只用了')
+    expect(within(claude).queryByText(/IPv6/)).not.toBeInTheDocument()
   })
 
   it('lists sessions, syncs on request and shows the turns of a session', async () => {

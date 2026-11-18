@@ -12522,6 +12522,51 @@
         "title": "LlmBridgeChannelOut",
         "type": "object"
       },
+      "LlmBridgeConnectivityAttemptOut": {
+        "description": "试过的一个地址（T-0284）：哪个先连上用哪个，一个地址 0.25 秒没连上就同时试下一个。",
+        "properties": {
+          "address": {
+            "description": "平台的哪个 IP",
+            "title": "Address",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "没连上的原因（没有回应 / 拒绝连接 / 网络不通 ……）；连上的为空",
+            "title": "Error"
+          },
+          "family": {
+            "description": "4：IPv4；6：IPv6",
+            "title": "Family",
+            "type": "integer"
+          },
+          "ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "连上或放弃用了多少毫秒",
+            "title": "Ms"
+          }
+        },
+        "required": [
+          "address",
+          "family"
+        ],
+        "title": "LlmBridgeConnectivityAttemptOut",
+        "type": "object"
+      },
       "LlmBridgeConnectivityOut": {
         "description": "管理器所在的服务器到各平台的连通性与延迟（T-0240）。\n\n键是账号槽位：openai / claude / workbuddy。",
         "properties": {
@@ -12592,6 +12637,21 @@
             ],
             "description": "连上的是平台的哪个 IP；经代理时为空",
             "title": "Address"
+          },
+          "attempts": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/LlmBridgeConnectivityAttemptOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "试过的地址（T-0284）；经代理时为空列表，旧版本的管理器没有",
+            "title": "Attempts"
           },
           "error": {
             "anyOf": [
@@ -14392,6 +14452,23 @@
         "title": "LlmBridgeLocalOut",
         "type": "object"
       },
+      "LlmBridgeLoginCodeIn": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "description": "授权页显示的授权码（code#state）；只转交给 MCP 管理器里的官方程序，不保存、不记审计",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "LlmBridgeLoginCodeIn",
+        "type": "object"
+      },
       "LlmBridgeLoginIn": {
         "additionalProperties": false,
         "properties": {
@@ -14408,14 +14485,15 @@
             "title": "Api Key"
           },
           "method": {
-            "description": "web_cn / web_intl：CodeBuddy的网页登录，国内站 / 国际站——返回 pending 和一个网址，人在自己的浏览器里打开并登录",
+            "description": "web_cn / web_intl：CodeBuddy的网页登录，国内站 / 国际站——返回 pending 和一个网址，人在自己的浏览器里打开并登录；web：Claude 的网页授权登录（T-0287）——返回 pending、网址和 needs_code，人在浏览器里登录授权后，把授权页显示的授权码交给“提交授权码”",
             "enum": [
               "device_code",
               "api_key",
               "oauth_token",
               "existing",
               "web_cn",
-              "web_intl"
+              "web_intl",
+              "web"
             ],
             "title": "Method",
             "type": "string"
@@ -14464,6 +14542,12 @@
             },
             "title": "Log",
             "type": "array"
+          },
+          "needs_code": {
+            "default": false,
+            "description": "在等人把授权页显示的授权码交回来（Claude 网页授权登录，T-0287）",
+            "title": "Needs Code",
+            "type": "boolean"
           },
           "started_at": {
             "anyOf": [
@@ -58757,7 +58841,7 @@
         ]
       },
       "post": {
-        "description": "device_code：返回网址和验证码，用户在自己的浏览器里完成，之后轮询登录状态；api_key / oauth_token：填的值保存在会话桥的数据卷里，不保存在工作台；existing：使用已经在容器里完成的登录。403：Claude 用订阅登录前要先在设置里确认风险。",
+        "description": "device_code：返回网址和验证码，用户在自己的浏览器里完成，之后轮询登录状态；web：Claude 的网页授权登录，返回网址后用“提交授权码”交回授权页显示的授权码；api_key / oauth_token：填的值保存在会话桥的数据卷里，不保存在工作台；existing：使用已经在容器里完成的登录。403：Claude 用订阅登录前要先在设置里确认风险。",
         "operationId": "llm_bridge_login",
         "parameters": [
           {
@@ -58905,6 +58989,161 @@
           }
         ],
         "summary": "登录一个平台（owner）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login/code": {
+      "post": {
+        "description": "Claude 网页授权登录（T-0287）：人在自己的浏览器里登录授权后，把授权页显示的授权码交给 MCP 管理器里正在等它的官方程序。授权码不保存、不记审计。409：没有在等授权码的登录；422：授权码不完整。",
+        "operationId": "llm_bridge_login_code",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "账号槽位",
+            "in": "path",
+            "name": "slot",
+            "required": true,
+            "schema": {
+              "description": "账号槽位",
+              "enum": [
+                "openai",
+                "claude",
+                "workbuddy"
+              ],
+              "title": "Slot",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmBridgeLoginCodeIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeLoginOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "提交授权码（owner，Claude 网页授权登录）",
         "tags": [
           "llm_bridge"
         ]

@@ -169,6 +169,8 @@ _LABELS: dict[str, str] = {
     "llm_bridge.bridge_updated": "修改 MCP 管理器",
     "llm_bridge.bridge_deleted": "删除 MCP 管理器的登记",
     "llm_bridge.grant_updated": "修改实例的大模型会话权限",
+    "llm_bridge.account_login": "登录大模型平台的账号",
+    "llm_bridge.account_login_code": "提交 Claude 网页授权登录的授权码",
     "llm_bridge.chat_session_created": "在聊天页新建会话",
     "llm_bridge.chat_message_sent": "在聊天页发送消息",
     "llm_bridge.chat_takeover_sent": "向别人建的会话发送消息",

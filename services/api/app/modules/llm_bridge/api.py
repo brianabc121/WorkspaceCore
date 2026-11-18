@@ -33,6 +33,7 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeList,
     LlmBridgeLocalIn,
     LlmBridgeLocalOut,
+    LlmBridgeLoginCodeIn,
     LlmBridgeLoginIn,
     LlmBridgeLoginOut,
     LlmBridgeOut,
@@ -209,6 +210,7 @@ async def llm_bridge_update_settings(
     "/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login",
     summary="登录一个平台（owner）",
     description="device_code：返回网址和验证码，用户在自己的浏览器里完成，之后轮询登录状态；"
+    "web：Claude 的网页授权登录，返回网址后用“提交授权码”交回授权页显示的授权码；"
     "api_key / oauth_token：填的值保存在会话桥的数据卷里，不保存在工作台；"
     "existing：使用已经在容器里完成的登录。403：Claude 用订阅登录前要先在设置里确认风险。",
     dependencies=_write,
@@ -227,6 +229,31 @@ async def llm_bridge_login(
         body.model_dump(exclude_none=True),
         {"slot": slot, "method": body.method},
         read_timeout=LOGIN_READ_TIMEOUT,
+    )
+    return login_out(data)
+
+
+@router.post(
+    "/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login/code",
+    summary="提交授权码（owner，Claude 网页授权登录）",
+    description="Claude 网页授权登录（T-0287）：人在自己的浏览器里登录授权后，"
+    "把授权页显示的授权码交给 MCP 管理器里正在等它的官方程序。授权码不保存、不记审计。"
+    "409：没有在等授权码的登录；422：授权码不完整。",
+    dependencies=_write,
+    responses=_write_errors,
+)
+async def llm_bridge_login_code(
+    access: Owner, service: Service, bridge_id: UUID, slot: SlotPath, body: LlmBridgeLoginCodeIn
+) -> LlmBridgeLoginOut:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    data = await service.admin_write(
+        access,
+        row,
+        "account_login_code",
+        "POST",
+        f"/accounts/{slot}/login/code",
+        {"code": body.code},
+        {"slot": slot},
     )
     return login_out(data)
 

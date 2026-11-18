@@ -106,6 +106,7 @@
     - 装的是 `zod@3.25.76`；`@vee-validate/zod@4.15.1`（npm 上的最新版）的 peer 依赖是 `zod ^3.24.0`，所以 `npm audit` 报“没有可用修复”。
     - 影响：校验发生在用户自己的浏览器里，最坏是那个标签页卡死，服务端不受影响。
     - 处理：**T-0044 处理**——把 zod 升级到 4.6.6 或更高版本，去掉 `@vee-validate/zod`，改用 vee-validate 对 Standard Schema 的支持或一个小的本地适配；升级前先核验它们的接口。
+- 补充（2026-11-18，T-0290）：npm 的公告改为按 `npm audit --json` 逐条判定，没有修复版本、又确认不影响生产的公告可以登记带到期日的临时例外（`scripts/security-exceptions.txt`），见 `docs/decisions/2026-11-18-npm-audit-picomatch-exception.md`。
 
 ### 5.3 密钥泄露：gitleaks v8.30.1
 

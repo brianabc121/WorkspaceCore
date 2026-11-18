@@ -776,8 +776,9 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `PATCH` / `DELETE /api/v1/llm_bridge/bridges/{id}` | 改名字、地址、令牌、启用停用；删除登记（不影响会话桥容器；各实例权限的 `bridge_ids` 里去掉它，只允许用它的实例之后一个都不能用） |
 | `GET /api/v1/llm_bridge/bridges/{id}/status` | 各账号槽位（`openai` / `claude` / `workbuddy`）的登录状态、通道、排队数、设置；连不上时 `reachable=false` 加 `error`，不报错。账号的 `identity` 是打码后的账号标识（用密钥或令牌登录时为空），`registered` 表示这座桥登记过这个平台的账号（退出登录后仍为 true，“更换账号”后才清掉），`method` 只在已登录时有值 |
 | `PUT /api/v1/llm_bridge/bridges/{id}/settings` | `platforms`（控制的平台：`codex` / `claude` / `workbuddy`，至少一个；旧名字 `chatgpt` 按 `codex` 处理，T-0280）、`concurrency`（1 ~ 16）、`turn_timeout_seconds`（30 ~ 21600）、`send_per_hour`、`max_text_chars`、`claude_subscription_ack`。没勾选的平台不能登录（`409 CONFLICT`）、不能新建会话和发送；已有的登录和会话记录保留 |
-| `POST /api/v1/llm_bridge/bridges/{id}/accounts/{slot}/login` | `method`：`device_code`（返回 `verification_url`、`user_code`，`state=pending`）/ `api_key` / `oauth_token` / `existing`。Claude 的非 `api_key` 方式在确认风险前 `403 FORBIDDEN` |
-| `GET .../accounts/{slot}/login` | 登录进行到哪一步：`pending` / `done` / `failed` / `none` |
+| `POST /api/v1/llm_bridge/bridges/{id}/accounts/{slot}/login` | `method`：`device_code`（返回 `verification_url`、`user_code`，`state=pending`）/ `api_key` / `oauth_token` / `existing` / `web`（Claude 网页授权登录，T-0287：返回 `verification_url` 和 `needs_code=true`，管理器里的官方程序 `claude auth login` 在等授权码）。Claude 的非 `api_key` 方式在确认风险前 `403 FORBIDDEN` |
+| `POST .../accounts/{slot}/login/code` | 提交授权码（owner，T-0287）：`{"code": "<授权页显示的 code#state>"}`，转交给正在等它的官方程序，返回登录进度（`needs_code` 变成 `false`，“完成登录”这一步进行中）。授权码不保存、不记审计（审计只记“提交了授权码”）。没有在等授权码的登录 `409 CONFLICT`；授权码不完整 `422` |
+| `GET .../accounts/{slot}/login` | 登录进行到哪一步：`pending` / `done` / `failed` / `none`；`needs_code` 表示在等授权码 |
 | `POST .../accounts/{slot}/refresh` / `logout` / `reset` | 重新检查状态；退出登录；更换账号（归档这个槽位的全部会话，返回 `archived_sessions`） |
 | `GET` / `POST /api/v1/llm_bridge/bridges/{id}/environments`，`PUT` / `DELETE .../environments/{env_id}` | 开发环境：`platform`、`name`、`repo_url`（只收 https）、`branch`、`sandbox`（`read_only` / `workspace_write` / `exec`）、`network`、`description`、`enabled` |
 | `GET .../environments/{env_id}/sessions` | 用这个开发环境建的会话（T-0289，最近活动的在前，最多 50 个）：会话的基本信息、`busy`、`browsable`（工作目录还在、是管理器建的） |
@@ -883,6 +884,7 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 返回 `supported`（旧版本的管理器为 false）和 `slots`（键是账号槽位 `openai` / `claude` / `workbuddy`）：每个槽位 `ok`、`need`（`all` 都要可用 / `any` 有一个就行）、`checked_at`、
 `targets[]`（`host`、`label`、`ok`、`state`：`ok` 可用 / `blocked` 连得上但被平台拒绝 / `unreachable` 连不上；`latency_ms`、`http_status`、`error`）。结果一分钟内复用，`refresh=true` 重新测。
 分步用时（T-0278）：`latency_ms` 是建立连接（TCP 握手，一次网络往返，和 ping 可比）的毫秒数，连不上时为空；`timings`（`dns_ms` 域名解析、`connect_ms` 建立连接、`tls_ms` 加密握手、`response_ms` 发出请求到收到应答头）每一步的用时，没做到的那一步为空；`stage` 连不上时卡在哪一步（`dns` / `connect` / `tls` / `response`）；`address` 连上的 IP；`via_proxy` 是否经容器的 HTTPS 代理（这时域名由代理解析，`dns_ms` 为空）。超时只算到收到应答头（12 秒），读页面正文和关连接不计入。旧版本的管理器没有这几个字段，`latency_ms` 是一次完整访问的总耗时。
+试过的地址（T-0284）：一个域名解析出几个地址时，管理器像官方程序一样，一个地址 0.25 秒没连上（或已经失败）就同时试下一个，IPv6 / IPv4 交替，哪个先连上用哪个；`attempts` 列出每个地址：`address`、`family`（4 / 6）、`ms`（连上或放弃用的毫秒数）、`error`（没有回应 / 拒绝连接 / 网络不通 / 这台服务器没开 IPv6 ……，连上的为空）。这时 `latency_ms` 是连上的那个地址的用时，`timings.connect_ms` 还含等前面地址的时间。域名解析单独限时 15 秒，之后的 12 秒从解析完算起。旧版本的管理器没有 `attempts`。
 
 登录等操作里平台那边没成功时，接口返回 `503 UNAVAILABLE` 并带管理器写的原因（T-0239）；`EXTERNAL_UNAVAILABLE` 只表示管理器本身连不上。
 

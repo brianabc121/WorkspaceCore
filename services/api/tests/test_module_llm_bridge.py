@@ -314,6 +314,38 @@ async def test_web_login_progress_reaches_the_page_when_it_fails(rig: Rig) -> No
     assert state["detail"] == state["steps"][0]["detail"]
 
 
+async def test_claude_web_login_hands_the_code_through(rig: Rig) -> None:
+    """Claude 网页授权登录（T-0287）：开始登录拿到网址和 needs_code，交回授权码完成登录；
+    订阅登录要先确认风险；授权码不进审计。"""
+    env = rig.env
+    fake = importlib.import_module("bridge.drivers.fake").FakeDriver()
+    fake.login_methods = ("api_key", "web")
+    rig.bridge_app.state.engine.drivers["claude"] = fake
+    base = f"/bridges/{rig.bridge_id}/accounts/claude/login"
+    blocked = await rig.api("POST", base, json={"method": "web"})
+    assert blocked.status_code == 403, blocked.text
+    acked = await rig.api(
+        "PUT", f"/bridges/{rig.bridge_id}/settings", json={"claude_subscription_ack": True}
+    )
+    assert acked.status_code == 200, acked.text
+    started = await rig.api("POST", base, json={"method": "web"})
+    assert started.status_code == 200, started.text
+    assert started.json()["state"] == "pending" and started.json()["needs_code"] is True
+    assert started.json()["verification_url"].startswith("https://")
+    assert (await rig.api("GET", base)).json()["needs_code"] is True
+    incomplete = await rig.api("POST", f"{base}/code", json={"code": "abc"})
+    assert incomplete.status_code == 422, incomplete.text
+    done = await rig.api("POST", f"{base}/code", json={"code": "good#s"})
+    assert done.status_code == 200, done.text
+    assert (done.json()["state"], done.json()["needs_code"]) == ("done", False)
+    again = await rig.api("POST", f"{base}/code", json={"code": "good#s"})
+    assert again.status_code == 409 and again.json()["error"]["code"] == "CONFLICT"
+    logs = (await env.get("/api/v1/audit-logs", limit=50))["items"]
+    submitted = [e for e in logs if e["action"] == "llm_bridge.account_login_code"]
+    assert submitted and submitted[0]["action_label"] == "提交 Claude 网页授权登录的授权码"
+    assert "good#s" not in str(logs)
+
+
 async def test_managers_control_their_own_platforms_and_accounts(rig: Rig) -> None:
     """人类的例子：1 号管理器控制 claude / workbuddy，2 号多一个 codex；各自一套账号。"""
     env = rig.env

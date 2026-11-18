@@ -330,6 +330,17 @@ class LlmBridgeConnectivityTimingsOut(BaseModel):
     )
 
 
+class LlmBridgeConnectivityAttemptOut(BaseModel):
+    """试过的一个地址（T-0284）：哪个先连上用哪个，一个地址 0.25 秒没连上就同时试下一个。"""
+
+    address: str = Field(description="平台的哪个 IP")
+    family: int = Field(description="4：IPv4；6：IPv6")
+    ms: int | None = Field(default=None, description="连上或放弃用了多少毫秒")
+    error: str | None = Field(
+        default=None, description="没连上的原因（没有回应 / 拒绝连接 / 网络不通 ……）；连上的为空"
+    )
+
+
 class LlmBridgeConnectivityTargetOut(BaseModel):
     host: str = Field(description="平台的地址（域名）")
     label: str = Field(description="这个地址是做什么用的")
@@ -353,6 +364,10 @@ class LlmBridgeConnectivityTargetOut(BaseModel):
         "response 等平台应答",
     )
     address: str | None = Field(default=None, description="连上的是平台的哪个 IP；经代理时为空")
+    attempts: list[LlmBridgeConnectivityAttemptOut] | None = Field(
+        default=None,
+        description="试过的地址（T-0284）；经代理时为空列表，旧版本的管理器没有",
+    )
     via_proxy: bool | None = Field(default=None, description="是否经容器设置的 HTTPS 代理访问")
 
 
@@ -392,11 +407,13 @@ class LlmBridgeStatusOut(BaseModel):
 
 
 class LlmBridgeLoginIn(_In):
-    method: Literal["device_code", "api_key", "oauth_token", "existing", "web_cn", "web_intl"] = (
-        Field(
-            description="web_cn / web_intl：CodeBuddy的网页登录，国内站 / 国际站——"
-            "返回 pending 和一个网址，人在自己的浏览器里打开并登录"
-        )
+    method: Literal[
+        "device_code", "api_key", "oauth_token", "existing", "web_cn", "web_intl", "web"
+    ] = Field(
+        description="web_cn / web_intl：CodeBuddy的网页登录，国内站 / 国际站——"
+        "返回 pending 和一个网址，人在自己的浏览器里打开并登录；"
+        "web：Claude 的网页授权登录（T-0287）——返回 pending、网址和 needs_code，"
+        "人在浏览器里登录授权后，把授权页显示的授权码交给“提交授权码”"
     )
     api_key: str | None = Field(default=None, max_length=500)
     oauth_token: str | None = Field(default=None, max_length=2000)
@@ -427,6 +444,19 @@ class LlmBridgeLoginOut(BaseModel):
     )
     started_at: str | None = None
     finished_at: str | None = None
+    needs_code: bool = Field(
+        default=False,
+        description="在等人把授权页显示的授权码交回来（Claude 网页授权登录，T-0287）",
+    )
+
+
+class LlmBridgeLoginCodeIn(_In):
+    code: str = Field(
+        min_length=1,
+        max_length=4096,
+        description="授权页显示的授权码（code#state）；"
+        "只转交给 MCP 管理器里的官方程序，不保存、不记审计",
+    )
 
 
 class LlmBridgeAccountStateOut(BaseModel):

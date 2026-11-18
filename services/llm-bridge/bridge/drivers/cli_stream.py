@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from bridge import hooks, quota
+from bridge.drivers import progress
 from bridge.drivers.base import (
     AccountStatus,
     ContextUsage,
@@ -42,7 +43,7 @@ from bridge.drivers.base import (
     positive_int,
 )
 from bridge.drivers.web_login import WebLogin
-from bridge.redact import redact
+from bridge.redact import mask_identity, redact
 
 _ENV_PASS = (
     "PATH",
@@ -100,6 +101,28 @@ class CliProfile:
     autocompact_env: str = ""
     # 推理强度的参数（只有核对过的官方程序有）：Claude Code 2.1.323 是 --effort <level>
     effort_flag: str = ""
+    # 网页授权登录（T-0287）：管理器替人运行官方程序的 `auth login`，人在自己的浏览器里登录授权，
+    # 再把授权页显示的授权码交回来。只有 Claude 有
+    code_login: bool = False
+
+
+# 网页授权登录（Claude，T-0287）。在 Claude Code 2.1.323 上核实
+# （读安装包源码、实际运行到给出网址）：
+# 没有终端时 `claude auth login --claudeai` 在标准输出依次写
+#   “Opening browser to sign in…”
+#   “If the browser didn't open, visit: <网址>”
+#   “Paste code here if prompted > ”
+# 然后从标准输入一行一行读授权码（授权页显示的 code#state；没有 # 就报 “Invalid code…”
+# 并接着等）。
+# 换取成功写 “Login successful.” 并退出 0；授权码被拒绝在错误输出写
+# “Login failed: That code wasn't accepted…” 并退出 1。登录凭据由官方程序自己存在它的配置目录里，
+# 管理器不读；之后 `auth status` 报告 authMethod claude.ai 和邮箱。
+CODE_LOGIN_STEPS = ("start", "request_url", "wait_user", "submit_code", "finish")
+CODE_URL_SECONDS = 60.0  # 等官方程序给出登录网址最多多久
+CODE_WAIT_SECONDS = 900.0  # 从开始到登录完成最多多久（人要去浏览器里登录、再把授权码交回来）
+_ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[A-Za-z]")
+_URL = re.compile(r"https://\S+")
+_REFUSED = "wasn't accepted"
 
 
 # Claude 的模型（T-0288）：取自锁定版本 Claude Code 2.1.323 内置的模型菜单
@@ -145,6 +168,7 @@ def claude_profile(binary: str) -> CliProfile:
         auth_cli=True,
         autocompact_env="CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
         effort_flag="--effort",
+        code_login=True,
     )
 
 
@@ -347,6 +371,7 @@ class CliStreamDriver(Driver):
         self.profile = profile
         self.slot = profile.slot
         self.login_methods = (
+            *(("web",) if profile.code_login else ()),
             *profile.web_login,
             *profile.secret_envs,
             *(("existing",) if profile.allow_existing else ()),
@@ -356,6 +381,10 @@ class CliStreamDriver(Driver):
         self._secret_file = secrets_dir / f"{profile.slot}.json"
         self._timeout = rpc_timeout
         self._procs: dict[str, asyncio.subprocess.Process] = {}
+        # 网页授权登录（T-0287）：这一次登录的进度、正在等授权码的官方程序、看着它的任务
+        self._code: LoginChallenge | None = None
+        self._code_proc: asyncio.subprocess.Process | None = None
+        self._code_task: asyncio.Task[None] | None = None
         # 工具调用的编号 → 工具名：结果报回来时知道是哪个工具的
         self._tool_names: dict[str, str] = {}
         self._help_models: list[ModelInfo] | None = None
@@ -393,6 +422,10 @@ class CliStreamDriver(Driver):
         self._secret_file.chmod(0o600)
 
     async def login(self, method: str, payload: dict[str, str]) -> LoginChallenge:
+        if method == "web" and self.profile.code_login:
+            return await self._start_code_login()
+        await self._stop_code_login()
+        self._code = None
         if self._web is not None and method in self.profile.web_login:
             # 网页登录：给出网址，人在自己的浏览器里登录；登录成功后才记下“已登录”
             def done(account: str | None) -> None:
@@ -419,13 +452,254 @@ class CliStreamDriver(Driver):
         return LoginChallenge(state="done")
 
     async def login_state(self) -> LoginChallenge | None:
+        if self._code is not None:
+            return self._code
         return self._web.challenge if self._web is not None else None
 
     async def stop(self) -> None:
+        await self._stop_code_login()
         if self._web is not None:
             await self._web.stop()
 
+    # ---- 网页授权登录（Claude，T-0287） ----
+    def _code_env(self) -> dict[str, str]:
+        """登录用的环境：不带已保存的密钥 / 令牌，免得官方程序以为已经登录了。"""
+        env = self._env()
+        for name in self.profile.secret_envs.values():
+            env.pop(name, None)
+        return env
+
+    async def _start_code_login(self) -> LoginChallenge:
+        """启动官方程序的 `auth login`，等它给出登录网址；之后等人交回授权码（submit_code）。
+        原来的登录（密钥、令牌）在新的登录成功之前照常可用。"""
+        await self._stop_code_login()
+        steps, log = progress.new_steps(CODE_LOGIN_STEPS), list[str]()
+        self._code = LoginChallenge(
+            state="pending", steps=steps, log=log, started_at=progress.iso(progress.now())
+        )
+        progress.mark(steps, "start", "running")
+        progress.note(
+            log, f"启动 {self.profile.label} 官方程序：auth login --claudeai（用订阅账号登录）"
+        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                self.profile.binary,
+                "auth",
+                "login",
+                "--claudeai",
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self._code_env(),
+            )
+        except OSError as error:
+            message = f"启动官方程序失败：{error}"
+            self._code_fail("start", message)
+            raise DriverError("unavailable", message) from error
+        self._code_proc = proc
+        progress.mark(steps, "start", "done", "官方程序已启动")
+        progress.mark(steps, "request_url", "running")
+        progress.note(log, f"等官方程序给出登录网址（最多 {CODE_URL_SECONDS:.0f} 秒）")
+        found: asyncio.Future[str | None] = asyncio.get_running_loop().create_future()
+        self._code_task = asyncio.create_task(self._watch_code_login(proc, found))
+        try:
+            url = await asyncio.wait_for(asyncio.shield(found), CODE_URL_SECONDS)
+        except TimeoutError:
+            message = f"等了 {CODE_URL_SECONDS:.0f} 秒，官方程序还没给出登录网址"
+            self._code_fail("request_url", message)
+            await self._stop_code_login()
+            raise DriverError("timeout", message) from None
+        if url is None:  # 官方程序没给网址就退出了：原因已经记在失败的那一步
+            login = self._code
+            raise DriverError(
+                "platform_error", login.detail if login else "官方程序没有给出登录网址"
+            )
+        progress.mark(steps, "request_url", "done", "已取得登录网址")
+        progress.mark(
+            steps,
+            "wait_user",
+            "running",
+            "在浏览器里打开网址，登录 Claude 订阅账号并授权；"
+            "授权页会显示一段授权码，把它粘贴到这里",
+        )
+        progress.note(log, "已取得登录网址，等你在浏览器里登录授权、交回授权码")
+        login = self._code
+        assert login is not None  # noqa: S101 - 上面刚建好
+        self._code = replace(login, verification_url=url, needs_code=True)
+        return self._code
+
+    async def _watch_code_login(
+        self, proc: asyncio.subprocess.Process, found: asyncio.Future[str | None]
+    ) -> None:
+        """读官方程序的输出：找登录网址、成功的那一句、失败的原因；等它退出后定下结果。"""
+        errors: list[str] = []
+        succeeded = False
+
+        async def read_out() -> None:
+            nonlocal succeeded
+            assert proc.stdout is not None  # noqa: S101
+            buffer = ""
+            while chunk := await proc.stdout.read(4096):
+                buffer += _ESCAPES.sub("", chunk.decode(errors="replace"))
+                lines = buffer.split("\n")
+                buffer = lines.pop()
+                for line in [*lines, buffer]:
+                    match = _URL.search(line) if "visit:" in line else None
+                    if match and not found.done():
+                        found.set_result(match.group(0))
+                if "Login successful." in "\n".join(lines):
+                    succeeded = True
+
+        async def read_err() -> None:
+            assert proc.stderr is not None  # noqa: S101
+            while raw := await proc.stderr.readline():
+                line = _ESCAPES.sub("", raw.decode(errors="replace")).strip()
+                if line:
+                    errors.append(line)
+                    if self._code is not None:
+                        progress.note(self._code.log, f"官方程序：{line}")
+
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(read_out(), read_err(), proc.wait()), CODE_WAIT_SECONDS
+            )
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            if not found.done():
+                found.set_result(None)
+            minutes = CODE_WAIT_SECONDS / 60
+            self._code_fail(
+                self._code_step(), f"等了 {minutes:.0f} 分钟还没有完成登录，已停止这次登录"
+            )
+            return
+        except asyncio.CancelledError:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            if not found.done():
+                found.set_result(None)
+            raise
+        if not found.done():
+            found.set_result(None)
+        if self._code_proc is not proc:
+            return  # 已经开始了新的一次登录
+        self._code_proc = None
+        if proc.returncode == 0 and succeeded:
+            await self._finish_code_login()
+            return
+        self._code_fail(self._code_step(), self._login_failure(errors))
+
+    def _code_step(self) -> str:
+        """现在卡在哪一步：最后一个“进行中”的步骤。"""
+        login = self._code
+        running = [s["key"] for s in login.steps if s["status"] == "running"] if login else []
+        return running[-1] if running else "request_url"
+
+    @staticmethod
+    def _login_failure(errors: list[str]) -> str:
+        text = next((e for e in reversed(errors) if e.startswith("Login failed")), "")
+        if _REFUSED in text:
+            return (
+                "授权码没有被接受：可能不完整、已过期、已经用过，或者是上一次登录的。"
+                "请重新开始登录，用新的授权码"
+            )
+        detail = redact(text or (errors[-1] if errors else ""))[:300]
+        return (
+            f"官方程序没有完成登录：{detail}" if detail else "官方程序没有完成登录，也没有给出原因"
+        )
+
+    async def _finish_code_login(self) -> None:
+        """官方程序报告登录成功：记下登录方式，再用 `auth status` 确认登录了哪个账号。"""
+        login = self._code
+        if login is None:
+            return
+        steps, log = login.steps, login.log
+        progress.mark(steps, "submit_code", "done", "官方程序报告登录成功（Login successful.）")
+        progress.mark(steps, "finish", "running")
+        progress.note(log, "官方程序报告登录成功，查一次登录状态（auth status）确认账号")
+        self._save_secret({"method": "web"})
+        try:
+            data = json.loads(await self._run_short(["auth", "status"]))
+        except (DriverError, ValueError):
+            data = {}
+        if not isinstance(data, dict) or not data.get("loggedIn"):
+            self._code_fail("finish", "官方程序报告登录成功，但查登录状态时没有确认已登录")
+            return
+        email = data.get("email")
+        who = f"已登录：{mask_identity(email)}" if isinstance(email, str) and email else "已登录"
+        progress.mark(steps, "finish", "done", who)
+        progress.note(log, who)
+        self._code = replace(
+            login,
+            state="done",
+            needs_code=False,
+            detail="",
+            finished_at=progress.iso(progress.now()),
+        )
+
+    def _code_fail(self, key: str, message: str) -> None:
+        login = self._code
+        if login is None:
+            return
+        progress.mark(login.steps, key, "failed", message)
+        progress.note(login.log, f"失败：{message}")
+        self._code = replace(
+            login,
+            state="failed",
+            needs_code=False,
+            detail=message,
+            finished_at=progress.iso(progress.now()),
+        )
+
+    async def _stop_code_login(self) -> None:
+        proc, task = self._code_proc, self._code_task
+        self._code_proc = self._code_task = None
+        if proc is not None and proc.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    async def submit_code(self, code: str) -> LoginChallenge:
+        """把授权码交给正在等它的官方程序。授权码不记日志，也不保存。"""
+        login, proc = self._code, self._code_proc
+        if (
+            login is None
+            or login.state != "pending"
+            or not login.needs_code
+            or proc is None
+            or proc.returncode is not None
+            or proc.stdin is None
+        ):
+            raise DriverError("conflict", "没有在等授权码的登录：请重新开始网页授权登录")
+        code = code.strip()
+        head, sep, tail = code.partition("#")
+        if not sep or not head or not tail or any(c.isspace() for c in code):
+            raise DriverError(
+                "invalid",
+                "授权码不完整：请复制授权页上显示的整段授权码（中间有一个 #），不要多也不要少",
+            )
+        try:
+            proc.stdin.write(f"{code}\n".encode())
+            await proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError) as error:
+            raise DriverError("conflict", "官方程序已经退出：请重新开始网页授权登录") from error
+        progress.mark(login.steps, "wait_user", "done", "已收到授权码")
+        progress.mark(
+            login.steps,
+            "submit_code",
+            "running",
+            "官方程序用授权码换取登录（要访问 platform.claude.com）",
+        )
+        progress.note(login.log, "已把授权码交给官方程序（授权码不记在这里）")
+        self._code = replace(login, needs_code=False)
+        return self._code
+
     async def logout(self) -> None:
+        await self._stop_code_login()
+        self._code = None
         was_web = self._secret().get("method") in self.profile.web_login
         with contextlib.suppress(FileNotFoundError):
             self._secret_file.unlink()
@@ -465,6 +739,8 @@ class CliStreamDriver(Driver):
                 data = {}
             if data.get("loggedIn"):
                 reported = str(data.get("authMethod") or method or "")
+                if method == "web" and reported == "claude.ai":
+                    reported = "web"  # 网页授权登录（T-0287）存下的就是 claude.ai 登录
                 return AccountStatus(True, data.get("email") or None, reported)
             if secret.get("value"):
                 # 配置了密钥或令牌、官方程序却没有确认：不拦在这里，发送时才知道凭据是否有效

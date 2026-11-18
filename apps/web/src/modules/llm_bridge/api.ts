@@ -101,7 +101,9 @@ export const ACCOUNT_STATE: Record<string, { text: string; tone: string }> = {
 export const METHODS: Record<LoginMethod, { name: string; help: string }> = {
   device_code: { name: '设备码登录', help: '页面给出网址和验证码，你在自己的浏览器里打开网址、输入验证码完成登录。' },
   api_key: { name: 'API 密钥', help: '密钥保存在会话桥的数据卷里，不保存在工作台。' },
-  oauth_token: { name: '订阅令牌', help: '用官方程序生成的长期令牌登录订阅账号；令牌保存在会话桥的数据卷里，不保存在工作台。' },
+  oauth_token: { name: '订阅令牌', help: '用官方程序在你自己电脑上生成的长期令牌登录订阅账号（步骤见下面）；令牌保存在会话桥的数据卷里，不保存在工作台。' },
+  // Claude 的网页授权登录（T-0287）：管理器替你运行官方程序的登录，你在浏览器里登录授权，再把授权码粘贴回来
+  web: { name: '网页授权登录（推荐）', help: '页面给出 Claude 的登录网址，你在自己的浏览器里登录订阅账号并授权，再把授权页显示的授权码粘贴回来；整个过程一步步显示。登录由 MCP 管理器里的官方程序完成，你的电脑上不用装 Claude Code。' },
   existing: { name: '容器里已有的登录', help: '使用已经在容器里完成的登录。' },
   // CodeBuddy的网页登录：页面给出网址，在自己的浏览器里打开并登录，不用进容器操作官方程序
   web_cn: { name: '网页登录（国内站）', help: '页面给出一个登录网址，你在自己的浏览器里打开并登录 CodeBuddy 国内站（copilot.tencent.com）的账号，完成后这里自动更新。' },
@@ -317,6 +319,10 @@ export function useLlmBridge(scope: string) {
     // 等 95 秒（工作台等管理器 90 秒，都在 CDN 单个请求 100 秒的上限之内）；更慢或连接中断时由页面改查登录进度
     async login(id: string, slot: Slot, body: LoginBody) {
       return dataOf(await auth.longApi.POST('/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login', { params: slotAt(id, slot), body }))
+    },
+    // Claude 网页授权登录（T-0287）：把授权页显示的授权码交给管理器里正在等它的官方程序
+    async submitLoginCode(id: string, slot: Slot, code: string) {
+      return dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login/code', { params: slotAt(id, slot), body: { code } }))
     },
     async loginState(id: string, slot: Slot) {
       return dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/accounts/{slot}/login', { params: slotAt(id, slot) }))
