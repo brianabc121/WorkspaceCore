@@ -163,7 +163,7 @@ def upgrade() -> None:
             name=op.f(f"ck_{CONTAINERS}_image_kind"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f(f"pk_{CONTAINERS}")),
-        sa.UniqueConstraint("bridge_id", "name", name=op.f(f"uq_{CONTAINERS}_bridge_id")),
+        sa.UniqueConstraint("bridge_id", "name", name=op.f(f"uq_{CONTAINERS}_bridge_id_name")),
         sa.UniqueConstraint(
             "runner_environment_id", name=op.f(f"uq_{CONTAINERS}_runner_environment_id")
         ),
@@ -192,7 +192,7 @@ def upgrade() -> None:
             "purpose IN ('turn', 'login', 'job', 'prepare')", name=op.f(f"ck_{PROCS}_purpose")
         ),
         sa.PrimaryKeyConstraint("id", name=op.f(f"pk_{PROCS}")),
-        sa.UniqueConstraint("bridge_id", "proc_id", name=op.f(f"uq_{PROCS}_bridge_id")),
+        sa.UniqueConstraint("bridge_id", "proc_id", name=op.f(f"uq_{PROCS}_bridge_id_proc_id")),
         schema="workspace",
     )
     op.create_index(f"ix_{PROCS}_run", PROCS, ["run_id"], schema="workspace")
