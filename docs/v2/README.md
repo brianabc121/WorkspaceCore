@@ -26,6 +26,7 @@ sha256 `2c0f41d55f9369c95a0aa83c64f05e905c9a48df353bd677765a6f3d4e3386a2`）。�
 | [`LLM_BRIDGE_PLAN.md`](LLM_BRIDGE_PLAN.md) | 大模型会话桥方案（2026-11-13，T-0226）：一个 Docker 部署的 MCP 服务，让多个 OpenClaw 向 ChatGPT / Codex / Claude / WorkBuddy 发指令；会话与回合、各平台驱动、开发环境、一座桥一个账号；附 GitHub 同类开源方案调研 | 新增，**已批准，实施中**（人类 2026-11-13 要求按方案全面落实，D1 ~ D9 按推荐；T-0227 起） |
 | [`LLM_BRIDGE_IMPROVE_PLAN.md`](LLM_BRIDGE_IMPROVE_PLAN.md) | 大模型客户端改进方案（2026-11-15，T-0246）：从智能体调用、管理员回溯、人日常聊天三条链路看现有设计的问题；先修正 7 处、再做共用的底座（回合状态、事件流、出处、会话索引）、再分链路改进；附业内做法的来源 | 新增，**已批准，实施中**（人类 2026-11-15 要求全面落实；T-0247 起） |
 | [`LLM_BRIDGE_MEMORY_PLAN.md`](LLM_BRIDGE_MEMORY_PLAN.md) | 大模型客户端：上下文压缩与知识库结合的优化方案（2026-11-16，T-0256）：三个官方程序自带的压缩能力（锁定版本核对）、业内做法、看得见与管得了压缩、会话纪要进知识库、提问前挑选笔记带上；人类 2026-11-16 已答复（会话纪要默认自动写入、知识库默认允许外发、其余按推荐） | 新增，**第 1–4 期已实施**（T-0257 ~ T-0260；钩子默认关，待真实账号验证） |
+| [`LLM_BRIDGE_REMOTE_ENV_PLAN.md`](LLM_BRIDGE_REMOTE_ENV_PLAN.md) | 开发环境的“云端远程容器”方案（2026-11-18）：新增开发环境时在容器服务器上建专用容器，Codex / Claude / CodeBuddy 整个跑在容器里；runner-agent 托管进程、工作台中转、登录凭据按种类处理、页面与数据、核验清单 | 新增，**草案，待人类决定 D1 ~ D8** |
 | [`package/README_V2.md`](package/README_V2.md) | 资料包说明 | 新增 |
 | [`package/AGENT_ARCHITECTURE_V2.md`](package/AGENT_ARCHITECTURE_V2.md) | Agent Control Plane 架构增补规格（V2 的主体） | 新增 |
 | [`package/AGENT_TASKS_V2.md`](package/AGENT_TASKS_V2.md) | V2-S0 ~ V2-S7 任务清单 | 新增 |
