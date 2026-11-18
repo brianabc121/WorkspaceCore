@@ -19,6 +19,7 @@ import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Any
 
 from redis.asyncio import Redis
 from sqlalchemy import delete, func, select, true, update
@@ -290,6 +291,8 @@ async def _event_conditions(
             .where(
                 RunnerEnvironment.state.in_(("creating", "running", "stopped", "archived")),
                 RunnerEnvironment.host_id.in_(host_ids) if host_ids is not None else true(),
+                # 模块建的环境（远程开发容器等）没有创建者实例，由模块管理，不算孤儿
+                RunnerEnvironment.owner_kind == "instance",
                 (RunnerEnvironment.owner_instance_id.is_(None))
                 | (AgentInstance.status == "disabled"),
             )
@@ -302,6 +305,15 @@ async def _event_conditions(
         else:
             await runner.mark_pending_delete(env, "创建者实例已停用或删除")
             out.pending_delete += 1
+
+
+def _idle_stop_after(env: RunnerEnvironment, policy: dict[str, Any]) -> float:
+    """空闲多久停止。模块建的环境按它自己的设置（runtime_metadata.idle_stop_seconds，0 = 不停）。"""
+    if env.owner_kind != "instance":
+        seconds = (env.runtime_metadata or {}).get("idle_stop_seconds")
+        if isinstance(seconds, int | float) and seconds >= 0:
+            return math.inf if seconds == 0 else float(seconds)
+    return specs.idle_stop_after(env.lifetime, env.start_seconds, policy)
 
 
 async def _busy(
@@ -403,7 +415,7 @@ async def _lifecycle(
             continue
         viewer = Viewer(env.workspace_id)
         if env.state == "running":
-            if idle >= specs.idle_stop_after(env.lifetime, env.start_seconds, policy):
+            if idle >= _idle_stop_after(env, policy):
                 await runner.stop(viewer, env, f"空闲 {round(idle / 60)} 分钟，自动停止")
                 out.stopped += 1
             elif (
@@ -419,7 +431,7 @@ async def _lifecycle(
             due = idle >= policy["persistent_archive_days"] * 86400
         else:
             due = since >= policy["session_archive_hours"] * 3600
-        if due and await runner.archive(env, "停止到点，自动归档"):
+        if due and not env.no_auto_archive and await runner.archive(env, "停止到点，自动归档"):
             out.archived += 1
 
 
@@ -504,7 +516,7 @@ async def _watermarks(
             for env in [e for e in candidates if e.state == "stopped"]:
                 if archived >= RECLAIM_PER_TICK:
                     break
-                if math.isinf(ranked.get(env.id, 0.0)):
+                if math.isinf(ranked.get(env.id, 0.0)) or env.no_auto_archive:
                     continue
                 if await runner.archive(env, "容器服务器磁盘紧张，按保留分归档"):
                     archived += 1

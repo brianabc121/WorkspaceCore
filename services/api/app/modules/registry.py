@@ -130,6 +130,14 @@ def secret_path_params() -> Mapping[str, frozenset[str]]:
     }
 
 
+def runner_proc_sink(owner_kind: str) -> Any | None:
+    """owner_kind（模块 key）对应的托管进程去处；模块没有声明时为 None。"""
+    manifest = BY_KEY.get(owner_kind)
+    if manifest is None or manifest.runner_proc_sink is None:
+        return None
+    return resolve(manifest.runner_proc_sink)
+
+
 def sealed_fields() -> tuple[Any, ...]:
     return tuple(sealed for m in MODULES if m.sealed_fields for sealed in resolve(m.sealed_fields))
 

@@ -2,7 +2,8 @@
 
 - `POST /runner-api/v1/poll`：长轮询（最多 25 秒）领指令，同时上报容量；
 - `POST /runner-api/v1/commands/{id}/result`：回报一条指令的结果（重复回报只认第一次）；
-- `POST /runner-api/v1/report`：定期对账；
+- `POST /runner-api/v1/report`：定期对账（应答里带还在跑的托管进程）；
+- `POST /runner-api/v1/procs/{id}/output|exit`：托管进程的输出与结束（远程开发容器，迁移 0079）；
 - `PUT|GET /runner-api/v1/snapshots/{id}/parts/{n}`：常驻环境快照的分块上传与恢复（T-0139）。
 认证：运行服务器凭证（`mwr_`）+ 接入入口写入的入口请求头（外网另需客户端证书指纹），
 只在请求直接来自接入入口时采用这些请求头。认证失败一律 401 RUNNER_UNAUTHORIZED。
@@ -20,7 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.agent_api import CERT_HEADER, INGRESS_HEADER, _from_ingress_proxy
 from app.api.deps import client_ip
 from app.core.errors import ApiError
+from app.domain import runner_specs as specs
 from app.domain.runner_hosts import RunnerHosts, unauthorized
+from app.domain.runner_procs import accept_exit, accept_output
 from app.domain.runner_snapshots import MAX_PARTS, PART_BYTES, SnapshotStore
 from app.models import RunnerEnvironment, RunnerHost, RunnerSnapshot
 from app.schemas.common import error_responses
@@ -28,6 +31,10 @@ from app.schemas.runner import (
     RunnerCommandResult,
     RunnerPoll,
     RunnerPollResponse,
+    RunnerProcAck,
+    RunnerProcExit,
+    RunnerProcExitAccepted,
+    RunnerProcOutput,
     RunnerReport,
     RunnerReportResult,
     RunnerReportSample,
@@ -119,6 +126,49 @@ async def command_result(
         accepted = await hosts.result(host, command_id, body)
         await db.commit()
     return ResultAccepted(accepted=accepted)
+
+
+@router.post(
+    "/procs/{run_id}/output",
+    summary="托管进程的一块输出（运行服务器）",
+    description="offset 是这一块在输出里的起始字节；工作台交给建这个进程的模块，"
+    "返回已确认的字节数。offset 和已确认数对不上时不收，只返回已确认数，runner-agent 从那里重发"
+    "（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 21.3）。",
+    responses=_errors,
+)
+async def proc_output(
+    request: Request, credentials: RunnerCredentials, run_id: uuid.UUID, body: RunnerProcOutput
+) -> RunnerProcAck:
+    app = request.app
+    async with app.state.sessionmaker() as db:
+        hosts = RunnerHosts(db, app.state.settings, app.state.redis)
+        host = await _authenticate(request, credentials, hosts)
+        acked = await accept_output(
+            db, app.state.settings, app.state.redis, host, run_id, body, app.state.connectors
+        )
+        host.last_seen_at = specs.now()
+        await db.commit()
+    return RunnerProcAck(acked=acked)
+
+
+@router.post(
+    "/procs/{run_id}/exit",
+    summary="托管进程结束（运行服务器）",
+    description="在输出全部确认之后回报；重复回报只认第一次（accepted=false）。",
+    responses=_errors,
+)
+async def proc_exit(
+    request: Request, credentials: RunnerCredentials, run_id: uuid.UUID, body: RunnerProcExit
+) -> RunnerProcExitAccepted:
+    app = request.app
+    async with app.state.sessionmaker() as db:
+        hosts = RunnerHosts(db, app.state.settings, app.state.redis)
+        host = await _authenticate(request, credentials, hosts)
+        accepted = await accept_exit(
+            db, app.state.settings, app.state.redis, host, run_id, body, app.state.connectors
+        )
+        await db.commit()
+    return RunnerProcExitAccepted(accepted=accepted)
 
 
 @router.post("/report/start", response_model=RunnerReportSample, responses=_errors)

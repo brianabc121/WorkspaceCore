@@ -75,6 +75,10 @@ def _error(error: RunnerError) -> ApiError:
     return ApiError(status, error.code, error.message)
 
 
+# 模块建的环境不能在容器服务器页面上做的操作（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 5.6）
+MODULE_MANAGED_ACTIONS = frozenset({"archive", "delete", "keep", "restore"})
+
+
 class RunnerAdmin:
     def __init__(self, db: AsyncSession, settings: Settings, redis: Redis | None = None) -> None:
         self.db = db
@@ -280,6 +284,9 @@ class RunnerAdmin:
         return RunnerEnvAdminOut(
             **base.model_dump(),
             owner_instance_id=env.owner_instance_id,
+            owner_kind=env.owner_kind,
+            owner_label=env.owner_label,
+            no_auto_archive=env.no_auto_archive,
             template_id=env.template_id,
             spec=spec_out(env.spec),
             mem_bytes=env.mem_bytes,
@@ -440,6 +447,14 @@ class RunnerAdmin:
             raise not_found()
         if env.version != body.version:
             raise ApiError(409, "VERSION_CONFLICT", "环境已被修改，请刷新后重试")
+        if env.owner_kind != "instance" and body.action in MODULE_MANAGED_ACTIONS:
+            # 模块建的环境（例如 MCP 管理器的远程开发容器）在模块的页面上归档、删除、恢复
+            raise ApiError(
+                409,
+                "MANAGED_BY_MODULE",
+                f"这个容器归「{env.owner_label or env.owner_kind}」管理，请在它自己的页面上删除",
+                details={"owner_kind": env.owner_kind},
+            )
         viewer = Viewer(access.workspace.id, user_id=access.user_id)
         reason = "管理员操作"
         try:

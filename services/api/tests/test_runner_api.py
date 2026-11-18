@@ -634,7 +634,11 @@ async def test_report_marks_lost_and_stray_containers(env: Env) -> None:
         headers=runner_headers(rtoken),
     )
     assert report.status_code == 200, report.text
-    assert report.json() == {"lost": [environment["id"]], "stray": ["mw-env-0123456789ab"]}
+    assert report.json() == {
+        "lost": [environment["id"]],
+        "stray": ["mw-env-0123456789ab"],
+        "procs": [],
+    }
     listed = await env.client.get(
         "/api/v1/runner/environments", params={"include_deleted": True}, headers=env.headers()
     )

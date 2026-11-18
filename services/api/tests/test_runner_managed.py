@@ -1,0 +1,343 @@
+"""模块建的容器服务器环境与托管进程（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 21.3、21.4）。
+
+真实 PostgreSQL / Redis；测试代替 runner-agent 走 /runner-api/v1/*，模块的去处换成记录用的假对象。
+覆盖：建模块归属的常驻环境；托管进程的标准输入和凭据不落库、领指令时才解开且只能领一次；
+起来以后才进对账名单；输出按偏移确认（重复、超前的块不收）；结束只认第一次；没起来时通知模块；
+排队时叫停直接取消；回收不把它当孤儿、不自动归档、按自己的空闲时长停止；容器服务器页面上不能删。
+"""
+
+import base64
+import json
+import uuid
+from collections.abc import AsyncIterator
+from datetime import timedelta
+from typing import Any
+
+import pytest
+from sqlalchemy import select, update
+
+from app.domain import runner_reclaim
+from app.domain import runner_specs as specs
+from app.domain.runner_managed import ManagedRunner, proc_input_key
+from app.models import RunnerCommand, RunnerEnvironment, RunnerHost, RunnerRun, RunnerTemplate
+from app.modules import registry
+from tests.test_runner_api import (
+    SETTINGS,
+    add_host,
+    begin_sample,
+    next_command,
+    physical_id,
+    report_result,
+    runner_headers,
+)
+from tests.workspace_support import Env, app_of, open_env
+
+pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+async def env(make_client: Any, migrated_database_url: str) -> AsyncIterator[Env]:
+    async with open_env(make_client, migrated_database_url, **SETTINGS) as value:
+        yield value
+
+
+SECRET = "sk-ant-api03-" + "Z" * 40
+PROMPT = "请把测试跑一遍"
+
+
+class FakeSink:
+    def __init__(self) -> None:
+        self.chunks: list[tuple[int, bytes]] = []
+        self.exits: list[dict[str, Any]] = []
+        self.accept = True
+
+    async def output(
+        self, db: Any, settings: Any, run: RunnerRun, offset: int, data: bytes, runtime: Any = None
+    ) -> int:
+        if not self.accept:
+            return offset
+        self.chunks.append((offset, data))
+        return offset + len(data)
+
+    async def exit(
+        self, db: Any, settings: Any, run: RunnerRun, info: dict[str, Any], runtime: Any = None
+    ) -> None:
+        self.exits.append({"run_id": str(run.id), **info})
+
+
+@pytest.fixture
+def sink(monkeypatch: pytest.MonkeyPatch) -> FakeSink:
+    fake = FakeSink()
+    original = registry.runner_proc_sink
+    monkeypatch.setattr(
+        registry,
+        "runner_proc_sink",
+        lambda kind: fake if kind == "llm_bridge" else original(kind),
+    )
+    return fake
+
+
+async def _setup(env: Env) -> tuple[str, uuid.UUID, uuid.UUID]:
+    """容器服务器上线、一个构建好的模板、一个模块建的环境（回报建好）。"""
+    rtoken = await add_host(env)
+    app = app_of(env.client)
+    workspace_id = uuid.UUID(env.workspace_id)
+    async with app.state.sessionmaker() as db:
+        host = await db.scalar(select(RunnerHost).where(RunnerHost.workspace_id == workspace_id))
+        assert host is not None
+        template = RunnerTemplate(
+            id=uuid.uuid4(),
+            workspace_id=workspace_id,
+            name="mw-llm-dev-test",
+            description="测试",
+            created_by=env.owner_id,
+            spec=specs.normalize({"image": "node:22-bookworm-slim", "lifetime": "persistent"}),
+            build_status="ready",
+            build_host_id=host.id,
+            image_ref="myworkspace/tpl-test:1",
+            image_digest="sha256:" + "b" * 64,
+        )
+        db.add(template)
+        await db.flush()
+        managed = ManagedRunner(db, app.state.settings, app.state.redis)
+        created = await managed.create(
+            workspace_id,
+            owner_kind="llm_bridge",
+            owner_ref="container-1",
+            owner_label="MCP 管理器「主桥」· 远程容器「开发机」",
+            host=host,
+            template=template,
+            overrides={"cpus": 2, "memory_mb": 4096, "disk_gb": 20, "network": "all"},
+            purpose="大模型开发环境：开发机",
+            idle_stop_seconds=1800,
+            actor_id=env.owner_id,
+        )
+        await db.commit()
+        env_id = created.id
+        host_id = host.id
+    command = await next_command(env, rtoken, "create_env")
+    assert command["payload"]["user"] == "user"  # 远程开发容器固定非 root
+    assert await report_result(env, rtoken, command["id"], {"seconds": 3.0})
+    return rtoken, env_id, host_id
+
+
+async def _start(env: Env, env_id: uuid.UUID, **kwargs: Any) -> uuid.UUID:
+    app = app_of(env.client)
+    async with app.state.sessionmaker() as db:
+        target = await db.get(RunnerEnvironment, env_id)
+        assert target is not None
+        run = await ManagedRunner(db, app.state.settings, app.state.redis).start_proc(
+            target,
+            owner_kind="llm_bridge",
+            owner_ref="container-1",
+            label="turn · claude · bs_test0001",
+            argv=["/opt/mw/cli/bin/claude", "-p", "--output-format", "stream-json"],
+            cwd="/workspace/sessions/bs_test0001",
+            env_vars={"CLAUDE_CONFIG_DIR": "/workspace/.home/.claude", "HOME": "/elsewhere"},
+            secret_env={"ANTHROPIC_API_KEY": SECRET},
+            stdin=PROMPT.encode(),
+            timeout_seconds=600,
+            **kwargs,
+        )
+        await db.commit()
+        return run.id
+
+
+async def _report(env: Env, rtoken: str) -> dict[str, Any]:
+    sample_id = await begin_sample(env, rtoken)
+    response = await env.client.post(
+        "/runner-api/v1/report",
+        json={
+            "sample_id": sample_id,
+            "physical_host_id": physical_id(rtoken),
+            "mem_bytes": 32 * 1024**3,
+            "mem_free_bytes": 24 * 1024**3,
+            "disk_bytes": 500 * 1024**3,
+            "disk_free_bytes": 400 * 1024**3,
+            "load": 0.5,
+        },
+        headers=runner_headers(rtoken),
+    )
+    assert response.status_code == 200, response.text
+    data: dict[str, Any] = response.json()
+    return data
+
+
+async def _output(env: Env, rtoken: str, run_id: uuid.UUID, offset: int, data: bytes) -> int:
+    response = await env.client.post(
+        f"/runner-api/v1/procs/{run_id}/output",
+        json={"offset": offset, "data_b64": base64.b64encode(data).decode()},
+        headers=runner_headers(rtoken),
+    )
+    assert response.status_code == 200, response.text
+    acked: int = response.json()["acked"]
+    return acked
+
+
+async def test_managed_process_round_trip(env: Env, sink: FakeSink) -> None:
+    rtoken, env_id, _ = await _setup(env)
+    run_id = await _start(env, env_id)
+    app = app_of(env.client)
+
+    # 标准输入和凭据不落库，只在 Redis 里加密放着
+    async with app.state.sessionmaker() as db:
+        command = await db.scalar(
+            select(RunnerCommand).where(
+                RunnerCommand.run_id == run_id, RunnerCommand.kind == "proc_start"
+            )
+        )
+        assert command is not None
+        stored = json.dumps(command.payload, ensure_ascii=False)
+        assert SECRET not in stored and PROMPT not in stored
+        assert "HOME" not in command.payload["env"]  # HOME 由容器设定，调用方改不了
+        command_id = command.id
+        run = await db.get(RunnerRun, run_id)
+        assert run is not None and run.kind == "proc" and run.status == "queued"
+    sealed = await app.state.redis.get(proc_input_key(command_id))
+    assert sealed is not None and SECRET.encode() not in sealed
+
+    # 起来之前不在对账名单里
+    assert (await _report(env, rtoken))["procs"] == []
+
+    # 领指令时才解开，只能领一次
+    command_out = await next_command(env, rtoken, "proc_start")
+    proc_input = command_out["payload"]["proc_input"]
+    assert base64.b64decode(proc_input["stdin_b64"]).decode() == PROMPT
+    assert proc_input["secret_env"] == {"ANTHROPIC_API_KEY": SECRET}
+    assert command_out["payload"]["proc_dir"] == f"/workspace/.mw/procs/{run_id}"
+    assert await app.state.redis.get(proc_input_key(command_id)) is None
+
+    assert await report_result(env, rtoken, command_out["id"], {"started": True, "pgid": 42})
+    procs = (await _report(env, rtoken))["procs"]
+    assert [p["run_id"] for p in procs] == [str(run_id)] and procs[0]["acked"] == 0
+
+    # 输出按偏移确认；重复、超前的块不收
+    assert await _output(env, rtoken, run_id, 0, b'{"type":"system"}\n') == 18
+    assert await _output(env, rtoken, run_id, 0, b'{"type":"system"}\n') == 18
+    assert await _output(env, rtoken, run_id, 50, b"x") == 18
+    sink.accept = False  # 下游暂时收不下：不推进
+    assert await _output(env, rtoken, run_id, 18, b"more\n") == 18
+    sink.accept = True
+    assert await _output(env, rtoken, run_id, 18, b"more\n") == 23
+    assert [offset for offset, _ in sink.chunks] == [0, 18]
+    assert (await _report(env, rtoken))["procs"][0]["acked"] == 23
+
+    # 结束：只认第一次
+    body = {"exit_code": 0, "state": "exited", "stderr_tail": "done", "error": None}
+    first = await env.client.post(
+        f"/runner-api/v1/procs/{run_id}/exit", json=body, headers=runner_headers(rtoken)
+    )
+    assert first.status_code == 200 and first.json() == {"accepted": True}
+    again = await env.client.post(
+        f"/runner-api/v1/procs/{run_id}/exit", json=body, headers=runner_headers(rtoken)
+    )
+    assert again.json() == {"accepted": False}
+    assert len(sink.exits) == 1 and sink.exits[0]["state"] == "exited"
+    async with app.state.sessionmaker() as db:
+        finished = await db.get(RunnerRun, run_id)
+        assert finished is not None and finished.status == "succeeded"
+    assert (await _report(env, rtoken))["procs"] == []
+
+    # 别的服务器的凭证碰不到这个进程
+    missing = await env.client.post(
+        f"/runner-api/v1/procs/{uuid.uuid4()}/output",
+        json={"offset": 0, "data_b64": ""},
+        headers=runner_headers(rtoken),
+    )
+    assert missing.status_code == 404
+
+
+async def test_failed_start_queued_signal_and_input(env: Env, sink: FakeSink) -> None:
+    rtoken, env_id, _ = await _setup(env)
+    app = app_of(env.client)
+
+    # 没起来：结束记失败并通知模块
+    run_id = await _start(env, env_id)
+    command = await next_command(env, rtoken, "proc_start")
+    assert await report_result(env, rtoken, command["id"], {}, status="failed")
+    assert sink.exits[-1]["run_id"] == str(run_id) and sink.exits[-1]["state"] == "failed"
+
+    # 还在排队时叫停：撤掉指令，直接取消
+    queued = await _start(env, env_id)
+    async with app.state.sessionmaker() as db:
+        run = await db.get(RunnerRun, queued)
+        assert run is not None
+        await ManagedRunner(db, app.state.settings, app.state.redis).signal(run, "TERM")
+        await db.commit()
+        assert run.status == "cancelled"
+
+    # 交互输入：只在领指令时解开
+    interactive = await _start(env, env_id, interactive=True)
+    started = await next_command(env, rtoken, "proc_start")
+    assert started["payload"]["interactive"] is True
+    assert await report_result(env, rtoken, started["id"], {"started": True, "pgid": 7})
+    async with app.state.sessionmaker() as db:
+        run = await db.get(RunnerRun, interactive)
+        assert run is not None
+        managed = ManagedRunner(db, app.state.settings, app.state.redis)
+        await managed.send_input(run, "code#state")
+        await managed.signal(run, "TERM")
+        await db.commit()
+    sent = await next_command(env, rtoken, "proc_input")
+    assert sent["payload"]["proc_input"] == {"data": "code#state"}
+    stopped = await next_command(env, rtoken, "proc_signal")
+    assert stopped["payload"]["signal"] == "TERM"
+
+
+async def test_reclaim_and_admin_treat_module_environments_specially(
+    env: Env, sink: FakeSink
+) -> None:
+    rtoken, env_id, _ = await _setup(env)
+    app = app_of(env.client)
+
+    # 没有创建者实例，但不是孤儿
+    async with app.state.sessionmaker() as db:
+        await runner_reclaim.tick(db, app.state.settings, app.state.redis)
+        await db.commit()
+        current = await db.get(RunnerEnvironment, env_id)
+        assert current is not None and current.state == "running"
+        assert current.no_auto_archive and current.owner_kind == "llm_bridge"
+
+    # 空闲超过它自己的时长（30 分钟）就停；停了也不自动归档
+    async with app.state.sessionmaker() as db:
+        await db.execute(
+            update(RunnerEnvironment)
+            .where(RunnerEnvironment.id == env_id)
+            .values(last_used_at=specs.now() - timedelta(minutes=31))
+        )
+        await db.commit()
+        await runner_reclaim.tick(db, app.state.settings, app.state.redis)
+        await db.commit()
+    stop = await next_command(env, rtoken, "stop_env")
+    assert await report_result(env, rtoken, stop["id"], {})
+    async with app.state.sessionmaker() as db:
+        await db.execute(
+            update(RunnerEnvironment)
+            .where(RunnerEnvironment.id == env_id)
+            .values(last_used_at=specs.now() - timedelta(days=60))
+        )
+        await db.commit()
+        await runner_reclaim.tick(db, app.state.settings, app.state.redis)
+        await db.commit()
+        current = await db.get(RunnerEnvironment, env_id)
+        assert current is not None and current.state == "stopped"
+
+    # 容器服务器页面：看得到申请方；不能删、不能归档；能启动
+    listed = await env.get("/api/v1/runner/environments")
+    item = next(e for e in listed["items"] if e["id"] == str(env_id))
+    assert item["owner_kind"] == "llm_bridge"
+    assert item["owner_label"] == "MCP 管理器「主桥」· 远程容器「开发机」"
+    for action in ("delete", "archive"):
+        denied = await env.client.post(
+            f"/api/v1/runner/environments/{env_id}/actions",
+            json={"action": action, "version": item["version"]},
+            headers=env.headers(write=True),
+        )
+        assert denied.status_code == 409, denied.text
+        assert denied.json()["error"]["code"] == "MANAGED_BY_MODULE"
+    started = await env.client.post(
+        f"/api/v1/runner/environments/{env_id}/actions",
+        json={"action": "start", "version": item["version"]},
+        headers=env.headers(write=True),
+    )
+    assert started.status_code == 200, started.text

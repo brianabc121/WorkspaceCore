@@ -458,6 +458,32 @@ class Docker:
         )
 
     # ------------------------------------------------------------------ exec
+    def exec_detached(
+        self,
+        container: str,
+        cmd: list[str],
+        *,
+        user: str | None = None,
+        workdir: str | None = None,
+        env: list[str] | None = None,
+    ) -> str:
+        """在运行中的容器里起一个后台进程（Detach），立即返回 exec 的 id。
+
+        进程的输出不经 Docker 回传：托管进程自己写进容器里的文件
+        （docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 第 7 节）。
+        Env 只经请求体交给 Docker，不出现在日志里。"""
+        body: dict[str, Any] = {"Cmd": cmd, "AttachStdout": False, "AttachStderr": False}
+        if user:
+            body["User"] = user
+        if workdir:
+            body["WorkingDir"] = workdir
+        if env:
+            body["Env"] = env
+        created = self.json("POST", f"/containers/{container}/exec", body=body)
+        exec_id = str(created["Id"])
+        self.call("POST", f"/exec/{exec_id}/start", body={"Detach": True, "Tty": False})
+        return exec_id
+
     def exec(
         self,
         container: str,

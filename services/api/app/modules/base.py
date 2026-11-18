@@ -122,6 +122,11 @@ class ModuleManifest:
     # 例如新闻早报停用后重新生成 TrendRadar 配置文件、不再推送。钩子要按数据库里的最新状态协调、
     # 可以重复执行；失败不回滚开关，结果写进同步记录，owner 可以在应用中心重试（T-0210）
     on_toggle: str | None = None
+    # 容器服务器托管进程的去处（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 21.4）：模块建的环境里
+    # owner_kind 等于本模块 key 的托管进程，输出和结束交给它。对象要有
+    # ``async output(db, settings, run, offset, data) -> int``（返回已确认的字节数）和
+    # ``async exit(db, settings, run, info) -> None``
+    runner_proc_sink: str | None = None
 
     def targets(self) -> list[str]:
         """清单里所有 ``包.模块:属性`` 形式的导入路径（一致性检查用）。"""
@@ -135,6 +140,7 @@ class ModuleManifest:
             self.direct_tools,
             self.sealed_fields,
             self.on_toggle,
+            self.runner_proc_sink,
             *(c.target for c in self.crons),
             *(s.probe for s in self.service_checks),
         ]
