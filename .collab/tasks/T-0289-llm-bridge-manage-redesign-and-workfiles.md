@@ -5,7 +5,7 @@ owner: claude
 status: done
 priority: P2
 branch: claude/amazing-faraday-6ey29e
-paths: apps/web/src/modules/llm_bridge,apps/web/src/services/schema.d.ts,apps/web/tests/llm_bridge.test.ts,services/llm-bridge/bridge/app.py,services/llm-bridge/bridge/engine.py,services/llm-bridge/bridge/store.py,services/llm-bridge/bridge/workfiles.py,services/llm-bridge/tests/test_workfiles.py,services/api/app/modules/llm_bridge,services/api/app/domain/audit_labels.py,services/api/openapi.json,services/api/tests/test_module_llm_bridge.py,tests/e2e/llm_bridge_browser.cjs,tests/e2e/llm_chat_browser.cjs,docs/api-contract.md,docs/v2/LLM_BRIDGE_PLAN.md,docs/guides/mcp-manager-deploy.md
+paths: apps/web/src/modules/llm_bridge,apps/web/src/services/schema.d.ts,apps/web/tests/llm_bridge.test.ts,services/llm-bridge/bridge/app.py,services/llm-bridge/bridge/engine.py,services/llm-bridge/bridge/store.py,services/llm-bridge/bridge/workfiles.py,services/llm-bridge/tests/test_workfiles.py,services/api/app/modules/llm_bridge,services/api/app/domain/audit_labels.py,services/api/openapi.json,services/api/tests/test_module_llm_bridge.py,tests/e2e/llm_bridge_browser.cjs,tests/e2e/llm_chat_browser.cjs,docs/api-contract.md,docs/v2/LLM_BRIDGE_PLAN.md,docs/guides/mcp-manager-deploy.md,.gitleaksignore
 depends_on: T-0286
 created: 2026-11-17
 updated: 2026-11-18
@@ -46,3 +46,4 @@ updated: 2026-11-18
 - 2026-11-17 18:02 UTC · claude · status in_progress → done：管理器与账号页按效果图改版、开发环境浏览文件完成，验收标准全部勾选（浏览器验收以 CI 为准）
 - 2026-11-18 01:58 UTC · claude · 合并 main 60cc147（含 #251、#252、#253）：cli_stream.py 同时保留推理强度和网页授权登录，BridgeAccounts.vue 按新布局接上 #252 的授权码输入；main 新增的连通性用例先展开“连接诊断”。合并后：管理器 ruff / mypy / pytest 116 passed 4 skipped；工作台 ruff / mypy / openapi 最新，Postgres 16 + Redis 上 llm_bridge 全部测试文件和 test_contract、test_audit_queries 126 passed；前端 lint、typecheck、vitest 84 个文件 926 个测试、build、check:api 通过；两个浏览器验收脚本 node --check 通过，实际运行以 CI 为准。
 - 2026-11-18 02:08 UTC · claude · 处理 PR #254 的 Codex 审查：1）P1 检查路径和打开文件之间的竞态：workfiles 改为从工作目录的文件描述符开始逐级 O_NOFOLLOW 打开，符号链接由管理器展开、只认工作目录以内的，类型 / 大小检查与读取用同一个已打开的文件，下载改为从它流式发送（StreamingResponse，不再按路径重新打开）；2）P2 预览截断处的私钥块：截断时去掉末尾被切开的词，没闭合的私钥块遮到结尾。新增测试 6 个（三个截断位置的私钥、截断的令牌、里外符号链接与循环、检查后换成外链仍读原文件），先在旧代码上确认失败 5 个，新代码上管理器 ruff / mypy / pytest 122 passed 4 skipped（1 个 ResourceWarning 来自已有的网页授权登录测试，改动前就有）；工作台下载用例通过。
+- 2026-11-18 03:12 UTC · claude · 越界说明：.gitleaksignore 原本不在 paths 里。处理审查时测试里写了假私钥样例（0d972d2），被 CI 的 gitleaks 认成私钥；c893293 已改为运行时拼接的假内容，0d972d2 已推送进历史，按仓库惯例把它的两个指纹登记进 .gitleaksignore 并写明理由，paths 补上这个文件。c893293 的 CI 18 项全部通过（api、agents、浏览器验收 workspace 等）；这个提交只改任务文件，产品输入不变。
