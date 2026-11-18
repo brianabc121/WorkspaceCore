@@ -135,7 +135,9 @@ async def test_external_sessions_and_large_files(bridge: Bridge, monkeypatch: An
     assert too_big.status_code == 422
 
 
-KEY_BODY = "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7"
+# 假的私钥块：标记在运行时拼出来、内容一眼就是假的，免得源码本身被密钥扫描（gitleaks）当成私钥
+PEM_KIND = "PRIVATE " + "KEY"
+PEM_LINE = "fakepemline" * 5
 
 
 @pytest.mark.parametrize("cut", [40, 70, 110])
@@ -144,15 +146,15 @@ def test_preview_masks_a_private_key_cut_by_the_limit(
 ) -> None:
     # 审查意见：私钥块跨过预览的上限时，结束标记读不到，原来的规则认不出来，私钥的开头会原样露出
     text = (
-        "说明\n-----BEGIN PRIVATE KEY-----\n"
-        + "\n".join([KEY_BODY] * 6)
-        + "\n-----END PRIVATE KEY-----\n尾巴\n"
+        f"说明\n-----BEGIN {PEM_KIND}-----\n"
+        + "\n".join([PEM_LINE] * 6)
+        + f"\n-----END {PEM_KIND}-----\n尾巴\n"
     )
     (tmp_path / "key.pem").write_text(text, encoding="utf-8")
     monkeypatch.setattr(workfiles, "PREVIEW_BYTES", cut)
     shown = workfiles.preview(tmp_path, "key.pem")
     assert shown["truncated"] is True
-    assert "MIIE" not in shown["text"] and "BADANBg" not in shown["text"]
+    assert "fakepem" not in shown["text"] and "BEGIN" not in shown["text"]
     assert shown["text"].startswith("说明\n") and shown["text"].endswith("***")
     # 没截断的完整私钥照常整块遮住，后面的内容照常显示
     monkeypatch.setattr(workfiles, "PREVIEW_BYTES", 4096)
