@@ -19,6 +19,7 @@ ErrorKind = Literal[
     "platform_error",  # 平台或官方程序出错
     "timeout",  # 超时（发送类操作的结果未知）
     "unavailable",  # 官方程序起不来
+    "conflict",  # 和现在的状态冲突（例如没有在等授权码的登录，T-0287）
 ]
 
 Mode = Literal["chat", "dev", "cloud"]
@@ -143,6 +144,8 @@ class LoginChallenge:
     log: list[str] = field(default_factory=list)
     started_at: str | None = None
     finished_at: str | None = None
+    # 在等人把授权页上显示的授权码交回来（Claude 网页授权登录，T-0287）
+    needs_code: bool = False
 
 
 EventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -220,6 +223,10 @@ class Driver:
 
     async def login_state(self) -> LoginChallenge | None:
         return None
+
+    async def submit_code(self, code: str) -> LoginChallenge:
+        """把授权页上显示的授权码交给正在等它的官方程序（T-0287）。"""
+        raise DriverError("not_supported", "这个平台的登录不需要提交授权码")
 
     async def logout(self) -> None:
         raise DriverError("not_supported", "这个平台不支持退出登录")

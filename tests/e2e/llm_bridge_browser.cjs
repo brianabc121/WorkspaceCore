@@ -323,6 +323,28 @@ async function main() {
     await form.getByRole('button', { name: '取消' }).click()
     step('Claude：订阅登录要先勾选风险确认（没确认时页面不能提交、后端 403）；确认后可以继续')
 
+    // ---------------------------------------------------------------- Claude 网页授权登录（T-0287）
+    // 真的启动管理器里官方程序的 `claude auth login`，拿到登录网址；不登录，点“不等了”
+    await account(page, 'Claude').getByRole('button', { name: '登录Claude' }).click()
+    form = page.getByRole('form', { name: '登录Claude' })
+    check(await form.getByRole('radio', { name: '网页授权登录（推荐）' }).isChecked(), 'Claude 默认应是网页授权登录')
+    await form.getByRole('button', { name: '获取登录网址' }).click()
+    const claudeLogin = page.getByRole('region', { name: '登录「Claude」的进度' })
+    const authorize = claudeLogin.getByRole('group', { name: '登录 Claude 并交回授权码' })
+    await authorize.waitFor({ timeout: 90000 })
+    const authorizeUrl = await authorize.getByRole('link').first().getAttribute('href')
+    check(/^https:\/\/claude\.com\/cai\/oauth\/authorize\?/.test(authorizeUrl || ''), `应拿到 Claude 的登录网址：${authorizeUrl}`)
+    await claudeLogin.getByText('官方程序用授权码完成登录').waitFor()
+    // 按角色精确找输入框：表单本身也叫“提交授权码”，getByLabel('授权码') 会连表单一起匹配上
+    await authorize.getByRole('textbox', { name: '授权码', exact: true }).fill('abc')
+    await authorize.getByRole('button', { name: '提交授权码', exact: true }).click()
+    await authorize.getByText(/授权码不完整/).waitFor()
+    const waiting = await api(page, workspace, 'GET', `/api/v1/llm_bridge/bridges/${oneId}/accounts/claude/login`)
+    check(waiting.body?.state === 'pending' && waiting.body?.needs_code === true, `管理器应在等授权码：${JSON.stringify(waiting.body)}`)
+    await claudeLogin.getByRole('button', { name: '不等了' }).click()
+    await claudeLogin.waitFor({ state: 'detached' })
+    step('Claude 网页授权登录：管理器里的官方程序（claude auth login）给出 claude.com 的登录网址，页面分步显示并等授权码；不完整的授权码页面先拦下；不登录，点“不等了”')
+
     // ---------------------------------------------------------------- 设置
     await tab(page, '运行设置').click()
     form = page.getByRole('form', { name: 'MCP 管理器设置' })

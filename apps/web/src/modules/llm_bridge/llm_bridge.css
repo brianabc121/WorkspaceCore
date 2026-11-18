@@ -114,6 +114,11 @@
 /* 网页登录的逐步进度（T-0276）：拿到网址后在步骤下面单独一块，醒目地给出要打开的网址 */
 .lb-login-open { display: grid; gap: 4px; padding: 12px 14px; border-radius: 10px; background: var(--accent-soft); overflow-wrap: anywhere; }
 .lb-login-open p { margin: 0; }
+/* 分步说明（Claude 网页授权登录、订阅令牌，T-0287） */
+.lb-guide { margin: 0; padding-left: 1.4em; display: grid; gap: 4px; line-height: 1.6; }
+.lb-code-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.lb-code-form label { font-weight: 600; }
+.lb-code-form input { flex: 1 1 260px; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .lb-login-open .lb-login-url { font-weight: 600; }
 .ssh-job-after .lb-actions { margin-top: 10px; }
 

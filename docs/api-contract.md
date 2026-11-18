@@ -776,8 +776,9 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `PATCH` / `DELETE /api/v1/llm_bridge/bridges/{id}` | 改名字、地址、令牌、启用停用；删除登记（不影响会话桥容器；各实例权限的 `bridge_ids` 里去掉它，只允许用它的实例之后一个都不能用） |
 | `GET /api/v1/llm_bridge/bridges/{id}/status` | 各账号槽位（`openai` / `claude` / `workbuddy`）的登录状态、通道、排队数、设置；连不上时 `reachable=false` 加 `error`，不报错。账号的 `identity` 是打码后的账号标识（用密钥或令牌登录时为空），`registered` 表示这座桥登记过这个平台的账号（退出登录后仍为 true，“更换账号”后才清掉），`method` 只在已登录时有值 |
 | `PUT /api/v1/llm_bridge/bridges/{id}/settings` | `platforms`（控制的平台：`codex` / `claude` / `workbuddy`，至少一个；旧名字 `chatgpt` 按 `codex` 处理，T-0280）、`concurrency`（1 ~ 16）、`turn_timeout_seconds`（30 ~ 21600）、`send_per_hour`、`max_text_chars`、`claude_subscription_ack`。没勾选的平台不能登录（`409 CONFLICT`）、不能新建会话和发送；已有的登录和会话记录保留 |
-| `POST /api/v1/llm_bridge/bridges/{id}/accounts/{slot}/login` | `method`：`device_code`（返回 `verification_url`、`user_code`，`state=pending`）/ `api_key` / `oauth_token` / `existing`。Claude 的非 `api_key` 方式在确认风险前 `403 FORBIDDEN` |
-| `GET .../accounts/{slot}/login` | 登录进行到哪一步：`pending` / `done` / `failed` / `none` |
+| `POST /api/v1/llm_bridge/bridges/{id}/accounts/{slot}/login` | `method`：`device_code`（返回 `verification_url`、`user_code`，`state=pending`）/ `api_key` / `oauth_token` / `existing` / `web`（Claude 网页授权登录，T-0287：返回 `verification_url` 和 `needs_code=true`，管理器里的官方程序 `claude auth login` 在等授权码）。Claude 的非 `api_key` 方式在确认风险前 `403 FORBIDDEN` |
+| `POST .../accounts/{slot}/login/code` | 提交授权码（owner，T-0287）：`{"code": "<授权页显示的 code#state>"}`，转交给正在等它的官方程序，返回登录进度（`needs_code` 变成 `false`，“完成登录”这一步进行中）。授权码不保存、不记审计（审计只记“提交了授权码”）。没有在等授权码的登录 `409 CONFLICT`；授权码不完整 `422` |
+| `GET .../accounts/{slot}/login` | 登录进行到哪一步：`pending` / `done` / `failed` / `none`；`needs_code` 表示在等授权码 |
 | `POST .../accounts/{slot}/refresh` / `logout` / `reset` | 重新检查状态；退出登录；更换账号（归档这个槽位的全部会话，返回 `archived_sessions`） |
 | `GET` / `POST /api/v1/llm_bridge/bridges/{id}/environments`，`PUT` / `DELETE .../environments/{env_id}` | 开发环境：`platform`、`name`、`repo_url`（只收 https）、`branch`、`sandbox`（`read_only` / `workspace_write` / `exec`）、`network`、`description`、`enabled` |
 | `GET /api/v1/llm_bridge/bridges/{id}/sessions?limit&offset&sync` | 会话桥上的会话；`sync=true` 先登记官方程序里有、桥里没有的会话 |

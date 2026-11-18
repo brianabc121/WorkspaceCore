@@ -763,6 +763,26 @@ async def test_single_account_guard(bridge: Bridge) -> None:
     assert (await _send(bridge, "c1", b, "x", "r5"))["error"]["code"] == "ACCOUNT_MISMATCH"
 
 
+async def test_a_login_code_is_handed_to_the_driver(bridge: Bridge) -> None:
+    """网页授权登录（T-0287）：开始登录给出网址并等授权码；交回授权码后完成；不需要授权码的时候交，算冲突。"""
+    bridge.fake.login_methods = ("api_key", "web")
+    started = (
+        await bridge.admin("POST", "/admin/accounts/fake/login", json={"method": "web"})
+    ).json()
+    assert (started["state"], started["needs_code"]) == ("pending", True)
+    assert started["verification_url"].startswith("https://")
+    state = (await bridge.admin("GET", "/admin/accounts/fake/login")).json()["login"]
+    assert state["needs_code"] is True
+    bad = await bridge.admin("POST", "/admin/accounts/fake/login/code", json={"code": "abc"})
+    assert bad.status_code == 422 and bad.json()["error"]["code"] == "VALIDATION_FAILED"
+    done = await bridge.admin("POST", "/admin/accounts/fake/login/code", json={"code": "good#s"})
+    assert done.status_code == 200 and done.json()["state"] == "done"
+    again = await bridge.admin("POST", "/admin/accounts/fake/login/code", json={"code": "good#s"})
+    assert again.status_code == 409 and again.json()["error"]["code"] == "CONFLICT"
+    empty = await bridge.admin("POST", "/admin/accounts/fake/login/code", json={"code": ""})
+    assert empty.status_code == 422
+
+
 async def test_key_logins_are_one_unknown_account(bridge: Bridge) -> None:
     """用密钥登录时看不到是哪个账号：换密钥不算换账号；换成具体账号才算。"""
     bridge.fake.anonymous = True

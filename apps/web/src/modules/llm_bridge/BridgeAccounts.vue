@@ -21,8 +21,10 @@ const RECOVER_MS = 120_000
 const WEB_POLL_MS = 1500
 // 网页登录：和设备码一样，拿到网址后等人在自己的浏览器里完成
 const WEB_METHODS: LoginMethod[] = ['web_cn', 'web_intl']
-// 显示逐步进度的登录方式：网页登录（CodeBuddy，T-0276）和设备码登录（Codex，T-0279）
-const PROGRESS_METHODS: LoginMethod[] = [...WEB_METHODS, 'device_code']
+// 给出登录网址、人在自己的浏览器里完成的登录方式：CodeBuddy 网页登录，Claude 网页授权登录（T-0287）
+const URL_METHODS: LoginMethod[] = [...WEB_METHODS, 'web']
+// 显示逐步进度的登录方式：网页登录（CodeBuddy，T-0276）、设备码登录（Codex，T-0279）、网页授权登录（Claude，T-0287）
+const PROGRESS_METHODS: LoginMethod[] = [...URL_METHODS, 'device_code']
 // 平台连通性（T-0240）：这个管理器所在的服务器到各平台能不能用、延迟多少；管理器连得上才测
 const bridgeId = toRef(() => (props.status?.reachable ? props.bridge.id : null))
 const net = props.api.useConnectivity(bridgeId)
@@ -41,6 +43,8 @@ let recoverUntil = 0, webTimer: ReturnType<typeof setInterval> | null = null, we
 // 开始前管理器那边上一次登录的 started_at：查进度时只认这一次的，不把上一次的结果当成这一次的
 let baseline: string | null = null
 const ackBusy = ref(false)
+// Claude 网页授权登录（T-0287）：提交授权码
+const codeBusy = ref(false), codeError = ref('')
 
 // 控制的平台：保存失败时重画勾选框，回到服务器上的状态
 const controlled = computed(() => (props.status?.reachable ? props.status.platforms : []))
@@ -114,8 +118,8 @@ onUnmounted(stopWeb)
 
 function openLogin(account: Account) {
   const methods = methodsOf(account)
-  // 有网页登录的平台（CodeBuddy）默认用它；别的平台照旧默认 API 密钥
-  const first = methods.find(m => WEB_METHODS.includes(m)) ?? (methods.includes('api_key') ? 'api_key' : methods[0] ?? 'api_key')
+  // 有网页登录的平台（CodeBuddy、Claude）默认用它；别的平台照旧默认 API 密钥
+  const first = methods.find(m => URL_METHODS.includes(m)) ?? (methods.includes('api_key') ? 'api_key' : methods[0] ?? 'api_key')
   Object.assign(login, { slot: account.slot as Slot, method: first, secret: '' })
   error.value = notice.value = ''
 }
@@ -207,6 +211,7 @@ async function startWebLogin(account: Account, body: LoginBody) {
   stopWeb(); closeLogin()
   error.value = notice.value = ''
   job.value = { slot, label: account.label, method: body.method, startedAt: nowIso(), requesting: true, answered: false, recovering: false, status: 'running', url: '', code: '', progress: null, error: '', finishedAt: null }
+  codeError.value = ''; codeBusy.value = false
   baseline = null
   try { baseline = (await props.api.loginState(props.bridge.id, slot)).started_at ?? null } catch { /* 查不到也照样开始：“开始登录”会给出原因 */ }
   if (run !== webRun) return
@@ -232,10 +237,22 @@ async function startWebLogin(account: Account, body: LoginBody) {
   }
 }
 function cancelWeb() {
-  const device = job.value?.method === 'device_code'
+  const method = job.value?.method
   webRun++; stopWeb(); job.value = null
-  notice.value = device ? '已不再等待：之后如果你在浏览器里完成了登录，点这个平台的“重新检查”就能看到。' : '已不再等待：MCP 管理器那边的登录服务没人登录时会在 10 分钟后自动关掉。'
+  notice.value = method === 'device_code'
+    ? '已不再等待：之后如果你在浏览器里完成了登录，点这个平台的“重新检查”就能看到。'
+    : method === 'web'
+      ? '已不再等待：MCP 管理器那边的这次登录没交回授权码时，会在 15 分钟后自动停止；要登录请重新获取登录网址。'
+      : '已不再等待：MCP 管理器那边的登录服务没人登录时会在 10 分钟后自动关掉。'
   emit('reload')
+}
+// 把授权页显示的授权码交给管理器里正在等它的官方程序；不完整的先在页面上拦下（交过去官方程序只会一直等）
+async function submitCode(code: string) {
+  const j = job.value, text = code.trim()
+  if (!j || codeBusy.value) return
+  if (!/^[^#\s]+#\S+$/.test(text)) { codeError.value = '授权码不完整：请复制授权页显示的整段授权码（中间有一个 #），不要多也不要少。'; return }
+  codeBusy.value = true; codeError.value = ''
+  try { applyProgress(await props.api.submitLoginCode(props.bridge.id, j.slot, text)) } catch (e) { codeError.value = bridgeError(e) } finally { codeBusy.value = false }
 }
 function retryWeb() {
   const j = job.value, account = j && accounts.value.find(a => a.slot === j.slot)
@@ -292,7 +309,7 @@ function reset(account: Account) {
         <li v-for="(load, platform) in status.load" :key="platform" :class="{ 'is-full': load.running >= load.limit }">{{ platformName(String(platform)) }}：{{ load.running }} / {{ load.limit }} 个会话在跑<template v-if="load.waiting">，{{ load.waiting }} 个在等</template></li>
       </ul>
 
-      <LoginProgress v-if="job" :job="job" :bridge-name="bridge.name" @cancel="cancelWeb" @retry="retryWeb" @close="job = null" />
+      <LoginProgress v-if="job" :job="job" :bridge-name="bridge.name" :code-busy="codeBusy" :code-error="codeError" @cancel="cancelWeb" @retry="retryWeb" @close="job = null" @code="submitCode" />
       <p v-if="askError" class="lb-warn is-red" role="alert">{{ askError }}</p>
 
       <div class="lb-accounts">
@@ -332,6 +349,15 @@ function reset(account: Account) {
               <label v-for="m in methodsOf(a)" :key="m" class="check-field"><input v-model="login.method" type="radio" :name="`lb-method-${a.slot}`" :value="m" @change="login.secret = ''" />{{ METHODS[m].name }}</label>
             </fieldset>
             <p class="form-help">{{ METHODS[login.method].help }}</p>
+            <template v-if="a.slot === 'claude' && login.method === 'oauth_token'">
+              <ol class="lb-guide" aria-label="订阅令牌怎么拿">
+                <li>在一台装了 Claude Code、能打开浏览器的电脑上，打开终端运行 <code>claude setup-token</code>（见 <a class="asv-link" href="https://code.claude.com/docs/en/cli-reference" target="_blank" rel="noopener noreferrer">Claude 官方说明</a>）。</li>
+                <li>按提示打开授权页面，登录你的 Claude 订阅账号并授权；终端会显示一段很长的登录令牌。</li>
+                <li>把完整令牌粘贴到下面的“订阅令牌”里，点“登录”。MCP 管理器保存它，之后的对话都用它。</li>
+                <li>令牌对不对，要等发第一条消息时官方程序才会知道；用令牌登录看不到是哪个账号。</li>
+              </ol>
+              <p v-if="methodsOf(a).includes('web')" class="form-help">不想在自己电脑上装 Claude Code：改用“网页授权登录”，全程在浏览器里完成。</p>
+            </template>
             <div v-if="needsAck(a.slot as Slot, login.method)" class="lb-warn is-red" role="group" aria-label="Claude 订阅登录的风险确认">
               <p><strong>先确认风险：</strong>Anthropic 要求开发者用 API 密钥接入；把订阅账号的登录用于自动化处在灰区，账号可能被限制。详见方案第 6.3 节（docs/v2/LLM_BRIDGE_PLAN.md）。不想承担这个风险，就改用“API 密钥”。</p>
               <label class="check-field"><input type="checkbox" :disabled="ackBusy" @change="acknowledge" />我已了解并接受这个风险，允许这个 MCP 管理器用订阅方式登录 Claude</label>
@@ -342,7 +368,7 @@ function reset(account: Account) {
             </div>
             <div class="lb-actions">
               <button type="button" class="secondary-button" :disabled="!!busy" @click="closeLogin">取消</button>
-              <button type="submit" class="primary-button" :disabled="!!busy || needsAck(a.slot as Slot, login.method)">{{ busy === `${a.slot}:login` ? '正在登录…' : login.method === 'device_code' ? '获取验证码' : WEB_METHODS.includes(login.method) ? '获取登录网址' : login.method === 'existing' ? '使用已有的登录' : '登录' }}</button>
+              <button type="submit" class="primary-button" :disabled="!!busy || needsAck(a.slot as Slot, login.method)">{{ busy === `${a.slot}:login` ? '正在登录…' : login.method === 'device_code' ? '获取验证码' : URL_METHODS.includes(login.method) ? '获取登录网址' : login.method === 'existing' ? '使用已有的登录' : '登录' }}</button>
             </div>
           </form>
         </article>
