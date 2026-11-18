@@ -4,7 +4,7 @@ title: 大模型客户端“对话”页：会话列表的状态标签与详情�
 owner: claude
 status: done
 priority: P2
-branch: wip/llm-client
+branch: claude/amazing-faraday-6ey29e
 paths: apps/web/src/modules/llm_bridge/chat,apps/web/src/modules/llm_bridge/llm_bridge.css,apps/web/tests/llm_chat.test.ts,services/llm-bridge/bridge/drivers/cli_stream.py,services/llm-bridge/bridge/drivers/fake.py,services/llm-bridge/bridge/engine.py,services/llm-bridge/tests,tests/e2e/llm_chat_browser.cjs,docs/v2/LLM_CHAT_PLAN.md,docs/decisions/2026-11-13-llm-bridge-verification.md
 depends_on:
 created: 2026-11-17

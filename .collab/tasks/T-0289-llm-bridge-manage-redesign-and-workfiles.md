@@ -4,7 +4,7 @@ title: 大模型客户端“管理器与账号”页按效果图改版（平台�
 owner: claude
 status: done
 priority: P2
-branch: wip/llm-client
+branch: claude/amazing-faraday-6ey29e
 paths: apps/web/src/modules/llm_bridge,apps/web/src/services/schema.d.ts,apps/web/tests/llm_bridge.test.ts,services/llm-bridge/bridge/app.py,services/llm-bridge/bridge/engine.py,services/llm-bridge/bridge/store.py,services/llm-bridge/bridge/workfiles.py,services/llm-bridge/tests/test_workfiles.py,services/api/app/modules/llm_bridge,services/api/app/domain/audit_labels.py,services/api/openapi.json,services/api/tests/test_module_llm_bridge.py,tests/e2e/llm_bridge_browser.cjs,tests/e2e/llm_chat_browser.cjs,docs/api-contract.md,docs/v2/LLM_BRIDGE_PLAN.md,docs/guides/mcp-manager-deploy.md
 depends_on: T-0286
 created: 2026-11-17
