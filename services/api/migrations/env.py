@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.core.config import get_settings
 from app.models import Base
+from migrations.runtime_revision_compat import normalize_old_pr0069
 
 config = context.config
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):
@@ -44,6 +45,7 @@ def run_migrations_offline() -> None:
 def _run_sync_migrations(connection: Connection) -> None:
     context.configure(connection=connection, target_metadata=target_metadata, include_schemas=True)
     with context.begin_transaction():
+        normalize_old_pr0069(context.get_context())
         context.run_migrations()
 
 

@@ -1,0 +1,10 @@
+time=2026-11-15T09:16:35.220121457Z level=info msg="Initializing dissection cache..."
+xx drop (Policy denied) flow 0x0 to endpoint 2520, ifindex 778, file bpf_lxc.c:2408, , identity 33554434->55696: 10.244.1.119:40012 -> 10.244.0.249:8443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 2520, ifindex 778, file bpf_lxc.c:2408, , identity 33554434->55696: 10.244.1.119:40024 -> 10.244.0.249:8443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 2520, ifindex 778, file bpf_lxc.c:2408, , identity 33554434->55696: 10.244.1.119:40024 -> 10.244.0.249:8443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 2520, ifindex 778, file bpf_lxc.c:2408, , identity 33554434->55696: 10.244.1.119:60918 -> 10.244.0.249:8443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 2520, ifindex 778, file bpf_lxc.c:2408, , identity 33554434->55696: 10.244.1.119:60918 -> 10.244.0.249:8443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 2520, ifindex 778, file bpf_lxc.c:2408, , identity 33554434->55696: 10.244.1.119:60932 -> 10.244.0.249:8443 tcp SYN
+xx drop (Policy denied) flow 0x0 to endpoint 2520, ifindex 778, file bpf_lxc.c:2408, , identity 33554434->55696: 10.244.1.119:60932 -> 10.244.0.249:8443 tcp SYN
+Listening for events on 64 CPUs with 64x4096 of shared memory
+Press Ctrl-C to quit

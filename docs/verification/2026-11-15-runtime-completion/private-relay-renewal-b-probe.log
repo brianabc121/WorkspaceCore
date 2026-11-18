@@ -1,0 +1,1 @@
+{"origin": "t0224-node-b", "target": "10.245.14.85", "tls_verification": true, "results": [{"path": "/healthz", "method": "GET", "status": 200}, {"path": "/readyz", "method": "GET", "status": 200}, {"path": "/docs", "method": "GET", "status": 404}, {"path": "/runner-api/v1/poll", "method": "POST", "status": 401}, {"wrong_ip_san_rejected": true}, {"untrusted_ca_rejected": true}]}

@@ -1,0 +1,33 @@
+2026-11-13T16:11:46Z
+s8006604
+uid=0(root) gid=0(root) groups=0(root)
+[identity_file_metadata]
+regular file -r--r--r-- root:root /etc/machine-id
+regular file -rw-r--r-- root:root /var/lib/dbus/machine-id
+73658ad349ec675300d22bdffe711f442745186fed8890811a422861e70da9de  /etc/machine-id
+73658ad349ec675300d22bdffe711f442745186fed8890811a422861e70da9de  /var/lib/dbus/machine-id
+/      ext4   rw,relatime,errors=remount-ro
+[required_tools]
+/usr/bin/systemd-id128
+/usr/bin/install
+/usr/bin/cp
+/usr/bin/sha256sum
+/usr/bin/systemctl
+[services]
+active
+active
+  cron.service              loaded active running Regular background program processing daemon
+  dbus.service              loaded active running D-Bus System Message Bus
+  getty@tty1.service        loaded active running Getty on tty1
+  hv-kvp-daemon.service     loaded active running Hyper-V key-value pair (KVP) daemon
+  hv-vss-daemon.service     loaded active running Hyper-V volume shadow copy service (VSS) daemon
+  rsyslog.service           loaded active running System Logging Service
+  ssh.service               loaded active running OpenBSD Secure Shell server
+  systemd-journald.service  loaded active running Journal Service
+  systemd-logind.service    loaded active running User Login Management
+  systemd-timesyncd.service loaded active running Network Time Synchronization
+  systemd-udevd.service     loaded active running Rule-based Manager for Device Events and Files
+  tailscaled.service        loaded active running Tailscale node agent
+  user@0.service            loaded active running User Manager for UID 0
+[tailscale_state_metadata]
+regular file -rw------- root:root /var/lib/tailscale/tailscaled.state

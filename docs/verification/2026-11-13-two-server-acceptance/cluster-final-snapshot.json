@@ -1,0 +1,166 @@
+{
+  "context": "t0224-nonproduction",
+  "run_id": "1e4c73d9-ad80-4b64-af4f-bab67c84d249",
+  "nodes": [
+    {
+      "name": "t0224-node-a",
+      "uid": "61c68c83-7aaf-4757-922b-1cb30e141554",
+      "pod_cidr": "10.244.0.0/24",
+      "kernel": "6.1.0-50-amd64",
+      "kubelet": "v1.35.10+k3s1",
+      "runtime": "containerd://2.2.10-k3s1",
+      "physical_host_id": "a0152aeb27a2d097b266fa8e448449fded17afcc82a7073d58307098d5f7b3a4",
+      "ready": true
+    },
+    {
+      "name": "t0224-node-b",
+      "uid": "b5167368-53bd-47d6-a2c1-6f0ce6b317a7",
+      "pod_cidr": "10.244.1.0/24",
+      "kernel": "5.10.0-19-amd64",
+      "kubelet": "v1.35.10+k3s1",
+      "runtime": "containerd://2.2.10-k3s1",
+      "physical_host_id": "e6f21d453b8d571c945344eee3a0ef0ce3941d16c892a4841390cd0610fd026b",
+      "ready": true
+    }
+  ],
+  "registered_workloads": [
+    {
+      "role": "allowed",
+      "name": "env-fe678277ccad4798828bd108b355a22b-6d6c5498-tlq4h",
+      "uid": "ebb70210-d5ae-4606-aa65-1729b17fc724",
+      "node": "t0224-node-a",
+      "pod_ip": "10.244.0.222",
+      "runtime_class": "gvisor",
+      "automount_service_account_token": false,
+      "host_network": false,
+      "security_context": {
+        "fsGroup": 1000,
+        "runAsGroup": 1000,
+        "runAsNonRoot": true,
+        "runAsUser": 1000,
+        "seccompProfile": {
+          "type": "RuntimeDefault"
+        }
+      },
+      "containers": [
+        {
+          "name": "environment",
+          "image": "docker.io/library/python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704",
+          "security_context": {
+            "allowPrivilegeEscalation": false,
+            "capabilities": {
+              "drop": [
+                "ALL"
+              ]
+            },
+            "privileged": false
+          }
+        }
+      ],
+      "restarts": 0
+    },
+    {
+      "role": "denied",
+      "name": "env-4adadc489a884d51a2604e981beed9cc-64f4fdf4cf-lmdbf",
+      "uid": "9724e224-a015-4826-b19c-eb91bd67961c",
+      "node": "t0224-node-a",
+      "pod_ip": "10.244.0.178",
+      "runtime_class": "gvisor",
+      "automount_service_account_token": false,
+      "host_network": false,
+      "security_context": {
+        "fsGroup": 1000,
+        "runAsGroup": 1000,
+        "runAsNonRoot": true,
+        "runAsUser": 1000,
+        "seccompProfile": {
+          "type": "RuntimeDefault"
+        }
+      },
+      "containers": [
+        {
+          "name": "environment",
+          "image": "docker.io/library/python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704",
+          "security_context": {
+            "allowPrivilegeEscalation": false,
+            "capabilities": {
+              "drop": [
+                "ALL"
+              ]
+            },
+            "privileged": false
+          }
+        }
+      ],
+      "restarts": 0
+    },
+    {
+      "role": "target",
+      "name": "env-0f28d3882cd140c481e5185ce2e9dbd3-7b5867745b-9ggbn",
+      "uid": "fbd28395-fb30-4363-a7fb-a1c3b864b451",
+      "node": "t0224-node-b",
+      "pod_ip": "10.244.1.163",
+      "runtime_class": "gvisor",
+      "automount_service_account_token": false,
+      "host_network": false,
+      "security_context": {
+        "fsGroup": 1000,
+        "runAsGroup": 1000,
+        "runAsNonRoot": true,
+        "runAsUser": 1000,
+        "seccompProfile": {
+          "type": "RuntimeDefault"
+        }
+      },
+      "containers": [
+        {
+          "name": "environment",
+          "image": "docker.io/library/python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704",
+          "security_context": {
+            "allowPrivilegeEscalation": false,
+            "capabilities": {
+              "drop": [
+                "ALL"
+              ]
+            },
+            "privileged": false
+          }
+        }
+      ],
+      "restarts": 0
+    }
+  ],
+  "fixture_phase": "settled",
+  "gateway_services": [
+    {
+      "name": "runner-gateway",
+      "uid": "5671591c-f417-4dcb-8b24-417c83e56607",
+      "type": "ClusterIP",
+      "ports": [
+        {
+          "name": "disabled",
+          "port": 65535,
+          "protocol": "TCP",
+          "targetPort": 65535
+        }
+      ],
+      "allocateLoadBalancerNodePorts": null,
+      "loadBalancer": {}
+    },
+    {
+      "name": "runner-gateway-public",
+      "uid": "b425e6d7-1d31-4adc-92b7-7fe96e8cd025",
+      "type": "LoadBalancer",
+      "ports": [
+        {
+          "name": "disabled",
+          "port": 65535,
+          "protocol": "TCP",
+          "targetPort": 65535
+        }
+      ],
+      "allocateLoadBalancerNodePorts": false,
+      "loadBalancer": {}
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "status": "failed_or_blocked",
+  "run_id": "b895e439-2df9-43d5-a7a3-82f93d1d6730",
+  "reason": "acceptance dependency unavailable or assertion failed"
+}

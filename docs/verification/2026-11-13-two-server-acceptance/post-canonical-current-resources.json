@@ -1,0 +1,49 @@
+{
+  "utc": "2026-11-13T19:29:45.225241+00:00",
+  "run_id": "1e4c73d9-ad80-4b64-af4f-bab67c84d249",
+  "phase": "settled",
+  "workloads": [
+    {
+      "role": "allowed",
+      "uid": "ebb70210-d5ae-4606-aa65-1729b17fc724",
+      "node": "t0224-node-a",
+      "runtime_class": "gvisor",
+      "ready": true,
+      "restarts": 0
+    },
+    {
+      "role": "denied",
+      "uid": "9724e224-a015-4826-b19c-eb91bd67961c",
+      "node": "t0224-node-a",
+      "runtime_class": "gvisor",
+      "ready": true,
+      "restarts": 0
+    },
+    {
+      "role": "target",
+      "uid": "fbd28395-fb30-4363-a7fb-a1c3b864b451",
+      "node": "t0224-node-b",
+      "runtime_class": "gvisor",
+      "ready": true,
+      "restarts": 0
+    }
+  ],
+  "gateway_uid": "c3a6fbac-5faa-4e26-98a4-1c182133c86c",
+  "gateway_restarts": 0,
+  "gateway_services": [
+    {
+      "name": "runner-gateway",
+      "ports": [
+        65535
+      ],
+      "load_balancer": {}
+    },
+    {
+      "name": "runner-gateway-public",
+      "ports": [
+        65535
+      ],
+      "load_balancer": {}
+    }
+  ]
+}

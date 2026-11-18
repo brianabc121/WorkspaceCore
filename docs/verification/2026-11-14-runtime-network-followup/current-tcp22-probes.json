@@ -1,0 +1,24 @@
+{
+  "probes": [
+    {
+      "target": "100.72.60.100",
+      "port": 22,
+      "transport": "platform HTTP CONNECT proxy:8088",
+      "started_utc": "2026-11-14T02:43:16.171340+00:00",
+      "http_status": "HTTP/1.1 503 Service Unavailable",
+      "proxy_error": "upstream connect error or disconnect/reset before headers. reset reason: connection timeout",
+      "elapsed_seconds": 6.014
+    },
+    {
+      "target": "100.121.210.36",
+      "port": 22,
+      "transport": "platform HTTP CONNECT proxy:8088",
+      "started_utc": "2026-11-14T02:43:16.172827+00:00",
+      "http_status": "HTTP/1.1 503 Service Unavailable",
+      "proxy_error": "upstream connect error or disconnect/reset before headers. reset reason: connection timeout",
+      "elapsed_seconds": 6.013
+    }
+  ],
+  "authentication_attempted": false,
+  "server_commands_executed": false
+}

@@ -3,7 +3,7 @@
 两张新表：llm_bridge_bridges（工作空间登记的会话桥，管理令牌加密保存）、
 llm_bridge_grants（按实例的“大模型会话权限”）。只新增，不改已有的表。
 
-downgrade 删掉这两张表。
+downgrade 仅在空表时删掉这两张表，拒绝丢弃已有桥数据。
 
 Revision ID: 0066
 Revises: 0065
@@ -16,6 +16,8 @@ from datetime import datetime
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
+
+from migrations.runtime_schema_compat_0068 import refuse_bridge_data_loss
 
 revision: str = "0066"
 down_revision: str | None = "0065"
@@ -94,5 +96,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    refuse_bridge_data_loss()
     op.drop_table("llm_bridge_grants", schema="workspace")
     op.drop_table("llm_bridge_bridges", schema="workspace")

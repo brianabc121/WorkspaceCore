@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 SUPPORTED_PROFILE = "gvisor-immutable-v1"
+KUBERNETES_COMMANDS = frozenset({"create_env", "start_env", "stop_env", "delete_env"})
 _IMAGE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._/:\-]*@sha256:[a-f0-9]{64}$")
 _DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 

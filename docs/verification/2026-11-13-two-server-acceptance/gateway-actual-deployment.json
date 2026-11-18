@@ -1,0 +1,182 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "spec": {
+    "progressDeadlineSeconds": 600,
+    "replicas": 1,
+    "revisionHistoryLimit": 10,
+    "selector": {
+      "matchLabels": {
+        "workspace.myworkspace.io/component": "network-gateway"
+      }
+    },
+    "strategy": {
+      "type": "Recreate"
+    },
+    "template": {
+      "metadata": {
+        "annotations": {
+          "workspace.myworkspace.io/reviewed-config-sha256": "a6f5045d7b217b497a4a4d573ceed2bff146b447ccb97b054a6770ae3413cb65"
+        },
+        "labels": {
+          "workspace.myworkspace.io/component": "network-gateway"
+        }
+      },
+      "spec": {
+        "containers": [
+          {
+            "command": [
+              "python",
+              "-m",
+              "app.runtime_v2.gateway_main"
+            ],
+            "env": [
+              {
+                "name": "RUNTIME_V2_GATEWAY_KUBECONFIG",
+                "value": "/gateway/api/config"
+              },
+              {
+                "name": "RUNTIME_V2_GATEWAY_ENABLED",
+                "value": "true"
+              },
+              {
+                "name": "RUNTIME_V2_GATEWAY_URL",
+                "value": "https://100.72.60.100:8443"
+              },
+              {
+                "name": "RUNTIME_V2_GATEWAY_CA_FILE",
+                "value": "/gateway/ca/ca.crt"
+              },
+              {
+                "name": "RUNTIME_V2_GATEWAY_TLS_CERT",
+                "value": "/gateway/tls/tls.crt"
+              },
+              {
+                "name": "RUNTIME_V2_GATEWAY_TLS_KEY",
+                "value": "/gateway/tls/tls.key"
+              },
+              {
+                "name": "RUNTIME_V2_GATEWAY_DENIED_CIDRS",
+                "value": "10.244.0.0/16,10.245.0.0/16,100.121.210.36/32,100.64.0.0/10,100.72.60.100/32,156.227.24.0/24,169.254.0.0/16,172.17.0.0/16,172.19.0.0/16,172.25.0.0/16,172.31.240.0/24,172.31.252.0/28"
+              },
+              {
+                "name": "RUNTIME_V2_GATEWAY_LISTEN_HOST",
+                "value": "0.0.0.0"
+              },
+              {
+                "name": "RUNTIME_V2_GATEWAY_MAX_BINDINGS",
+                "value": "100"
+              },
+              {
+                "name": "RUNTIME_V2_GATEWAY_TOKEN",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "token",
+                    "name": "runtime-gateway-auth"
+                  }
+                }
+              },
+              {
+                "name": "HOME",
+                "value": "/tmp"
+              },
+              {
+                "name": "PYTHONDONTWRITEBYTECODE",
+                "value": "1"
+              }
+            ],
+            "image": "docker.io/library/workspace-t0224-gateway@sha256:df127f69d8f5909dea4895ae86f0da26a4b04ec1339cd6a22c0eff8595d99baf",
+            "imagePullPolicy": "IfNotPresent",
+            "name": "gateway",
+            "resources": {
+              "limits": {
+                "cpu": "2",
+                "memory": "512Mi"
+              },
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              }
+            },
+            "securityContext": {
+              "allowPrivilegeEscalation": false,
+              "capabilities": {
+                "drop": [
+                  "ALL"
+                ]
+              },
+              "readOnlyRootFilesystem": true
+            },
+            "terminationMessagePath": "/dev/termination-log",
+            "terminationMessagePolicy": "File",
+            "volumeMounts": [
+              {
+                "mountPath": "/gateway/api",
+                "name": "api-config",
+                "readOnly": true
+              },
+              {
+                "mountPath": "/tmp",
+                "name": "tmp"
+              },
+              {
+                "mountPath": "/gateway/ca",
+                "name": "ca",
+                "readOnly": true
+              },
+              {
+                "mountPath": "/gateway/tls",
+                "name": "tls",
+                "readOnly": true
+              }
+            ]
+          }
+        ],
+        "dnsPolicy": "ClusterFirst",
+        "nodeName": "t0224-node-a",
+        "restartPolicy": "Always",
+        "schedulerName": "default-scheduler",
+        "securityContext": {
+          "runAsGroup": 1000,
+          "runAsNonRoot": true,
+          "runAsUser": 1000,
+          "seccompProfile": {
+            "type": "RuntimeDefault"
+          }
+        },
+        "serviceAccount": "runner-gateway",
+        "serviceAccountName": "runner-gateway",
+        "terminationGracePeriodSeconds": 30,
+        "volumes": [
+          {
+            "configMap": {
+              "defaultMode": 420,
+              "name": "t0224-gateway-kubeconfig"
+            },
+            "name": "api-config"
+          },
+          {
+            "emptyDir": {
+              "sizeLimit": "64Mi"
+            },
+            "name": "tmp"
+          },
+          {
+            "name": "ca",
+            "secret": {
+              "defaultMode": 420,
+              "secretName": "runtime-control-ca"
+            }
+          },
+          {
+            "name": "tls",
+            "secret": {
+              "defaultMode": 420,
+              "secretName": "runtime-gateway-tls"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

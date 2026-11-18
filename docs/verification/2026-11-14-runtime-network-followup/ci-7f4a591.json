@@ -1,0 +1,613 @@
+{
+  "verified_commit": "7f4a59157137e8336e2823805b052abb1510bfd3",
+  "source": "GitHub Actions connector, live read on 2026-11-14 UTC",
+  "workflows": [
+    {
+      "id": 43493219316,
+      "name": "ci-security",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/brianabc121/WorkspaceCore/actions/runs/43493219316"
+    },
+    {
+      "id": 43493219227,
+      "name": "Web CI",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/brianabc121/WorkspaceCore/actions/runs/43493219227"
+    },
+    {
+      "id": 43493219209,
+      "name": "Runtime network image",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/brianabc121/WorkspaceCore/actions/runs/43493219209"
+    },
+    {
+      "id": 43493219289,
+      "name": "collab",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/brianabc121/WorkspaceCore/actions/runs/43493219289"
+    },
+    {
+      "id": 43493219194,
+      "name": "ci-api",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/brianabc121/WorkspaceCore/actions/runs/43493219194"
+    },
+    {
+      "id": 43493219358,
+      "name": "ci-infra",
+      "status": "completed",
+      "conclusion": "success",
+      "url": "https://github.com/brianabc121/WorkspaceCore/actions/runs/43493219358"
+    }
+  ],
+  "api_job": {
+    "id": 132119505318,
+    "actual_output": [
+      "2026-11-13T19:33:10.1505608Z 565 files already formatted",
+      "2026-11-13T19:33:23.5669999Z Success: no issues found in 561 source files",
+      "2026-11-13T19:33:30.8226652Z openapi.json 是最新的",
+      "2026-11-13T20:14:18.3546637Z ================ 1774 passed, 16 skipped in 2437.46s (0:40:37) =================",
+      "2026-11-13T20:14:36.4294145Z 5 passed in 2.20s",
+      "2026-11-13T20:14:39.9156636Z INFO  [alembic.runtime.migration] Running upgrade 0065 -> 0066, 大模型会话桥模块（T-0228，docs/v2/LLM_BRIDGE_PLAN.md 第 11 节）",
+      "2026-11-13T20:14:39.9276652Z INFO  [alembic.runtime.migration] Running upgrade 0066 -> 0067, Stable non-recycled TCP gateway ports and monotonically fenced network snapshots.",
+      "2026-11-13T20:14:40.0025741Z INFO  [alembic.runtime.migration] Running upgrade 0067 -> 0068, Reconcile both historical 0066/0067 runtime schemas without deleting data.",
+      "2026-11-13T20:14:40.6715222Z INFO  [alembic.runtime.migration] Running downgrade 0068 -> 0067, Reconcile both historical 0066/0067 runtime schemas without deleting data.",
+      "2026-11-13T20:14:40.6732871Z INFO  [alembic.runtime.migration] Running downgrade 0067 -> 0066, Stable non-recycled TCP gateway ports and monotonically fenced network snapshots.",
+      "2026-11-13T20:14:40.6822042Z INFO  [alembic.runtime.migration] Running downgrade 0066 -> 0065, 大模型会话桥模块（T-0228，docs/v2/LLM_BRIDGE_PLAN.md 第 11 节）",
+      "2026-11-13T20:14:43.6480559Z INFO  [alembic.runtime.migration] Running upgrade 0065 -> 0066, 大模型会话桥模块（T-0228，docs/v2/LLM_BRIDGE_PLAN.md 第 11 节）",
+      "2026-11-13T20:14:43.6613961Z INFO  [alembic.runtime.migration] Running upgrade 0066 -> 0067, Stable non-recycled TCP gateway ports and monotonically fenced network snapshots.",
+      "2026-11-13T20:14:43.7399314Z INFO  [alembic.runtime.migration] Running upgrade 0067 -> 0068, Reconcile both historical 0066/0067 runtime schemas without deleting data."
+    ]
+  },
+  "web_job": {
+    "id": 132119505277,
+    "actual_output": [
+      "2026-11-13T19:36:26.7819487Z \u001b[32m✓ built in 10.86s\u001b[39m"
+    ]
+  },
+  "infra_jobs": [
+    {
+      "id": 132119505336,
+      "name": "news",
+      "status": "completed",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "生成 .env（新闻早报：部署了 TrendRadar、每分钟运行一次、允许模拟服务的主机名）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "docker compose config（core 与 TrendRadar）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "构建并启动（make up）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "数据库迁移（make migrate）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "启动新闻早报（make trendradar-pull、make trendradar-up：按锁定的提交下载并校验 AI 提示词）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "新闻早报全栈验收（设置 → 配置文件 → 抓取筛选 AI 分析推送 → 入库通知；MCP 查询与智能体工具；改关键词；不对外暴露）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/setup-node@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "安装浏览器验收依赖（Playwright 版本由 tests/e2e 的锁文件固定）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "应用中心浏览器验收（已部署 TrendRadar：检测连通、暂停 MCP 后检测超时、配置目录不可写时同步失败与重试成功）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "新闻早报浏览器验收（设置页、早报页各标签、收藏与不感兴趣、首页面板、手机宽度、viewer 只读）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "失败时输出服务状态与日志",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "停止服务",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/setup-node@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 132119505771,
+      "name": "docker-pins (ubuntu:22.04)",
+      "status": "completed",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "在 ubuntu:22.04 里运行 install-docker.sh",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 132119505870,
+      "name": "agents",
+      "status": "completed",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "腾出磁盘空间（OpenIM 补丁镜像的构建约 8 GB 临时空间，OpenClaw 镜像约 3 GB）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "生成 .env 与接入入口的测试证书",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "安装 gVisor release-20261019.0（运行服务器验收用，接入包里的同一个脚本）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "构建打过补丁的 OpenIM 镜像（make openim-build）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "构建并启动（make up）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "数据库迁移（make migrate）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "启动接入入口（make agents-up：导出内部 CA，启动 agent-gateway）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "接入入口验收（内网 / 外网入口、双向证书、本机隧道、/mcp、入口错配、吊销、伪造请求头）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "启动 OpenIM（make openim-up）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "多实例端到端（方案第 8 节：两个真实 OpenClaw 实例 + 假模型，内网直连与外网隧道；场景 15 是知识库与每晚复盘（T-0100），场景 23 是 Gmail（T-0131），场景 26 是容器服务器（T-0141；容器读数 T-0188），场景 27 是中转站管理的主模型应用（T-0205））",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "A15 恢复演练含 OpenIM（上一步留下的消息、好友与群随快照恢复，数量一致）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/setup-node@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "安装浏览器验收依赖（Playwright 版本由 tests/e2e 的锁文件固定）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "V2 浏览器验收（中转站管理与兼容凭据、实例页、主模型分配、通讯录与单聊、导出、建群、IM 审批卡片、审批中心、移动端、member 不可见）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "邮件页浏览器验收（T-0170 / T-0171：默认全部邮箱、同 ID 的邮件不串号、回复只经所属邮箱；模拟 Google）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "一键配置接入入口（deploy.sh connect 的“OpenClaw 接入入口”一步：没有域名 → 内部主机名 + 本机出站地址）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "接入入口自动配置验收（原样的接入包：内部 CA + 地址映射，经本机隧道连回工作台）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "SSH 自动部署验收准备（本机 sshd：专用账号，sudo 要密码，不在 docker 组）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "智能体服务器 SSH 验收（四项添加、密码加密保存、指纹确认、错误密码、初始化加入 docker 组、一次点击部署两个真实 OpenClaw、重部署、保留数据卸载、旧公钥退役）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "智能体服务器浏览器验收（服务器页四项添加、核对指纹、测试连接、初始化，智能体页选服务器部署到上线、运维、卸载、移除、手机宽度）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "容器服务器浏览器验收（添加服务器、SSH 部署到上线、容器总览与主机条、旧链接与详情直链、各标签、卸载、吊销、手机宽度）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "失败时输出服务状态与日志",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "停止服务",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/setup-node@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 132119505911,
+      "name": "docker-pins (debian:12)",
+      "status": "completed",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "在 debian:12 里运行 install-docker.sh",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 132119505957,
+      "name": "compose",
+      "status": "completed",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "生成 .env（随机密码与密钥）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "docker compose config",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "构建并启动（make up）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "数据库迁移（make migrate）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "冒烟检查（make smoke）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Sprint 1 全栈验收（A01 / A02 / A18 / 跨工作空间）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Sprint 2 全栈验收（A03 / A04 / A05 / DoD，接口级）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "项目与任务全栈验收（T-0082 起由工作台自己管理：A06 / A07、version、权限、搜索、首页）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Sprint 4 全栈验收（DoD / A10 ~ A13 / A17，接口级，模拟 GitHub）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "启动 Prometheus 3.15.1（--profile monitoring，只启动 prometheus）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Sprint 5 全栈验收（DoD / S5-01 ~ S5-05 / A16，接口级，Prometheus）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/setup-node@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "安装浏览器验收依赖（Playwright 版本由 tests/e2e 的锁文件固定）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Sprint 2 浏览器验收（拖拽保存刷新、版本冲突、错误卡片、viewer 只读、移动端）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "项目与任务浏览器验收（新建项目 → 新建 / 编辑任务 → 看板 → 首页 → 删除 → 归档 / 删除项目、viewer 只读）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Sprint 4 浏览器验收（收藏与关联、日历、首页组件、viewer 只读、不请求 AFFiNE）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Sprint 5 浏览器验收（运维页与首页运维组件、停掉 Prometheus 后显示过期、viewer 可读、不暴露监控地址）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "知识库浏览器验收（知识图谱、[[ 补全与链接、版本冲突三方合并、回收站、项目知识库主页与趋势图、图片上传 / 粘贴 / 显示 / 清理、手机宽度、viewer 只读）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "图片存储设置浏览器验收（网页上选主存储与副本、填 R2 连接信息、保存前自检、密钥不回显、运维页链接、admin 只读、member 看不到、切换工作空间、手机宽度、暗色）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "时间轴浏览器验收（任务页 / 项目页入口、全部与按项目、智能体的一段与 token、开始暂停、拖动计划、执行记录、手机宽度、viewer 只读）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "README 与 Issues 浏览器验收（README 自动更新的部分、页面上开 Issue、沟通部分自动列出、评论与关闭、手机宽度、viewer 只读）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "插拔式模块与侧栏浏览器验收（应用中心停用 / 启用新闻早报、功能未启用页、自定义分组与页面、嵌入页与 CSP、member 只读、手机宽度）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "应用中心浏览器验收（四类状态、检测不出站、启停确认与 409、自定义页面整份带版本保存与冲突合并、admin 只读、切换工作空间、手机宽度、暗色）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "首页浏览器验收（工作概况、任务进展与确认结果、我的待办、提醒与日程、恢复默认首页、viewer 只读、手机宽度）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "完整端到端冒烟（make smoke-full：全部读接口与页面、核心服务、SSE、写入往返、登出）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "性能基准（基础 API P95 < 300 ms、首页 P95 < 500 ms；CI 的 runner 不稳定，允许 2 倍）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "备份恢复验收（A15：make backup → 隔离环境 make restore-verify → 登录与首页配置一致）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "停止 Prometheus（之后的 make down 只管 core 服务）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "停止后重启，确认数据卷保留",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "清空数据卷并重新迁移（Sprint 1 浏览器验收要从首次安装开始）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Sprint 1 浏览器验收（首次安装 → 登录 → 修改设置 → 撤销会话 → 登出）",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "失败时输出服务状态与日志",
+          "status": "completed",
+          "conclusion": "skipped"
+        },
+        {
+          "name": "停止服务",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/setup-node@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "id": 132119505985,
+      "name": "docker-pins (ubuntu:24.04)",
+      "status": "completed",
+      "conclusion": "success",
+      "steps": [
+        {
+          "name": "Set up job",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "在 ubuntu:24.04 里运行 install-docker.sh",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Post Run actions/checkout@v5",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Complete job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+
+[identity]
+2026-11-13T15:43:10Z
+s8006604
+uid=0(root) gid=0(root) groups=0(root)
+73658ad349ec675300d22bdffe711f442745186fed8890811a422861e70da9de  /etc/machine-id
+
+[os]
+PRETTY_NAME="Debian GNU/Linux 11 (bullseye)"
+NAME="Debian GNU/Linux"
+VERSION_ID="11"
+VERSION="11 (bullseye)"
+VERSION_CODENAME=bullseye
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+Linux 5.10.0-19-amd64 x86_64 GNU/Linux
+microsoft
+
+[cpu]
+4
+Architecture:                    x86_64
+CPU op-mode(s):                  32-bit, 64-bit
+Byte Order:                      Little Endian
+Address sizes:                   42 bits physical, 48 bits virtual
+CPU(s):                          4
+On-line CPU(s) list:             0-3
+Thread(s) per core:              1
+Core(s) per socket:              4
+Socket(s):                       1
+NUMA node(s):                    1
+Vendor ID:                       GenuineIntel
+CPU family:                      6
+Model:                           45
+Model name:                      Intel(R) Xeon(R) CPU E5-2670 0 @ 2.60GHz
+Stepping:                        7
+CPU MHz:                         2600.001
+BogoMIPS:                        5200.00
+Hypervisor vendor:               Microsoft
+Virtualization type:             full
+L1d cache:                       128 KiB
+L1i cache:                       128 KiB
+L2 cache:                        1 MiB
+L3 cache:                        80 MiB
+NUMA node0 CPU(s):               0-3
+
+[memory]
+               total        used        free      shared  buff/cache   available
+Mem:            3915         146        3324           0         444        3554
+Swap:              0           0           0
+
+[filesystem]
+Filesystem     Type      Size  Used Avail Use% Mounted on
+udev           devtmpfs  1.9G     0  1.9G   0% /dev
+tmpfs          tmpfs     392M  500K  392M   1% /run
+/dev/sda1      ext4       40G  1.6G   37G   5% /
+tmpfs          tmpfs     2.0G     0  2.0G   0% /dev/shm
+tmpfs          tmpfs     5.0M     0  5.0M   0% /run/lock
+tmpfs          tmpfs     392M     0  392M   0% /run/user/0
+lsblk: unknown column: MOUNTPOINTS
+
+[network]
+lo               UNKNOWN        127.0.0.1/8 ::1/128 
+eth0             UP             156.227.24.7/24 fe80::215:5dff:fe00:80/64 
+tailscale0       UNKNOWN        100.121.210.36/32 fd7a:115c:a1e0::bc4b:d225/128 fe80::6499:f4fb:1753:5af9/64 
+default via 156.227.24.1 dev eth0 onlink 
+156.227.24.0/24 dev eth0 proto kernel scope link src 156.227.24.7 
+Netid State  Recv-Q Send-Q                          Local Address:Port  Peer Address:PortProcess                               
+udp   UNCONN 0      0                                     0.0.0.0:41641      0.0.0.0:*    users:(("tailscaled",pid=1227,fd=20))
+udp   UNCONN 0      0                                        [::]:41641         [::]:*    users:(("tailscaled",pid=1227,fd=18))
+tcp   LISTEN 0      128                                   0.0.0.0:22         0.0.0.0:*    users:(("sshd",pid=471,fd=3))        
+tcp   LISTEN 0      4096                100.121.210.36%tailscale0:51585      0.0.0.0:*    users:(("tailscaled",pid=1227,fd=24))
+tcp   LISTEN 0      4096   [fd7a:115c:a1e0::bc4b:d225]%tailscale0:51433         [::]:*    users:(("tailscaled",pid=1227,fd=25))
+tcp   LISTEN 0      128                                      [::]:22            [::]:*    users:(("sshd",pid=471,fd=4))        
+
+[services]
+  cron.service              loaded active running Regular background program processing daemon
+  dbus.service              loaded active running D-Bus System Message Bus
+  getty@tty1.service        loaded active running Getty on tty1
+  hv-kvp-daemon.service     loaded active running Hyper-V key-value pair (KVP) daemon
+  hv-vss-daemon.service     loaded active running Hyper-V volume shadow copy service (VSS) daemon
+  rsyslog.service           loaded active running System Logging Service
+  ssh.service               loaded active running OpenBSD Secure Shell server
+  systemd-journald.service  loaded active running Journal Service
+  systemd-logind.service    loaded active running User Login Management
+  systemd-timesyncd.service loaded active running Network Time Synchronization
+  systemd-udevd.service     loaded active running Rule-based Manager for Device Events and Files
+  tailscaled.service        loaded active running Tailscale node agent
+  user@0.service            loaded active running User Manager for UID 0
+
+[runtime_binaries]
+/usr/bin/python3
+
+[containers]
+
+[existing_cluster_files]
+
+[existing_test_processes]
+   1227 tailscaled         01:02:51
+   1678 tailscaled            00:00
+   1686 tailscaled            00:00

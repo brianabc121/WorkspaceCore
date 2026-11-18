@@ -1,0 +1,55 @@
+"""Normal owner step-up revoke of the dedicated source communication grant."""
+
+import json, ssl
+from pathlib import Path
+from datetime import datetime, timezone
+import httpx
+
+s = json.loads(Path("/state/fixtures.json").read_text())
+password = Path("/admin-password").read_text().strip()
+url = "https://100.72.60.100:8443"
+source = s["environments"]["allowed"]["instance"]
+with httpx.Client(
+    base_url=url,
+    verify=ssl.create_default_context(cafile="/ca.crt"),
+    timeout=20,
+    headers={"Origin": url},
+) as c:
+    r = c.post(
+        "/api/v1/auth/login",
+        json={"email": "network-acceptance@example.com", "password": password},
+    )
+    r.raise_for_status()
+    headers = {
+        "X-Workspace-Id": s["workspace"],
+        "X-CSRF-Token": c.cookies.get("ws_csrf") or "",
+    }
+    r = c.get(
+        "/api/v1/agents/instances/" + source + "/runner/capabilities", headers=headers
+    )
+    r.raise_for_status()
+    grant = next(g for g in r.json()["grants"] if g["approval_id"] == s["approval"])
+    assert grant["state"] == "active"
+    r = c.post(
+        "/api/v1/agents/instances/"
+        + source
+        + "/runner/capabilities/"
+        + grant["id"]
+        + "/revoke",
+        headers=headers,
+        json={
+            "reason": "T0224 active connection capability revocation acceptance",
+            "password": password,
+        },
+    )
+    r.raise_for_status()
+    assert r.json()["state"] == "revoked"
+    Path("/state/capability-revoke-result.json").write_text(
+        json.dumps(
+            {
+                "utc": datetime.now(timezone.utc).isoformat(),
+                "grant_id": grant["id"],
+                "state": "revoked",
+            }
+        )
+    )

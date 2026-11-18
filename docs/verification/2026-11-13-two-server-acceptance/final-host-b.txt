@@ -1,0 +1,12 @@
+2026-11-13T18:52:31Z
+s8006604
+uid=0(root) gid=0(root) groups=0(root)
+4eefda99b588efcf38cfab5835e1bfb57ce232f964b47dfaf7312aa9ab7b1beb  /etc/machine-id
+4eefda99b588efcf38cfab5835e1bfb57ce232f964b47dfaf7312aa9ab7b1beb  /var/lib/dbus/machine-id
+active
+active
+active
+active
+disabled
+{"backend_state": "Running", "self_ip": ["100.121.210.36", "fd7a:115c:a1e0::bc4b:d225"], "peer": [{"ips": ["100.72.60.100", "fd7a:115c:a1e0::b74b:3c65"], "online": true}]}
+peer=100.72.60.100 tcp22=connected banner=SSH-2.0-Tailscale

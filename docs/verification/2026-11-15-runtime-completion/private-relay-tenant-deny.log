@@ -1,0 +1,2 @@
+{"pod_uid": "9724e224-a015-4826-b19c-eb91bd67961c", "namespace": "oc-97f6ae3b605247c093ddc839bb05f6a1", "probe_exit": 0, "result": "{\"unauthorized_tenant_connected\": false, \"socket_result\": 11}"}
+{"relay_pods": [{"name": "control-api-private-758c665895-n479b", "uid": "b9951d7c-ceb5-4e71-8ea0-5d5096cf94b8", "restarts": 0}]}

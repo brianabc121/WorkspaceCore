@@ -1,0 +1,256 @@
+{
+  "run_id": "1e4c73d9-ad80-4b64-af4f-bab67c84d249",
+  "workspace": "fd3911bc-f366-4ea8-ab35-b54f18c02aed",
+  "owner": "b9618eb8-ed3b-476d-a5b1-0fd632276311",
+  "receipts": [
+    {
+      "kind": "Namespace",
+      "name": "oc-8ef1173c41184fd08c62e65abba5b7f0",
+      "namespace": null,
+      "uid": "2f4232d0-7171-4c55-928a-bef5dd37d09b"
+    },
+    {
+      "kind": "NetworkPolicy",
+      "name": "runner-default-deny",
+      "namespace": "oc-8ef1173c41184fd08c62e65abba5b7f0",
+      "uid": "156f96e5-33ca-4136-90ad-8a506b260281"
+    },
+    {
+      "kind": "NetworkPolicy",
+      "name": "runner-domain",
+      "namespace": "oc-8ef1173c41184fd08c62e65abba5b7f0",
+      "uid": "dedf10cb-27f5-4896-a293-c117faaee10e"
+    },
+    {
+      "kind": "PersistentVolume",
+      "name": "t0224-fe678277ccad4798828bd108b355a22b",
+      "namespace": null,
+      "uid": "b3cd9949-0075-45b8-ad24-759b331ab05c"
+    },
+    {
+      "kind": "pvc",
+      "name": "data-fe678277ccad4798828bd108b355a22b",
+      "namespace": "oc-8ef1173c41184fd08c62e65abba5b7f0",
+      "uid": "326bd89e-6119-4fc2-80f2-009a4eb70af3"
+    },
+    {
+      "kind": "deployment",
+      "name": "env-fe678277ccad4798828bd108b355a22b",
+      "namespace": "oc-8ef1173c41184fd08c62e65abba5b7f0",
+      "uid": "b0d870c6-a87a-418b-abb0-9059311d5ac9"
+    },
+    {
+      "kind": "Namespace",
+      "name": "oc-97f6ae3b605247c093ddc839bb05f6a1",
+      "namespace": null,
+      "uid": "5cce1272-24cb-4124-929e-4d82cedbf261"
+    },
+    {
+      "kind": "NetworkPolicy",
+      "name": "runner-default-deny",
+      "namespace": "oc-97f6ae3b605247c093ddc839bb05f6a1",
+      "uid": "6123f75b-9560-4513-aadc-c9b44bb1ae93"
+    },
+    {
+      "kind": "NetworkPolicy",
+      "name": "runner-domain",
+      "namespace": "oc-97f6ae3b605247c093ddc839bb05f6a1",
+      "uid": "74cd0e41-082a-43b1-9f3d-4da9fdc585ac"
+    },
+    {
+      "kind": "PersistentVolume",
+      "name": "t0224-4adadc489a884d51a2604e981beed9cc",
+      "namespace": null,
+      "uid": "e7a2b8a0-24d3-419f-9682-6fd0fee8c2d1"
+    },
+    {
+      "kind": "pvc",
+      "name": "data-4adadc489a884d51a2604e981beed9cc",
+      "namespace": "oc-97f6ae3b605247c093ddc839bb05f6a1",
+      "uid": "80c26945-76c7-4b57-acb2-418858102537"
+    },
+    {
+      "kind": "deployment",
+      "name": "env-4adadc489a884d51a2604e981beed9cc",
+      "namespace": "oc-97f6ae3b605247c093ddc839bb05f6a1",
+      "uid": "a8c21504-11f9-439e-befe-ac694345de75"
+    },
+    {
+      "kind": "Namespace",
+      "name": "oc-da957024e0944bba8953359518505af2",
+      "namespace": null,
+      "uid": "2774432d-4093-447d-8e02-3b71a5300e2e"
+    },
+    {
+      "kind": "NetworkPolicy",
+      "name": "runner-default-deny",
+      "namespace": "oc-da957024e0944bba8953359518505af2",
+      "uid": "0dbeeda1-fa46-4b08-9c8a-498ba909b473"
+    },
+    {
+      "kind": "NetworkPolicy",
+      "name": "runner-domain",
+      "namespace": "oc-da957024e0944bba8953359518505af2",
+      "uid": "fc26be0f-0a77-4e59-b449-545398da7b80"
+    },
+    {
+      "kind": "PersistentVolume",
+      "name": "t0224-0f28d3882cd140c481e5185ce2e9dbd3",
+      "namespace": null,
+      "uid": "06b8ea17-c9b9-4ea7-8799-ccbd497317f6"
+    },
+    {
+      "kind": "pvc",
+      "name": "data-0f28d3882cd140c481e5185ce2e9dbd3",
+      "namespace": "oc-da957024e0944bba8953359518505af2",
+      "uid": "3d04c242-bc94-4d98-a027-092b6177cc99"
+    },
+    {
+      "kind": "deployment",
+      "name": "env-0f28d3882cd140c481e5185ce2e9dbd3",
+      "namespace": "oc-da957024e0944bba8953359518505af2",
+      "uid": "db2d7444-6397-4444-aff1-3379be8ecaf7"
+    },
+    {
+      "kind": "NetworkPolicy",
+      "name": "t0224-gateway-denial-probe",
+      "namespace": "oc-97f6ae3b605247c093ddc839bb05f6a1",
+      "uid": "a2dc3cd1-c08b-497d-90c5-146d42685356"
+    }
+  ],
+  "environments": {
+    "allowed": {
+      "id": "fe678277-ccad-4798-828b-d108b355a22b",
+      "allocation": "f7a5a442-aded-4c71-8bd4-32c28be9e503",
+      "instance": "8ef1173c-4118-4fd0-8c62-e65abba5b7f0",
+      "node": "t0224-node-a",
+      "volume": "/var/lib/workspace-t0224/volumes/fe678277ccad4798828bd108b355a22b",
+      "host": "cbfe9e5e-515c-46da-be6e-89c03eec2ebb",
+      "namespace": "oc-8ef1173c41184fd08c62e65abba5b7f0",
+      "pod": "env-fe678277ccad4798828bd108b355a22b-6d6c5498-tlq4h",
+      "observed": {
+        "ready": true,
+        "pod_uid": "ebb70210-d5ae-4606-aa65-1729b17fc724",
+        "node": "t0224-node-a",
+        "pod_ip": "10.244.0.222",
+        "allocation_id": "f7a5a442-aded-4c71-8bd4-32c28be9e503",
+        "generation": 1
+      }
+    },
+    "denied": {
+      "id": "4adadc48-9a88-4d51-a260-4e981beed9cc",
+      "allocation": "a6296652-dad3-446f-8322-6b9ece792ee2",
+      "instance": "97f6ae3b-6052-47c0-93dd-c839bb05f6a1",
+      "node": "t0224-node-a",
+      "volume": "/var/lib/workspace-t0224/volumes/4adadc489a884d51a2604e981beed9cc",
+      "host": "cbfe9e5e-515c-46da-be6e-89c03eec2ebb",
+      "namespace": "oc-97f6ae3b605247c093ddc839bb05f6a1",
+      "pod": "env-4adadc489a884d51a2604e981beed9cc-64f4fdf4cf-lmdbf",
+      "observed": {
+        "ready": true,
+        "pod_uid": "9724e224-a015-4826-b19c-eb91bd67961c",
+        "node": "t0224-node-a",
+        "pod_ip": "10.244.0.178",
+        "allocation_id": "a6296652-dad3-446f-8322-6b9ece792ee2",
+        "generation": 1
+      }
+    },
+    "target": {
+      "id": "0f28d388-2cd1-40c4-81e5-185ce2e9dbd3",
+      "allocation": "d85b10f8-974d-4a06-a443-15f188252fa7",
+      "instance": "da957024-e094-4bba-8953-359518505af2",
+      "node": "t0224-node-b",
+      "volume": "/var/lib/workspace-t0224/volumes/0f28d3882cd140c481e5185ce2e9dbd3",
+      "host": "adaa917b-bfef-4643-8b28-9af5f4da294f",
+      "namespace": "oc-da957024e0944bba8953359518505af2",
+      "pod": "env-0f28d3882cd140c481e5185ce2e9dbd3-7b5867745b-9ggbn",
+      "observed": {
+        "ready": true,
+        "pod_uid": "fbd28395-fb30-4363-a7fb-a1c3b864b451",
+        "node": "t0224-node-b",
+        "pod_ip": "10.244.1.163",
+        "allocation_id": "d85b10f8-974d-4a06-a443-15f188252fa7",
+        "generation": 1
+      }
+    }
+  },
+  "hosts": {
+    "a": "cbfe9e5e-515c-46da-be6e-89c03eec2ebb",
+    "b": "adaa917b-bfef-4643-8b28-9af5f4da294f"
+  },
+  "phase": "settled",
+  "service": {
+    "id": "da547763-5f31-4fb1-9eb5-9f17d9c6f243",
+    "workspace_id": "fd3911bc-f366-4ea8-ab35-b54f18c02aed",
+    "environment_id": "0f28d388-2cd1-40c4-81e5-185ce2e9dbd3",
+    "owner_instance_id": "da957024-e094-4bba-8953-359518505af2",
+    "host_id": "adaa917b-bfef-4643-8b28-9af5f4da294f",
+    "state": "approved_pending_apply",
+    "desired_revision": 1,
+    "applied_revision": 0,
+    "desired_generation": 1,
+    "applied_generation": null,
+    "apply_error": null,
+    "expires_at": null,
+    "revoked_by": null,
+    "revoked_at": null,
+    "created_at": "2026-11-13T17:06:25.453468Z",
+    "accepting_new_connections": false,
+    "connect_host": null,
+    "connect_port": null,
+    "revocation_confirmed": false,
+    "name": "echo",
+    "port": 7070,
+    "protocol": "TCP",
+    "desired_dns": "svc-da5477635f314fb19eb59f17d9c6f243.oc-da957024e0944bba8953359518505af2.svc.cluster.local",
+    "visibility": "private"
+  },
+  "without_source_grant": "SOURCE_CAPABILITY_REQUIRED",
+  "approval": "20762be6-d0a8-4cf4-b423-d1ba89f5ad85",
+  "ingress": {
+    "id": "91976bb5-7901-445a-8cf4-7ba524bb821e",
+    "workspace_id": "fd3911bc-f366-4ea8-ab35-b54f18c02aed",
+    "environment_id": "0f28d388-2cd1-40c4-81e5-185ce2e9dbd3",
+    "owner_instance_id": "da957024-e094-4bba-8953-359518505af2",
+    "host_id": "adaa917b-bfef-4643-8b28-9af5f4da294f",
+    "state": "active",
+    "desired_revision": 1,
+    "applied_revision": 1,
+    "desired_generation": 1,
+    "applied_generation": 1,
+    "apply_error": null,
+    "expires_at": "2026-11-13T19:34:19.653941Z",
+    "revoked_by": null,
+    "revoked_at": null,
+    "created_at": "2026-11-13T18:34:19.665279Z",
+    "accepting_new_connections": true,
+    "connect_host": "runner-gateway.runner-system.svc.cluster.local",
+    "connect_port": 30001,
+    "revocation_confirmed": false,
+    "service_id": "da547763-5f31-4fb1-9eb5-9f17d9c6f243",
+    "source_instance_id": "8ef1173c-4118-4fd0-8c62-e65abba5b7f0"
+  },
+  "first_ingress": {
+    "id": "1b54e3c0-0bff-48b9-bf63-e3e2162046ff",
+    "workspace_id": "fd3911bc-f366-4ea8-ab35-b54f18c02aed",
+    "environment_id": "0f28d388-2cd1-40c4-81e5-185ce2e9dbd3",
+    "owner_instance_id": "da957024-e094-4bba-8953-359518505af2",
+    "host_id": "adaa917b-bfef-4643-8b28-9af5f4da294f",
+    "state": "active",
+    "desired_revision": 1,
+    "applied_revision": 1,
+    "desired_generation": 1,
+    "applied_generation": 1,
+    "apply_error": null,
+    "expires_at": "2026-11-13T19:27:41.830788Z",
+    "revoked_by": null,
+    "revoked_at": null,
+    "created_at": "2026-11-13T18:27:41.836988Z",
+    "accepting_new_connections": true,
+    "connect_host": "runner-gateway.runner-system.svc.cluster.local",
+    "connect_port": 30000,
+    "revocation_confirmed": false,
+    "service_id": "da547763-5f31-4fb1-9eb5-9f17d9c6f243",
+    "source_instance_id": "8ef1173c-4118-4fd0-8c62-e65abba5b7f0"
+  }
+}

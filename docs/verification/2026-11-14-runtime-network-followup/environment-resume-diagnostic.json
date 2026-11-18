@@ -1,0 +1,22 @@
+{
+  "observed_beijing": "2026-11-14T10:59:08.750418+08:00",
+  "executor_pid1_started_beijing": "2026-11-14T10:25:57+08:00",
+  "network_policy_file_mtime_beijing": "2026-11-14T10:26:04.056843+08:00",
+  "logical_environment_id_matches_previous_session": true,
+  "source_configuration_id_and_version_match_previous_session": true,
+  "configuration_spec_revision": "1",
+  "local_tailscale_binary_present": false,
+  "local_tailscaled_binary_present": false,
+  "retained_registration_diagnostics": "not_found",
+  "user_screenshot_observations": {
+    "workspace_test_a": "Connected, tag:workspace-test",
+    "workspace_test_b": "Connected, tag:workspace-test",
+    "codex_environment_3": "Connected, no tag:codex-cloud shown",
+    "older_codex_clients": "offline, tag:codex-cloud shown"
+  },
+  "interpretation": {
+    "runtime_restart_observed": true,
+    "new_client_registration_on_resume": "likely; proxy self-IP and registration history not exposed by available tools",
+    "missing_source_tag_causes_acl_mismatch": "consistent with screenshot and tag-only source grant; not yet verified by adding tag and retesting"
+  }
+}

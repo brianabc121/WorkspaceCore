@@ -1,0 +1,7 @@
+{
+  "scope": "production KubernetesRunner with existing in-memory test API; no live cluster/network/load claim",
+  "unchanged_policy_newer_revision_writes": 2,
+  "identical_revision_repeated_writes": 0,
+  "policy_spec_unchanged": true,
+  "stale_revision_rejected": "stale or missing policy revision or generation"
+}

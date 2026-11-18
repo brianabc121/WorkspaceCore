@@ -1,0 +1,11 @@
+2026-11-13T19:00:24.471827+00:00
+{"path": "/etc/workspace-t0224/control.env", "uid": 0, "gid": 0, "mode": "0o600", "regular_file": true}
+{"path": "/etc/workspace-t0224/pg.env", "uid": 0, "gid": 0, "mode": "0o600", "regular_file": true}
+{"path": "/etc/workspace-t0224/gateway.token", "uid": 0, "gid": 0, "mode": "0o600", "regular_file": true}
+{"path": "/etc/workspace-t0224/admin-password", "uid": 0, "gid": 0, "mode": "0o600", "regular_file": true}
+{"path": "/etc/workspace-t0224/test-kubeconfig", "uid": 0, "gid": 0, "mode": "0o600", "regular_file": true}
+{"path": "/etc/workspace-t0224/gateway.curl-config", "uid": 0, "gid": 0, "mode": "0o600", "regular_file": true}
+{"path": "/var/lib/workspace-t0224/fixture-state/host-tokens.json", "uid": 0, "gid": 0, "mode": "0o600", "regular_file": true}
+{"path": "/etc/workspace-t0224/tls/server.key", "uid": 0, "gid": 0, "mode": "0o600", "regular_file": true}
+{"path": "/etc/workspace-t0224/tls/ca.key", "uid": 0, "gid": 0, "mode": "0o600", "regular_file": true}
+listed private files are root-owned without group/other permissions; values not read

@@ -1,0 +1,462 @@
+{
+  "apiVersion": "v1",
+  "kind": "List",
+  "items": [
+    {
+      "apiVersion": "v1",
+      "kind": "Namespace",
+      "metadata": {
+        "name": "runner-system",
+        "labels": {
+          "workspace.myworkspace.io/managed": "true",
+          "pod-security.kubernetes.io/enforce": "restricted",
+          "pod-security.kubernetes.io/enforce-version": "v1.35"
+        }
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "ServiceAccount",
+      "metadata": {
+        "name": "runner-gateway",
+        "namespace": "runner-system",
+        "labels": {
+          "workspace.myworkspace.io/component": "network-gateway"
+        }
+      },
+      "automountServiceAccountToken": true
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRole",
+      "metadata": {
+        "name": "runner-gateway-identity"
+      },
+      "rules": [
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "pods"
+          ],
+          "verbs": [
+            "list"
+          ]
+        }
+      ]
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "ClusterRoleBinding",
+      "metadata": {
+        "name": "runner-gateway-identity"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "ClusterRole",
+        "name": "runner-gateway-identity"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "runner-gateway",
+          "namespace": "runner-system"
+        }
+      ]
+    },
+    {
+      "apiVersion": "apps/v1",
+      "kind": "Deployment",
+      "metadata": {
+        "name": "runner-gateway",
+        "namespace": "runner-system",
+        "labels": {
+          "workspace.myworkspace.io/component": "network-gateway"
+        }
+      },
+      "spec": {
+        "replicas": 1,
+        "strategy": {
+          "type": "Recreate"
+        },
+        "selector": {
+          "matchLabels": {
+            "workspace.myworkspace.io/component": "network-gateway"
+          }
+        },
+        "template": {
+          "metadata": {
+            "labels": {
+              "workspace.myworkspace.io/component": "network-gateway"
+            },
+            "annotations": {
+              "workspace.myworkspace.io/reviewed-config-sha256": "a6f5045d7b217b497a4a4d573ceed2bff146b447ccb97b054a6770ae3413cb65"
+            }
+          },
+          "spec": {
+            "serviceAccountName": "runner-gateway",
+            "hostNetwork": false,
+            "hostPID": false,
+            "hostIPC": false,
+            "securityContext": {
+              "runAsNonRoot": true,
+              "runAsUser": 1000,
+              "runAsGroup": 1000,
+              "seccompProfile": {
+                "type": "RuntimeDefault"
+              }
+            },
+            "containers": [
+              {
+                "name": "gateway",
+                "image": "docker.io/library/workspace-t0224-gateway@sha256:df127f69d8f5909dea4895ae86f0da26a4b04ec1339cd6a22c0eff8595d99baf",
+                "command": [
+                  "python",
+                  "-m",
+                  "app.runtime_v2.gateway_main"
+                ],
+                "env": [
+                  {
+                    "name": "RUNTIME_V2_GATEWAY_ENABLED",
+                    "value": "true"
+                  },
+                  {
+                    "name": "RUNTIME_V2_GATEWAY_URL",
+                    "value": "https://100.72.60.100:8443"
+                  },
+                  {
+                    "name": "RUNTIME_V2_GATEWAY_CA_FILE",
+                    "value": "/gateway/ca/ca.crt"
+                  },
+                  {
+                    "name": "RUNTIME_V2_GATEWAY_TLS_CERT",
+                    "value": "/gateway/tls/tls.crt"
+                  },
+                  {
+                    "name": "RUNTIME_V2_GATEWAY_TLS_KEY",
+                    "value": "/gateway/tls/tls.key"
+                  },
+                  {
+                    "name": "RUNTIME_V2_GATEWAY_DENIED_CIDRS",
+                    "value": "10.244.0.0/16,10.245.0.0/16,100.121.210.36/32,100.64.0.0/10,100.72.60.100/32,156.227.24.0/24,169.254.0.0/16,172.17.0.0/16,172.19.0.0/16,172.25.0.0/16,172.31.240.0/24,172.31.252.0/28"
+                  },
+                  {
+                    "name": "RUNTIME_V2_GATEWAY_LISTEN_HOST",
+                    "value": "0.0.0.0"
+                  },
+                  {
+                    "name": "RUNTIME_V2_GATEWAY_MAX_BINDINGS",
+                    "value": "100"
+                  },
+                  {
+                    "name": "RUNTIME_V2_GATEWAY_TOKEN",
+                    "valueFrom": {
+                      "secretKeyRef": {
+                        "name": "runtime-gateway-auth",
+                        "key": "token"
+                      }
+                    }
+                  },
+                  {
+                    "name": "HOME",
+                    "value": "/tmp"
+                  },
+                  {
+                    "name": "PYTHONDONTWRITEBYTECODE",
+                    "value": "1"
+                  }
+                ],
+                "securityContext": {
+                  "allowPrivilegeEscalation": false,
+                  "readOnlyRootFilesystem": true,
+                  "capabilities": {
+                    "drop": [
+                      "ALL"
+                    ]
+                  }
+                },
+                "resources": {
+                  "requests": {
+                    "cpu": "100m",
+                    "memory": "128Mi"
+                  },
+                  "limits": {
+                    "cpu": "2",
+                    "memory": "512Mi"
+                  }
+                },
+                "volumeMounts": [
+                  {
+                    "name": "tmp",
+                    "mountPath": "/tmp"
+                  },
+                  {
+                    "name": "ca",
+                    "mountPath": "/gateway/ca",
+                    "readOnly": true
+                  },
+                  {
+                    "name": "tls",
+                    "mountPath": "/gateway/tls",
+                    "readOnly": true
+                  }
+                ]
+              }
+            ],
+            "volumes": [
+              {
+                "name": "tmp",
+                "emptyDir": {
+                  "sizeLimit": "64Mi"
+                }
+              },
+              {
+                "name": "ca",
+                "secret": {
+                  "secretName": "runtime-control-ca"
+                }
+              },
+              {
+                "name": "tls",
+                "secret": {
+                  "secretName": "runtime-gateway-tls"
+                }
+              }
+            ],
+            "nodeName": "t0224-node-a"
+          }
+        }
+      }
+    },
+    {
+      "apiVersion": "networking.k8s.io/v1",
+      "kind": "NetworkPolicy",
+      "metadata": {
+        "name": "runner-gateway-control",
+        "namespace": "runner-system",
+        "labels": {
+          "workspace.myworkspace.io/component": "network-gateway"
+        }
+      },
+      "spec": {
+        "podSelector": {
+          "matchLabels": {
+            "workspace.myworkspace.io/component": "network-gateway"
+          }
+        },
+        "policyTypes": [
+          "Ingress",
+          "Egress"
+        ],
+        "ingress": [],
+        "egress": [
+          {
+            "to": [
+              {
+                "namespaceSelector": {
+                  "matchLabels": {
+                    "kubernetes.io/metadata.name": "kube-system"
+                  }
+                },
+                "podSelector": {
+                  "matchLabels": {
+                    "k8s-app": "kube-dns"
+                  }
+                }
+              }
+            ],
+            "ports": [
+              {
+                "protocol": "TCP",
+                "port": 53
+              },
+              {
+                "protocol": "UDP",
+                "port": 53
+              }
+            ]
+          },
+          {
+            "to": [
+              {
+                "ipBlock": {
+                  "cidr": "100.72.60.100/32"
+                }
+              }
+            ],
+            "ports": [
+              {
+                "protocol": "TCP",
+                "port": 8443
+              }
+            ]
+          },
+          {
+            "to": [
+              {
+                "ipBlock": {
+                  "cidr": "100.72.60.100/32"
+                }
+              }
+            ],
+            "ports": [
+              {
+                "protocol": "TCP",
+                "port": 6443
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "runner-gateway",
+        "namespace": "runner-system",
+        "labels": {
+          "workspace.myworkspace.io/component": "network-gateway"
+        }
+      },
+      "spec": {
+        "type": "ClusterIP",
+        "ipFamilyPolicy": "SingleStack",
+        "ipFamilies": [
+          "IPv4"
+        ],
+        "selector": {
+          "workspace.myworkspace.io/component": "network-gateway"
+        },
+        "ports": [
+          {
+            "name": "disabled",
+            "port": 65535,
+            "targetPort": 65535,
+            "protocol": "TCP"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "v1",
+      "kind": "Service",
+      "metadata": {
+        "name": "runner-gateway-public",
+        "namespace": "runner-system",
+        "labels": {
+          "workspace.myworkspace.io/component": "network-gateway"
+        }
+      },
+      "spec": {
+        "type": "LoadBalancer",
+        "ipFamilyPolicy": "SingleStack",
+        "ipFamilies": [
+          "IPv4"
+        ],
+        "selector": {
+          "workspace.myworkspace.io/component": "network-gateway"
+        },
+        "ports": [
+          {
+            "name": "disabled",
+            "port": 65535,
+            "targetPort": 65535,
+            "protocol": "TCP"
+          }
+        ],
+        "externalTrafficPolicy": "Local",
+        "allocateLoadBalancerNodePorts": false,
+        "loadBalancerSourceRanges": [
+          "0.0.0.0/32"
+        ]
+      }
+    },
+    {
+      "apiVersion": "networking.k8s.io/v1",
+      "kind": "NetworkPolicy",
+      "metadata": {
+        "name": "runner-gateway-routes",
+        "namespace": "runner-system",
+        "labels": {
+          "workspace.myworkspace.io/component": "network-gateway"
+        }
+      },
+      "spec": {
+        "podSelector": {
+          "matchLabels": {
+            "workspace.myworkspace.io/component": "network-gateway"
+          }
+        },
+        "policyTypes": [
+          "Ingress",
+          "Egress"
+        ],
+        "ingress": [],
+        "egress": []
+      }
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "Role",
+      "metadata": {
+        "name": "runner-gateway-routes",
+        "namespace": "runner-system"
+      },
+      "rules": [
+        {
+          "apiGroups": [
+            ""
+          ],
+          "resources": [
+            "services"
+          ],
+          "resourceNames": [
+            "runner-gateway",
+            "runner-gateway-public"
+          ],
+          "verbs": [
+            "get",
+            "patch"
+          ]
+        },
+        {
+          "apiGroups": [
+            "networking.k8s.io"
+          ],
+          "resources": [
+            "networkpolicies"
+          ],
+          "resourceNames": [
+            "runner-gateway-routes"
+          ],
+          "verbs": [
+            "get",
+            "patch"
+          ]
+        }
+      ]
+    },
+    {
+      "apiVersion": "rbac.authorization.k8s.io/v1",
+      "kind": "RoleBinding",
+      "metadata": {
+        "name": "runner-gateway-routes",
+        "namespace": "runner-system"
+      },
+      "roleRef": {
+        "apiGroup": "rbac.authorization.k8s.io",
+        "kind": "Role",
+        "name": "runner-gateway-routes"
+      },
+      "subjects": [
+        {
+          "kind": "ServiceAccount",
+          "name": "runner-gateway",
+          "namespace": "runner-system"
+        }
+      ]
+    }
+  ]
+}

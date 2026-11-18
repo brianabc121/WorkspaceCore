@@ -1,0 +1,1 @@
+[{"name": "t0224-node-a", "uid": "b7ffa53b-916d-4d61-9d05-113930d911c0", "addresses": [{"ip": "100.72.60.100", "type": "InternalIP"}, {"ip": "10.244.0.50", "type": "CiliumInternalIP"}]}, {"name": "t0224-node-b", "uid": "4de5b41c-5449-492c-8640-9fee2ca813f1", "addresses": [{"ip": "100.121.210.36", "type": "InternalIP"}, {"ip": "10.244.1.119", "type": "CiliumInternalIP"}]}]

@@ -1,0 +1,51 @@
+"""Operator-only migration/retention check against the isolated T-0224 database."""
+import asyncio
+import json
+import os
+from datetime import datetime, timezone
+
+import asyncpg
+from alembic import command
+from alembic.config import Config
+
+TABLES = (
+    'agent_instances', 'runner_hosts', 'runner_environments', 'runner_ingress_rules',
+    'llm_bridge_bridges', 'llm_bridge_grants',
+)
+SEQUENCES = ('runner_ingress_port_seq', 'runner_public_port_seq', 'runner_network_policy_revision_seq')
+
+async def observe():
+    conn = await asyncpg.connect(os.environ['DATABASE_URL'].replace('postgresql+asyncpg:', 'postgresql:', 1))
+    try:
+        out = {'version': await conn.fetchval('SELECT version_num FROM alembic_version'), 'tables': {}, 'sequences': {}}
+        for name in TABLES:
+            row = await conn.fetchrow(
+                f"SELECT count(*) AS rows, md5(COALESCE(string_agg(to_jsonb(t)::text,'' "
+                f"ORDER BY to_jsonb(t)::text),'')) AS digest FROM workspace.{name} t"
+            )
+            out['tables'][name] = dict(row)
+        for name in SEQUENCES:
+            out['sequences'][name] = dict(await conn.fetchrow(f'SELECT last_value,is_called FROM workspace.{name}'))
+        return out
+    finally:
+        await conn.close()
+
+before = asyncio.run(observe())
+assert before['version'] == '0067', 'unexpected test database revision'
+config = Config('/app/alembic.ini')
+config.attributes['database_url'] = os.environ['DATABASE_URL']
+config.attributes['configure_logger'] = False
+command.upgrade(config, 'head')
+after = asyncio.run(observe())
+assert after['version'] == '0068'
+assert before['tables'] == after['tables'], 'dedicated fixture rows changed'
+for name in SEQUENCES:
+    if name == 'runner_network_policy_revision_seq':
+        # The running gateway can continue normal monotonically fenced polling.
+        assert after['sequences'][name]['last_value'] >= before['sequences'][name]['last_value']
+    else:
+        assert after['sequences'][name] == before['sequences'][name]
+print(json.dumps({'utc': datetime.now(timezone.utc).isoformat(), 'before': before, 'after': after,
+                  'fixture_row_counts_and_digests_preserved': True,
+                  'ingress_public_allocators_unchanged': True,
+                  'policy_allocator_not_reset': True}, indent=2))

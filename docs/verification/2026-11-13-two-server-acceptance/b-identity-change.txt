@@ -1,0 +1,9 @@
+2026-11-13T16:15:52Z
+s8006604
+ceec4e999dbbd4199eddef0fa37dc77769c3bbacbafd8cb3670e04938dd7b10d  /proc/sys/kernel/random/boot_id
+backup=/root/t0224-machine-id-backup-Mbl4zYp0
+4eefda99b588efcf38cfab5835e1bfb57ce232f964b47dfaf7312aa9ab7b1beb  /etc/machine-id
+4eefda99b588efcf38cfab5835e1bfb57ce232f964b47dfaf7312aa9ab7b1beb  /var/lib/dbus/machine-id
+-r--r--r-- root:root /etc/machine-id
+-rw-r--r-- root:root /var/lib/dbus/machine-id
+identity-written; requesting authorized reboot

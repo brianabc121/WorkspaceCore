@@ -1,0 +1,2726 @@
+.EEEEEEEEEEEEEE                                                          [100%]
+==================================== ERRORS ====================================
+_ ERROR at setup of test_service_edit_fences_old_ack_and_requires_owner_stepup _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4166a0a990>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4165878ef0>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_service_edit_fences_old_ack_and_requires_owner_stepup>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4166a0a990>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:57.217+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:57.218+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+___ ERROR at setup of test_gateway_auth_public_lease_and_revoke_confirmation ___
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41658cb4d0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f41658cb0b0>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_gateway_auth_public_lease_and_revoke_confirmation>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41658cb4d0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:57.646+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:57.647+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+__ ERROR at setup of test_second_gateway_child_keeps_live_sibling_and_service __
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4166604d10>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4165902d80>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_second_gateway_child_keeps_live_sibling_and_service>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4166604d10>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:57.826+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:57.827+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_public_udp_not_supported_and_managed_sources_never_use_public_route _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41659037d0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f41655ef290>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_public_udp_not_supported_and_managed_sources_never_use_public_route>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41659037d0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:57.993+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:57.993+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_cross_instance_lease_needs_current_workload_grant_and_target_consent _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41655939b0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4165590b60>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_cross_instance_lease_needs_current_workload_grant_and_target_consent>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41655939b0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:58.170+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:58.170+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_kubernetes_capacity_report_cannot_erase_uid_fenced_lifecycle _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41655aa060>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4164f86f30>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_kubernetes_capacity_report_cannot_erase_uid_fenced_lifecycle>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41655aa060>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:58.361+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:58.361+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_runtime_binding_only_accepts_current_host_allocation_generation _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164d83ad0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4164d81400>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_runtime_binding_only_accepts_current_host_allocation_generation>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164d83ad0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:58.532+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:58.533+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_periodic_binding_preserves_original_deployment_and_stopped_state _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164f85e50>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4164d55c70>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_periodic_binding_preserves_original_deployment_and_stopped_state>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164f85e50>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:58.712+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:58.712+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_expiry_needs_withdrawal_ack_and_stopped_target_hides_address _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164edf260>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4164edf0e0>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_expiry_needs_withdrawal_ack_and_stopped_target_hides_address>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164edf260>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:58.884+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:58.884+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_gateway_capacity_and_forbidden_sources_are_rejected_at_admission[approved_pending_apply-3600] _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164f12060>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4164f188c0>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_gateway_capacity_and_forbidden_sources_are_rejected_at_admission[approved_pending_apply-3600]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164f12060>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:59.230+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:59.230+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_gateway_capacity_and_forbidden_sources_are_rejected_at_admission[revoked-3600] _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164f1b4d0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4164dfbe00>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_gateway_capacity_and_forbidden_sources_are_rejected_at_admission[revoked-3600]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164f1b4d0>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:59.397+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:59.397+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_gateway_capacity_and_forbidden_sources_are_rejected_at_admission[expired--60] _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164f85d00>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f4164f86390>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_gateway_capacity_and_forbidden_sources_are_rejected_at_admission[expired--60]>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f4164f85d00>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:59.574+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:59.574+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+__ ERROR at setup of test_invalid_legacy_binding_does_not_poison_other_routes __
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f416561a060>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f41655f1d60>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_invalid_legacy_binding_does_not_poison_other_routes>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f416561a060>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:59.749+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:59.749+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+_ ERROR at setup of test_withdrawn_live_binding_cannot_be_acknowledged_as_active _
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41655f2060>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+>           yield
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:207: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/alembic/script/base.py:426: in _upgrade_revs
+    for script in reversed(list(revs))
+                           ^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:807: in iterate_revisions
+    revisions, heads = fn(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1440: in _collect_upgrade_revisions
+    for rev in self._parse_upgrade_target(
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:1227: in _parse_upgrade_target
+    return self.get_revisions(target)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:537: in get_revisions
+    resolved_id, branch_label = self._resolve_revision_number(id_)
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:771: in _resolve_revision_number
+    current_head = self.get_current_head(branch_label)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.revision.RevisionMap object at 0x7f41655f2f00>
+branch_label = None
+
+    def get_current_head(self, branch_label: str | None = None) -> str | None:
+        """Return the current head revision.
+    
+        If the script directory has multiple heads
+        due to branching, an error is raised;
+        :meth:`.ScriptDirectory.get_heads` should be
+        preferred.
+    
+        :param branch_label: optional branch name which will limit the
+         heads considered to those which include that branch_label.
+    
+        :return: a string revision number.
+    
+        .. seealso::
+    
+            :meth:`.ScriptDirectory.get_heads`
+    
+        """
+        current_heads: Sequence[str] = self.heads
+        if branch_label:
+            current_heads = self.filter_for_lineage(
+                current_heads, branch_label
+            )
+        if len(current_heads) > 1:
+>           raise MultipleHeads(
+                current_heads,
+                "%s@head" % branch_label if branch_label else "head",
+            )
+E           alembic.script.revision.MultipleHeads: Multiple heads are present for given argument 'head'; 0066, 0066
+
+.venv/lib/python3.12/site-packages/alembic/script/revision.py:501: MultipleHeads
+
+The above exception was the direct cause of the following exception:
+
+self = <Coroutine test_withdrawn_live_binding_cannot_be_acknowledged_as_active>
+
+    def setup(self) -> None:
+        runner_fixture_id = f"_{self._loop_scope}_scoped_runner"
+        if runner_fixture_id not in self.fixturenames:
+            self.fixturenames.append(runner_fixture_id)
+        # When loop factories are configured, resolve the loop factory
+        # fixture early so that a factory variant change cascades cache
+        # invalidation before any async fixture checks its cache.
+        hook_caller = self.config.hook.pytest_asyncio_loop_factories
+        if hook_caller.get_hookimpls():
+            _ = self._request.getfixturevalue(_asyncio_loop_factory.__name__)
+>       return super().setup()
+               ^^^^^^^^^^^^^^^
+
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:559: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+.venv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:927: in pytest_fixture_setup
+    return (yield)
+            ^^^^^
+tests/conftest.py:84: in migrated_database_url
+    command.upgrade(alembic_config(temp_database_url), "head")
+.venv/lib/python3.12/site-packages/alembic/command.py:487: in upgrade
+    script.run_env()
+.venv/lib/python3.12/site-packages/alembic/script/base.py:550: in run_env
+    util.load_python_file(self.dir, "env.py")
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:114: in load_python_file
+    module = load_module_py(module_id, path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/util/pyfiles.py:132: in load_module_py
+    spec.loader.exec_module(module)  # type: ignore
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:62: in <module>
+    asyncio.run(run_migrations_online())
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:195: in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/runners.py:118: in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/asyncio/base_events.py:691: in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+migrations/env.py:54: in run_migrations_online
+    await connection.run_sync(_run_sync_migrations)
+.venv/lib/python3.12/site-packages/sqlalchemy/ext/asyncio/engine.py:907: in run_sync
+    return await greenlet_spawn(
+.venv/lib/python3.12/site-packages/sqlalchemy/util/concurrency.py:212: in greenlet_spawn
+    result = context.switch(value)
+             ^^^^^^^^^^^^^^^^^^^^^
+migrations/env.py:47: in _run_sync_migrations
+    context.run_migrations()
+.venv/lib/python3.12/site-packages/alembic/runtime/environment.py:970: in run_migrations
+    self.get_context().run_migrations(**kw)
+.venv/lib/python3.12/site-packages/alembic/runtime/migration.py:604: in run_migrations
+    for step in self._migrations_fn(heads, self):
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/command.py:476: in upgrade
+    return script._upgrade_revs(revision, rev)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/alembic/script/base.py:414: in _upgrade_revs
+    with self._catch_revision_errors(
+/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/contextlib.py:158: in __exit__
+    self.gen.throw(value)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <alembic.script.base.ScriptDirectory object at 0x7f41655f2060>
+ancestor = 'Destination %(end)s is not a valid upgrade target from current head(s)'
+multiple_heads = "Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads"
+start = None, end = 'head', resolution = None
+
+    @contextmanager
+    def _catch_revision_errors(
+        self,
+        ancestor: str | None = None,
+        multiple_heads: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        resolution: str | None = None,
+    ) -> Iterator[None]:
+        try:
+            yield
+        except revision.RangeNotAncestorError as rna:
+            if start is None:
+                start = cast(Any, rna.lower)
+            if end is None:
+                end = cast(Any, rna.upper)
+            if not ancestor:
+                ancestor = (
+                    "Requested range %(start)s:%(end)s does not refer to "
+                    "ancestor/descendant revisions along the same branch"
+                )
+            ancestor = ancestor % {"start": start, "end": end}
+            raise util.CommandError(ancestor) from rna
+        except revision.MultipleHeads as mh:
+            if not multiple_heads:
+                multiple_heads = (
+                    "Multiple head revisions are present for given "
+                    "argument '%(head_arg)s'; please "
+                    "specify a specific target revision, "
+                    "'<branchname>@%(head_arg)s' to "
+                    "narrow to a specific head, or 'heads' for all heads"
+                )
+            multiple_heads = multiple_heads % {
+                "head_arg": end or mh.argument,
+                "heads": util.format_as_comma(mh.heads),
+            }
+>           raise util.CommandError(multiple_heads) from mh
+E           alembic.util.exc.CommandError: Multiple head revisions are present for given argument 'head'; please specify a specific target revision, '<branchname>@head' to narrow to a specific head, or 'heads' for all heads
+
+.venv/lib/python3.12/site-packages/alembic/script/base.py:233: CommandError
+---------------------------- Captured stdout setup -----------------------------
+{"ts": "2026-11-13T15:38:59.934+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Context impl PostgresqlImpl."}
+{"ts": "2026-11-13T15:38:59.934+00:00", "level": "INFO", "logger": "alembic.runtime.migration", "message": "Will assume transactional DDL."}
+------------------------------ Captured log setup ------------------------------
+INFO     alembic.runtime.migration:migration.py:205 Context impl PostgresqlImpl.
+INFO     alembic.runtime.migration:migration.py:208 Will assume transactional DDL.
+=============================== warnings summary ===============================
+tests/test_runner_network_gateway_control.py: 14 warnings
+  /workspace/WorkspaceCore/services/api/.venv/lib/python3.12/site-packages/alembic/script/revision.py:208: UserWarning: Revision 0066 is present more than once
+    util.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/test_runner_network_gateway_control.py::test_service_edit_fences_old_ack_and_requires_owner_stepup
+ERROR tests/test_runner_network_gateway_control.py::test_gateway_auth_public_lease_and_revoke_confirmation
+ERROR tests/test_runner_network_gateway_control.py::test_second_gateway_child_keeps_live_sibling_and_service
+ERROR tests/test_runner_network_gateway_control.py::test_public_udp_not_supported_and_managed_sources_never_use_public_route
+ERROR tests/test_runner_network_gateway_control.py::test_cross_instance_lease_needs_current_workload_grant_and_target_consent
+ERROR tests/test_runner_network_gateway_control.py::test_kubernetes_capacity_report_cannot_erase_uid_fenced_lifecycle
+ERROR tests/test_runner_network_gateway_control.py::test_runtime_binding_only_accepts_current_host_allocation_generation
+ERROR tests/test_runner_network_gateway_control.py::test_periodic_binding_preserves_original_deployment_and_stopped_state
+ERROR tests/test_runner_network_gateway_control.py::test_expiry_needs_withdrawal_ack_and_stopped_target_hides_address
+ERROR tests/test_runner_network_gateway_control.py::test_gateway_capacity_and_forbidden_sources_are_rejected_at_admission[approved_pending_apply-3600]
+ERROR tests/test_runner_network_gateway_control.py::test_gateway_capacity_and_forbidden_sources_are_rejected_at_admission[revoked-3600]
+ERROR tests/test_runner_network_gateway_control.py::test_gateway_capacity_and_forbidden_sources_are_rejected_at_admission[expired--60]
+ERROR tests/test_runner_network_gateway_control.py::test_invalid_legacy_binding_does_not_poison_other_routes
+ERROR tests/test_runner_network_gateway_control.py::test_withdrawn_live_binding_cannot_be_acknowledged_as_active
+1 passed, 14 warnings, 14 errors in 2.96s

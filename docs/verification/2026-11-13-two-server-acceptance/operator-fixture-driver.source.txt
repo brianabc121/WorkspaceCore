@@ -1,0 +1,902 @@
+"""Operator-only fixture orchestration inside the isolated T-0224 tool image."""
+
+import asyncio
+import hashlib
+import importlib.util
+import json
+import os
+import ssl
+import sys
+from datetime import datetime, timezone, timedelta
+import time
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import httpx
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+sys.path.insert(0, "/app")
+
+from app.models import AgentInstance, RunnerHost, RunnerEnvironment
+from app.domain.runner_hosts import new_token, hash_token
+from app.domain.physical_hosts import claim_physical_host
+from app.runtime_v2.kubernetes import RuntimeIdentity, KubernetesRuntime
+from app.runtime_v2.runner import Kubectl, KubernetesRunner
+from app.runtime_v2.network import PrivateNetworkReconciler
+from app.runner_agent.client import Workspace
+
+os.umask(0o077)
+ROOT = Path("/state")
+STATE = ROOT / "fixtures.json"
+URL = "https://100.72.60.100:8443"
+CA = "/ca.crt"
+IMAGE = "docker.io/library/python:3.12.15-slim-trixie@sha256:a0f57064cbdcd6285fa45f51237ab0b35ea8ebaed06a1f5973e89e19dfb86704"
+api = Kubectl("/kubeconfig")
+runner = KubernetesRunner(api)
+engine = create_async_engine(os.environ["DATABASE_URL"])
+sessions = async_sessionmaker(engine, expire_on_commit=False)
+client = httpx.Client(
+    base_url=URL,
+    verify=ssl.create_default_context(cafile=CA),
+    timeout=30,
+    headers={"Origin": URL},
+)
+password = Path("/admin-password").read_text().strip()
+
+
+def save(s):
+    STATE.write_text(json.dumps(s, indent=2))
+
+
+def load():
+    return json.loads(STATE.read_text())
+
+
+def checked(response, statuses=(200,)):
+    if response.status_code not in statuses:
+        raise RuntimeError(
+            f"API {response.request.method} {response.request.url.path}: {response.status_code} {response.text[:400]}"
+        )
+    return response.json()
+
+
+def login():
+    checked(
+        client.post(
+            "/api/v1/auth/login",
+            json={"email": "network-acceptance@example.com", "password": password},
+        )
+    )
+
+
+def headers(s):
+    return {
+        "X-Workspace-Id": s["workspace"],
+        "X-CSRF-Token": client.cookies.get("ws_csrf") or "",
+    }
+
+
+def identity(s, e):
+    return RuntimeIdentity(
+        UUID(s["workspace"]),
+        UUID(e["instance"]),
+        UUID(e["id"]),
+        UUID(e["allocation"]),
+        1,
+        e["node"],
+    )
+
+
+def create(s, obj):
+    observed = api.create(obj)
+    receipt = {
+        "kind": obj["kind"],
+        "name": obj["metadata"]["name"],
+        "namespace": obj["metadata"].get("namespace"),
+        "uid": observed["metadata"]["uid"],
+    }
+    s["receipts"].append(receipt)
+    save(s)
+    return observed
+
+
+async def bootstrap():
+    if STATE.exists():
+        raise RuntimeError("fixture state already exists; reconcile before retry")
+    checked(client.get("/readyz"))
+    setup = checked(
+        client.post(
+            "/api/v1/setup",
+            json={
+                "setup_token": os.environ["SETUP_TOKEN"],
+                "email": "network-acceptance@example.com",
+                "password": password,
+                "display_name": "Network acceptance",
+                "workspace_name": "T0224 isolated acceptance",
+            },
+        ),
+        (201,),
+    )
+    s = {
+        "run_id": str(uuid4()),
+        "workspace": setup["workspaces"][0]["id"],
+        "owner": setup["user"]["id"],
+        "receipts": [],
+        "environments": {},
+        "hosts": {},
+    }
+    save(s)
+    for role in ("allowed", "denied", "target"):
+        instance = checked(
+            client.post(
+                "/api/v1/agents/instances",
+                headers=headers(s),
+                json={
+                    "name": "t0224-" + role,
+                    "network_mode": "intranet",
+                    "scope": "read_write",
+                    "max_role": "member",
+                },
+            ),
+            (201,),
+        )
+        eid = uuid4()
+        node = "t0224-node-b" if role == "target" else "t0224-node-a"
+        s["environments"][role] = {
+            "id": str(eid),
+            "allocation": str(uuid4()),
+            "instance": instance["id"],
+            "node": node,
+            "volume": "/var/lib/workspace-t0224/volumes/" + eid.hex,
+        }
+        save(s)
+    tokens = {}
+    async with sessions() as db:
+        for letter, node in [("a", "t0224-node-a"), ("b", "t0224-node-b")]:
+            observed = api.get_optional("node", node)
+            machine = observed["status"]["nodeInfo"]["machineID"].strip().lower()
+            token = new_token()
+            tokens[letter] = token
+            host = RunnerHost(
+                workspace_id=UUID(s["workspace"]),
+                name="t0224-" + letter,
+                backend="kubernetes",
+                node_name=node,
+                status="online",
+                token_hash=hash_token(token),
+                token_prefix=token[:12],
+                runtime_metadata={
+                    "network_validation_revision": 1,
+                    "acceptance_test_only": True,
+                    "private_baseline_run": "8e363798-be80-45b0-bc2c-79807dc802db",
+                    "gateway_acceptance": "pending",
+                },
+            )
+            db.add(host)
+            await db.flush()
+            physical = hashlib.sha256(("machine-id:" + machine).encode()).hexdigest()
+            assert await claim_physical_host(
+                db,
+                physical,
+                workspace_id=host.workspace_id,
+                role="runner",
+                server_id=host.id,
+            )
+            s["hosts"][letter] = str(host.id)
+        for role, e in s["environments"].items():
+            instance = await db.get(AgentInstance, UUID(e["instance"]))
+            instance.runner_enabled = True
+            e["host"] = s["hosts"]["b" if role == "target" else "a"]
+            db.add(
+                RunnerEnvironment(
+                    id=UUID(e["id"]),
+                    workspace_id=UUID(s["workspace"]),
+                    host_id=UUID(e["host"]),
+                    owner_instance_id=UUID(e["instance"]),
+                    purpose="T0224 isolated network acceptance",
+                    lifetime="session",
+                    state="creating",
+                    runtime_backend="kubernetes",
+                    container_name="t0224-" + UUID(e["id"]).hex,
+                    volume_name="t0224-" + UUID(e["id"]).hex,
+                    network_name="t0224-" + UUID(e["instance"]).hex,
+                    runtime_metadata={
+                        "generation": 1,
+                        "allocation_id": e["allocation"],
+                    },
+                )
+            )
+        save(s)
+        await db.commit()
+    (ROOT / "host-tokens.json").write_text(json.dumps(tokens))
+    s["phase"] = "planned"
+    save(s)
+    print(
+        json.dumps(
+            {
+                "phase": s["phase"],
+                "run_id": s["run_id"],
+                "environments": s["environments"],
+            },
+            indent=2,
+        )
+    )
+
+
+def harness():
+    spec = importlib.util.spec_from_file_location(
+        "acceptance", "/opt/t0224/infra/runtime-v2/acceptance_two_nodes.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+async def deploy():
+    s = load()
+    if s.get("phase") != "planned":
+        raise RuntimeError("expected planned state; no blind deployment retry")
+    for role, e in s["environments"].items():
+        i = identity(s, e)
+        scope = {
+            k: v for k, v in i.labels.items() if k.endswith(("/workspace", "/instance"))
+        }
+        create(
+            s,
+            {
+                "apiVersion": "v1",
+                "kind": "Namespace",
+                "metadata": {
+                    "name": i.namespace,
+                    "labels": {
+                        **scope,
+                        "workspace.myworkspace.io/acceptance-run": s["run_id"],
+                        "pod-security.kubernetes.io/enforce": "restricted",
+                        "pod-security.kubernetes.io/enforce-version": "v1.35",
+                    },
+                },
+            },
+        )
+        create(
+            s,
+            {
+                "apiVersion": "networking.k8s.io/v1",
+                "kind": "NetworkPolicy",
+                "metadata": {"name": "runner-default-deny", "namespace": i.namespace},
+                "spec": {
+                    "podSelector": {},
+                    "policyTypes": ["Ingress", "Egress"],
+                    "ingress": [],
+                    "egress": [],
+                },
+            },
+        )
+        create(s, KubernetesRuntime.network_policy(i))
+        create(
+            s,
+            {
+                "apiVersion": "v1",
+                "kind": "PersistentVolume",
+                "metadata": {
+                    "name": "t0224-" + UUID(e["id"]).hex,
+                    "labels": {"workspace.myworkspace.io/acceptance-run": s["run_id"]},
+                },
+                "spec": {
+                    "capacity": {"storage": "1Gi"},
+                    "volumeMode": "Filesystem",
+                    "accessModes": ["ReadWriteOnce"],
+                    "persistentVolumeReclaimPolicy": "Retain",
+                    "storageClassName": "",
+                    "local": {"path": e["volume"]},
+                    "claimRef": {
+                        "namespace": i.namespace,
+                        "name": "data-" + UUID(e["id"]).hex,
+                    },
+                    "nodeAffinity": {
+                        "required": {
+                            "nodeSelectorTerms": [
+                                {
+                                    "matchFields": [
+                                        {
+                                            "key": "metadata.name",
+                                            "operator": "In",
+                                            "values": [i.node_name],
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    },
+                },
+            },
+        )
+
+        def receipt(kind, uid):
+            s["receipts"].append(
+                {
+                    "kind": kind,
+                    "name": (
+                        "data-" + UUID(e["id"]).hex if kind == "pvc" else i.pod_name
+                    ),
+                    "namespace": i.namespace,
+                    "uid": uid,
+                }
+            )
+            save(s)
+
+        runner.create(
+            i,
+            {
+                "image": IMAGE,
+                "cpus": 0.25,
+                "memory_mb": 128,
+                "disk_gb": 1,
+                "start_command": ["python", "-u", "-c", harness().SERVER],
+            },
+            operation_id=str(uuid4()),
+            receipt=receipt,
+        )
+        e["namespace"] = i.namespace
+        save(s)
+    for role, e in s["environments"].items():
+        i = identity(s, e)
+        api.call(
+            [
+                "rollout",
+                "status",
+                "deployment/" + i.pod_name,
+                "-n",
+                i.namespace,
+                "--timeout=120s",
+            ]
+        )
+        observed = runner.observe(i)
+        assert observed["ready"] and observed["node"] == i.node_name
+        pods = json.loads(
+            api.call(
+                [
+                    "get",
+                    "pods",
+                    "-n",
+                    i.namespace,
+                    "-l",
+                    "workspace.myworkspace.io/environment=" + UUID(e["id"]).hex,
+                    "-o",
+                    "json",
+                ]
+            )
+        )
+        e["pod"] = pods["items"][0]["metadata"]["name"]
+        e["observed"] = observed
+        save(s)
+        async with sessions() as db:
+            row = await db.get(RunnerEnvironment, UUID(e["id"]))
+            row.state = "running"
+            row.runtime_metadata = {
+                **observed,
+                "deployment_uid": next(
+                    r["uid"]
+                    for r in s["receipts"]
+                    if r["kind"] == "deployment" and r["namespace"] == i.namespace
+                ),
+            }
+            await db.commit()
+        print(
+            role,
+            "actual registered workload ready",
+            observed["pod_uid"],
+            observed["pod_ip"],
+        )
+    s["phase"] = "deployed"
+    save(s)
+
+
+def reconcile(s):
+    tokens = json.loads((ROOT / "host-tokens.json").read_text())
+    for letter, node in [("a", "t0224-node-a"), ("b", "t0224-node-b")]:
+        remote = Workspace(URL, tokens[letter], ca_file=CA)
+        PrivateNetworkReconciler(
+            runner,
+            remote,
+            workspace_id=UUID(s["workspace"]),
+            host_id=s["hosts"][letter],
+            node_name=node,
+            journal_path=str(ROOT / ("network-" + letter + ".sqlite3")),
+        ).reconcile()
+
+
+async def network():
+    s = load()
+    login()
+    if s.get("phase") != "deployed":
+        raise RuntimeError("expected deployed fixtures")
+    target = s["environments"]["target"]
+    service = checked(
+        client.post(
+            "/api/v1/runner/environments/" + target["id"] + "/services",
+            headers=headers(s),
+            json={"name": "echo", "port": 7070},
+        ),
+        (201,),
+    )
+    s["service"] = service
+    save(s)
+    reconcile(s)
+    print(
+        "target service and domain policy reconciled using actual Kubernetes receipts"
+    )
+    s["phase"] = "service-created"
+    save(s)
+
+
+def current_network(s):
+    target = s["environments"]["target"]
+    return checked(
+        client.get(
+            "/api/v1/runner/environments/" + target["id"] + "/network",
+            headers=headers(s),
+        )
+    )
+
+
+def settle_service(s):
+    for attempt in range(8):
+        reconcile(s)
+        data = current_network(s)
+        service = next(x for x in data["services"] if x["id"] == s["service"]["id"])
+        if (
+            service["state"] == "active"
+            and service["applied_revision"] == service["desired_revision"]
+        ):
+            print(
+                "actual service ACK active revision",
+                service["applied_revision"],
+                flush=True,
+            )
+            return
+        time.sleep(1)
+    raise RuntimeError("actual service/policy ACK not active")
+
+
+async def authorize():
+    s = load()
+    login()
+    if s.get("phase") not in ("service-created", "grant-requested", "grant-approved"):
+        raise RuntimeError("unexpected authorization phase")
+    settle_service(s)
+    source = s["environments"]["allowed"]
+    target = s["environments"]["target"]
+    path = (
+        "/api/v1/runner/environments/"
+        + target["id"]
+        + "/services/"
+        + s["service"]["id"]
+        + "/ingress"
+    )
+    if "approval" not in s:
+        response = client.post(
+            path,
+            headers=headers(s),
+            json={
+                "source_instance_id": source["instance"],
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(hours=1)
+                ).isoformat(),
+                "password": password,
+            },
+        )
+        assert (
+            response.status_code == 403
+            and response.json()["error"]["code"] == "SOURCE_CAPABILITY_REQUIRED"
+        )
+        s["without_source_grant"] = "SOURCE_CAPABILITY_REQUIRED"
+        save(s)
+        pending = checked(
+            client.post(
+                "/api/v1/agents/instances/"
+                + source["instance"]
+                + "/runner/capabilities/request",
+                headers=headers(s),
+                json={
+                    "capability": "runner.cross_agent_communication",
+                    "reason": "T0224 isolated gateway acceptance",
+                    "expires_at": (
+                        datetime.now(timezone.utc) + timedelta(hours=1)
+                    ).isoformat(),
+                },
+            )
+        )
+        s["approval"] = pending["action_id"]
+        s["phase"] = "grant-requested"
+        save(s)
+    if s["phase"] == "grant-requested":
+        detail = client.get(
+            "/api/v1/ai/tool-executions/" + s["approval"], headers=headers(s)
+        )
+        checked(detail)
+        approved = checked(
+            client.post(
+                "/api/v1/ai/tool-executions/" + s["approval"] + "/approve",
+                headers={**headers(s), "If-Match": detail.headers["etag"]},
+                json={"password": password},
+            )
+        )
+        assert approved["status"] == "succeeded"
+        s["phase"] = "grant-approved"
+        save(s)
+    for attempt in range(30):
+        capabilities = checked(
+            client.get(
+                "/api/v1/agents/instances/"
+                + source["instance"]
+                + "/runner/capabilities",
+                headers=headers(s),
+            )
+        )
+        grant = next(
+            (g for g in capabilities["grants"] if g["approval_id"] == s["approval"]),
+            None,
+        )
+        if grant and grant["state"] == "active":
+            break
+        time.sleep(1)
+    else:
+        raise RuntimeError("operational gateway did not activate approved test grant")
+    print("normal owner approval applied by actual gateway", s["approval"], flush=True)
+    if "ingress" not in s:
+        rule = checked(
+            client.post(
+                path,
+                headers=headers(s),
+                json={
+                    "source_instance_id": source["instance"],
+                    "expires_at": (
+                        datetime.now(timezone.utc) + timedelta(hours=1)
+                    ).isoformat(),
+                    "password": password,
+                },
+            ),
+            (201,),
+        )
+        s["ingress"] = rule
+        save(s)
+    settle_service(s)
+    for attempt in range(30):
+        data = current_network(s)
+        rule = next(r for r in data["ingress_rules"] if r["id"] == s["ingress"]["id"])
+        if (
+            rule["state"] == "active"
+            and rule["accepting_new_connections"]
+            and rule["connect_port"]
+        ):
+            s["ingress"] = rule
+            s["phase"] = "authorized"
+            save(s)
+            print(
+                "actual gateway listening ACK active",
+                rule["id"],
+                rule["connect_host"],
+                rule["connect_port"],
+                flush=True,
+            )
+            return
+        time.sleep(1)
+    raise RuntimeError("gateway listener did not ACK actual rule")
+
+
+async def gateway_acceptance():
+    s = load()
+    login()
+    if s.get("phase") != "authorized":
+        raise RuntimeError("test rule not authorized")
+    allowed = s["environments"]["allowed"]
+    denied = s["environments"]["denied"]
+    target = s["environments"]["target"]
+    mod = harness()
+    before_gateway = json.loads(
+        api.call(
+            [
+                "get",
+                "pods",
+                "-n",
+                "runner-system",
+                "-l",
+                "workspace.myworkspace.io/component=network-gateway",
+                "-o",
+                "json",
+            ]
+        )
+    )["items"]
+    assert len(before_gateway) == 1
+    gateway_uid = before_gateway[0]["metadata"]["uid"]
+    gateway_restarts = sum(
+        c["restartCount"] for c in before_gateway[0]["status"]["containerStatuses"]
+    )
+    for role in ("allowed", "denied"):
+        source = s["environments"][role]
+        for protocol in ("tcp", "udp"):
+            api.call(
+                mod.exec_args(
+                    source["namespace"],
+                    source["pod"],
+                    mod.PROBE,
+                    protocol,
+                    target["observed"]["pod_ip"],
+                    "7070",
+                    "deny",
+                )
+            )
+    print("registered workload direct cross-instance TCP/UDP denied", flush=True)
+    # Diagnostic-only narrow egress permits reaching the gateway so denial also
+    # tests its application identity/authorization, not only source NetworkPolicy.
+    i = identity(s, denied)
+    port = s["ingress"]["connect_port"]
+    create(
+        s,
+        {
+            "apiVersion": "networking.k8s.io/v1",
+            "kind": "NetworkPolicy",
+            "metadata": {
+                "name": "t0224-gateway-denial-probe",
+                "namespace": i.namespace,
+                "labels": {"workspace.myworkspace.io/acceptance-run": s["run_id"]},
+            },
+            "spec": {
+                "podSelector": {"matchLabels": i.labels},
+                "policyTypes": ["Egress"],
+                "egress": [
+                    {
+                        "to": [runner._gateway_peer()],
+                        "ports": [{"protocol": "TCP", "port": port}],
+                    }
+                ],
+            },
+        },
+    )
+    plan = {
+        "source_namespace": allowed["namespace"],
+        "source_pod": allowed["pod"],
+        "denied_namespace": denied["namespace"],
+        "denied_pod": denied["pod"],
+        "gateway_host": s["ingress"]["connect_host"],
+        "port": port,
+        "revoke_argv": ["/opt/venv/bin/python", "/opt/t0224/revoke_test_rule.py"],
+    }
+    (ROOT / "gateway-plan.json").write_text(json.dumps(plan, indent=2))
+    started = time.monotonic()
+    mod.gateway_checks(api, "t0224-nonproduction", plan)
+    elapsed = time.monotonic() - started
+    checked(client.get("/readyz"))
+    api.call(
+        mod.exec_args(
+            target["namespace"],
+            target["pod"],
+            mod.PROBE,
+            "tcp",
+            "127.0.0.1",
+            "7070",
+            "allow",
+        )
+    )
+    data = current_network(s)
+    rule = next(r for r in data["ingress_rules"] if r["id"] == s["ingress"]["id"])
+    for attempt in range(15):
+        if rule["revocation_confirmed"]:
+            break
+        time.sleep(1)
+        data = current_network(s)
+        rule = next(r for r in data["ingress_rules"] if r["id"] == s["ingress"]["id"])
+    assert (
+        rule["state"] == "revoked"
+        and rule["revocation_confirmed"]
+        and not rule["accepting_new_connections"]
+    )
+    after_gateway = json.loads(
+        api.call(
+            [
+                "get",
+                "pods",
+                "-n",
+                "runner-system",
+                "-l",
+                "workspace.myworkspace.io/component=network-gateway",
+                "-o",
+                "json",
+            ]
+        )
+    )["items"]
+    assert (
+        len(after_gateway) == 1 and after_gateway[0]["metadata"]["uid"] == gateway_uid
+    )
+    assert (
+        sum(c["restartCount"] for c in after_gateway[0]["status"]["containerStatuses"])
+        == gateway_restarts
+    )
+    for e in s["environments"].values():
+        observed = runner.observe(identity(s, e))
+        assert observed["ready"] and observed["pod_uid"] == e["observed"]["pod_uid"]
+    result = {
+        "utc": datetime.now(timezone.utc).isoformat(),
+        "run_id": s["run_id"],
+        "private_gateway_allowed_denied_revocation": "passed",
+        "registered_direct_cross_instance_tcp_udp": "denied",
+        "established_stream_closed_within_8_seconds": True,
+        "new_connection_after_revoke": "denied",
+        "rule_revocation_confirmed": True,
+        "test_control_health_after": "ready",
+        "same_current_workload_uids": True,
+        "gateway_uid_unchanged": gateway_uid,
+        "gateway_restart_count_unchanged": gateway_restarts,
+        "elapsed_seconds": round(elapsed, 3),
+        "public_tls_external_source": "blocked: real LB and two external source artifacts missing",
+    }
+    (ROOT / "gateway-result.json").write_text(json.dumps(result, indent=2))
+    s["phase"] = "gateway-passed"
+    save(s)
+    print(json.dumps(result, indent=2), flush=True)
+
+
+async def capability_test():
+    s = load()
+    login()
+    if s.get("phase") != "gateway-passed":
+        raise RuntimeError("rule revocation baseline must pass first")
+    first = s["ingress"]
+    s["first_ingress"] = first
+    save(s)
+    source = s["environments"]["allowed"]
+    target = s["environments"]["target"]
+    denied = s["environments"]["denied"]
+    rule = checked(
+        client.post(
+            "/api/v1/runner/environments/"
+            + target["id"]
+            + "/services/"
+            + s["service"]["id"]
+            + "/ingress",
+            headers=headers(s),
+            json={
+                "source_instance_id": source["instance"],
+                "expires_at": (
+                    datetime.now(timezone.utc) + timedelta(hours=1)
+                ).isoformat(),
+                "password": password,
+            },
+        ),
+        (201,),
+    )
+    s["ingress"] = rule
+    s["phase"] = "capability-test-pending"
+    save(s)
+    settle_service(s)
+    for attempt in range(30):
+        data = current_network(s)
+        rule = next(r for r in data["ingress_rules"] if r["id"] == s["ingress"]["id"])
+        if (
+            rule["state"] == "active"
+            and rule["accepting_new_connections"]
+            and rule["connect_port"]
+        ):
+            break
+        time.sleep(1)
+    else:
+        raise RuntimeError("second real gateway rule did not become active")
+    assert rule["connect_port"] > first["connect_port"]
+    s["ingress"] = rule
+    save(s)
+    plan = {
+        "source_namespace": source["namespace"],
+        "source_pod": source["pod"],
+        "denied_namespace": denied["namespace"],
+        "denied_pod": denied["pod"],
+        "gateway_host": rule["connect_host"],
+        "port": rule["connect_port"],
+        "revoke_argv": ["/opt/venv/bin/python", "/opt/t0224/revoke_test_capability.py"],
+    }
+    harness().gateway_checks(api, "t0224-nonproduction", plan)
+    capabilities = checked(
+        client.get(
+            "/api/v1/agents/instances/" + source["instance"] + "/runner/capabilities",
+            headers=headers(s),
+        )
+    )
+    grant = next(g for g in capabilities["grants"] if g["approval_id"] == s["approval"])
+    assert grant["state"] == "revoked"
+    checked(client.get("/readyz"))
+    # Retire the second dedicated rule as well; no authorization is left active.
+    retired = checked(
+        client.post(
+            "/api/v1/runner/environments/"
+            + target["id"]
+            + "/ingress/"
+            + rule["id"]
+            + "/revoke",
+            headers=headers(s),
+            json={"password": password},
+        )
+    )
+    assert retired["state"] == "revoked"
+    result = {
+        "utc": datetime.now(timezone.utc).isoformat(),
+        "run_id": s["run_id"],
+        "source_capability_revocation": "passed",
+        "established_stream_closed_within_8_seconds": True,
+        "new_connection_after_capability_revoke": "denied",
+        "gateway_ports_monotonic": [first["connect_port"], rule["connect_port"]],
+        "test_control_health_after": "ready",
+        "dedicated_rules_retired": True,
+    }
+    (ROOT / "capability-result.json").write_text(json.dumps(result, indent=2))
+    s["phase"] = "capability-passed"
+    save(s)
+    print(json.dumps(result, indent=2), flush=True)
+
+
+async def settle_and_remove_probe_policy():
+    s = load()
+    login()
+    if s.get("phase") != "capability-passed":
+        raise RuntimeError("capability revocation must pass first")
+    for _ in range(3):
+        reconcile(s)
+        time.sleep(1)
+    e = s["environments"]["denied"]
+    receipt = next(
+        r
+        for r in s["receipts"]
+        if r["kind"] == "NetworkPolicy" and r["name"] == "t0224-gateway-denial-probe"
+    )
+    obj = api.get_optional("networkpolicy", receipt["name"], e["namespace"])
+    if obj:
+        assert obj["metadata"]["uid"] == receipt["uid"]
+        assert (
+            obj["metadata"]["labels"]["workspace.myworkspace.io/acceptance-run"]
+            == s["run_id"]
+        )
+        runner._delete_uid(
+            "/apis/networking.k8s.io/v1/namespaces/"
+            + e["namespace"]
+            + "/networkpolicies/"
+            + receipt["name"],
+            receipt["uid"],
+            obj["metadata"]["resourceVersion"],
+        )
+    data = current_network(s)
+    assert len(data["ingress_rules"]) == 2
+    assert all(
+        r["state"] == "revoked"
+        and r["revocation_confirmed"]
+        and not r["accepting_new_connections"]
+        for r in data["ingress_rules"]
+    )
+    s["phase"] = "settled"
+    save(s)
+    (ROOT / "final-network.json").write_text(json.dumps(data, indent=2))
+    print(
+        "all dedicated ingress rules revoked and withdrawal-ACK confirmed; diagnostic-only egress policy removed by original UID",
+        flush=True,
+    )
+
+
+async def main():
+    stage = sys.argv[1]
+    if stage == "bootstrap":
+        await bootstrap()
+    elif stage == "deploy":
+        await deploy()
+    elif stage == "network":
+        await network()
+    elif stage == "authorize":
+        await authorize()
+    elif stage == "gateway-test":
+        await gateway_acceptance()
+    elif stage == "capability-test":
+        await capability_test()
+    elif stage == "settle":
+        await settle_and_remove_probe_policy()
+    else:
+        raise RuntimeError("unsupported stage")
+    await engine.dispose()
+
+
+asyncio.run(main())

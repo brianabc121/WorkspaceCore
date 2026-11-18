@@ -1,0 +1,10 @@
+2026-11-13T16:30:09Z
+s8006604
+4eefda99b588efcf38cfab5835e1bfb57ce232f964b47dfaf7312aa9ab7b1beb  /etc/machine-id
+4eefda99b588efcf38cfab5835e1bfb57ce232f964b47dfaf7312aa9ab7b1beb  /var/lib/dbus/machine-id
+53b74482e7fd53a94ad5492412d8559a02dcf79cf91418e9cc532c68cfc15a92  /proc/sys/kernel/random/boot_id
+active
+active
+active
+active
+peer=100.72.60.100 tcp22=connected banner=SSH-2.0-Tailscale
