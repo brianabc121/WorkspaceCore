@@ -130,7 +130,8 @@ MCP 管理器：排队、会话、事件、额度都照旧；只是起官方程�
 | 容器服务器上已有的模板 | 在模板镜像上加一层命令行（见下） |
 | 自定义镜像 | 填镜像名，工作台建成一个模板：`FROM <镜像>`，再加一层命令行 |
 
-- “加一层命令行”的做法：内置镜像里有一个自带 Node 运行时的命令行目录，其他镜像用 `COPY --from=<命令行镜像 digest> /opt/mw/cli /opt/mw/cli` 拷进去。要求镜像是 glibc 的 Linux、有 `/bin/sh` 和 `setsid`；建容器时检查，不满足就失败并写明原因。命令行搬到别的镜像里能不能直接跑【未核验】。
+- “加一层命令行”的做法：内置镜像里有一个自带 Node 运行时的命令行目录，其他镜像用 `COPY --from=<命令行镜像 digest> /opt/mw/cli /opt/mw/cli` 拷进去。要求镜像是 glibc 的 Linux、有 `/bin/sh` 和 `setsid`；建容器时检查，不满足就失败并写明原因。拷进不带 Node 的 `debian:bookworm-slim` 后三个命令行都能直接跑【已核验，V8】。
+  这个目录约 1.2 GB，第一次构建要下载约 1 GB；同一台容器服务器上只构建一次，所有远程容器共用这一层。
 - 额外要装的系统软件写在弹窗“高级”里的“安装步骤”（就是容器服务器模板的安装步骤），构建成镜像的一部分。容器里的程序以非 root 运行（5.3），运行中装不了系统软件，所以要装的东西放进镜像。
 - 版本必须一致：管理器解析的是锁定版本的输出格式。管理器升级后，页面上提示“更新镜像”：重新构建模板、按新镜像重建容器，数据卷保留（容器服务器现有的重建流程）。回合开始前比对容器里的命令行版本，不一致就不开回合，提示更新镜像。
 
@@ -158,7 +159,7 @@ MCP 管理器：排队、会话、事件、额度都照旧；只是起官方程�
 | 全部外网 | 任何公网地址 |
 
 另外可以自己加域名（支持 `*.example.com`）。三档都只经出口代理走 HTTP / HTTPS（容器服务器 V1 的限制）。
-三个命令行都走 `HTTPS_PROXY`：Codex 0.169.0、Claude Code 2.1.323【已核验：本会话实测】，CodeBuddy【未核验】。
+三个命令行都走 `HTTPS_PROXY`【已核验，V6】。不登录时启动会连的域名已实测（核验记录 V3）；登录、刷新用的域名要用真实账号补测，补测之前“只连模型接口和代码仓库”这一档的清单不完整，页面上暂时推荐“全部外网”并写明原因。
 
 ### 5.5 生命周期与回收（D3）
 
@@ -188,7 +189,7 @@ MCP 管理器：排队、会话、事件、额度都照旧；只是起官方程�
 |---|---|---|
 | Claude | `claude -p --output-format stream-json --verbose --include-partial-messages --session-id / --resume <号>`，每回合一个进程 | 同一条命令，在容器里由托管进程起；“可执行命令”档用 `--permission-mode bypassPermissions`（非 root，容器即沙箱） |
 | CodeBuddy | `codebuddy -p …`，同上 | 同上；“可执行命令”档另加 `CODEBUDDY_IS_SANDBOX=1`（帮助文本说这是隔离沙箱下的完全放行，实际效果待核验 V7） |
-| Codex | 常驻 `codex app-server`，JSON-RPC | **每回合一个 `codex exec --json`**（D7）：第一回合 `codex exec --json -m <模型> -C <工作目录> --skip-git-repo-check -`，之后 `codex exec resume <会话号> --json -`；提问从标准输入给（`-` 表示读标准输入）；图片用 `-i`。“可执行命令”档用 `--dangerously-bypass-approvals-and-sandbox`，只读和可写工作区两档用 `-s read-only` / `-s workspace-write`（Codex 自己的沙箱在 gVisor 里能不能用待核验 V2，不能用就只提供“可执行命令”档） |
+| Codex | 常驻 `codex app-server`，JSON-RPC | **每回合一个 `codex exec --json`**（D7）：第一回合 `codex exec --json -m <模型> -C <工作目录> --skip-git-repo-check -`，之后 `codex exec resume <会话号> --json -`；提问从标准输入给（`-` 表示读标准输入）；图片用 `-i`。**只提供“可执行命令”档**，用 `--dangerously-bypass-approvals-and-sandbox`：Codex 0.169.0 自己的沙箱（bubblewrap）在 runc 和 gVisor 容器里都起不来【已核验，V2】，容器本身就是沙箱 |
 
 - 【已核验：Codex 0.169.0】上面的参数都在帮助文本里；无登录实测时输出第一行是 `{"type":"thread.started","thread_id":"…"}`，接着 `turn.started`、`error`、`item.completed`；它经 `HTTPS_PROXY` 连接（先试 WebSocket，失败后退回 HTTPS）。
   命令、改文件、用量、额度这些事件的完整形状要用真实账号录一份（V1）。
@@ -221,7 +222,7 @@ MCP 管理器：排队、会话、事件、额度都照旧；只是起官方程�
 | 指令 | 做什么 |
 |---|---|
 | `proc_start` | 参数：环境、进程号（幂等）、种类（`turn` / `login` / `job`）、命令参数数组、工作目录、环境变量、标准输入（不超过 2 MB）、时限。runner-agent 确保容器在运行（停止的自动启动），把标准输入写进 `/workspace/.mw/procs/<号>/stdin`，用 `docker exec -d` 起托管脚本 |
-| `proc_signal` | 对整个进程组发 TERM，10 秒后还在就 KILL |
+| `proc_signal` | 对整个进程组发 TERM，10 秒后还在就 KILL（Debian 的 `sh` 里写 `kill -TERM "-<进程组号>"`，核验记录 V9） |
 | `proc_input` | 只给登录用：往进程的输入管道写一小段（不超过 4 KB，例如粘贴的授权码） |
 
 托管脚本：
@@ -328,7 +329,7 @@ MCP 管理器：排队、会话、事件、额度都照旧；只是起官方程�
 
 其他变化：
 
-- **访问权限**：远程容器的默认档改成“可执行命令”（D5），说明改成“可以改文件、执行命令（在远程容器里，容器本身是沙箱）”；原来那句“能读到这个 MCP 管理器数据卷里的其他内容”的红字只在管理器容器里显示。
+- **访问权限**：远程容器的默认档改成“可执行命令”（D5；Codex 在远程容器里只有这一档，见 6.1），说明改成“可以改文件、执行命令（在远程容器里，容器本身是沙箱）”；原来那句“能读到这个 MCP 管理器数据卷里的其他内容”的红字只在管理器容器里显示。
   远程容器换成一句提醒：“容器里执行的命令能读到这个平台在容器里的登录凭据”。
 - **登录提示**：这个平台在管理器里是需要刷新的登录方式时，写明“建好后要在容器里登录一次 Claude”，建好后环境卡片上有“登录”按钮。
 - **底部说明**：“会在容器服务器「X」上新建一个容器（约 20 GB 磁盘）；可以在容器服务器页面查看。”按钮仍是“创建环境”。
@@ -443,7 +444,12 @@ PR #255 给管理器加了托管后台作业和会话里的 `llm-task` 命令（
 
 ## 16. 核验清单
 
-本会话已核验（2026-11-18）：
+本会话已核验（2026-11-18；第二次核验的详细结果见 `docs/decisions/2026-11-18-llm-remote-env-verification.md`）：
+
+- V2、V6、V8、V9 通过；V2 的结论之一是 Codex 自己的沙箱在容器里不能用，远程 Codex 只提供“可执行命令”档；V3 测了不登录时的部分。
+- V1、V4、V5、V7 和 V3 的登录部分要真实账号，放进人类验收。
+
+第一次（写方案时）：
 
 - Codex 0.169.0（npm `@openai/codex@0.169.0`）：`codex exec` 有 `--json`、`resume <会话号>`、`-m`、`-s read-only|workspace-write|danger-full-access`、`-C`、`-i`、`--skip-git-repo-check`、`--dangerously-bypass-approvals-and-sandbox`（“只用于外部已隔离的环境”）；提问可从标准输入给；无登录实测的 JSONL 以 `thread.started`（带 `thread_id`）开头；经 `HTTPS_PROXY` 连接。
 - Claude Code 2.1.323：`-p --output-format stream-json` 经 `HTTPS_PROXY` 出网正常（本会话的网络代理下实测）。官方文档：非 root 运行时可以跳过权限确认、以 root 运行时程序拒绝；容器挡不住恶意项目带走 `~/.claude` 里的凭据。
@@ -481,11 +487,12 @@ PR #255 给管理器加了托管后台作业和会话里的 `llm-task` 命令（
 ## 18. 任务拆分
 
 编号在 issue #235 申请。注意路径重叠：codex 的 T-0224（双机验收，交接中）占用 `services/api`、`apps/web`、`.github/workflows` 等目录，
-第 1、2 期会改到其中的容器服务器与 runner-agent 代码，开工前按 `docs/AGENTS.md` 第 4 节确认没有碰到它进行中的范围，或请人类先安排顺序。
+第 1、2 期会改到其中的容器服务器与 runner-agent 代码。它的 PR #203 改了 `runner.py`、`runner_api.py`、`runner_reclaim.py` 等同一批文件，
+第 1 期要等 #203 合并（或集成会话给出顺序）再开工，开工前按 `docs/AGENTS.md` 第 4 节确认没有碰到它进行中的范围。
 
 | 期 | 任务 | 内容 | 依赖 |
 |---|---|---|---|
-| 0 | 核验 | 第 16 节 V1 ~ V9，写核验记录 `docs/decisions/` | 无（PR #255 已合并） |
+| 0 | 核验 | 第 16 节 V1 ~ V9，写核验记录 `docs/decisions/`。2026-11-18 已做完不需要账号的部分（V2、V3 部分、V6、V8、V9），其余要真实账号 | 无（PR #255 已合并） |
 | 1 | 容器服务器：归属与托管进程 | 迁移（归属、不自动归档、远程容器、托管进程）；runner-agent 的三条新指令、分块回传、续读、对账；工作空间上限；容器服务器页面的申请方列与动作限制 | 0 |
 | 1 | 内置镜像 | “大模型开发环境”模板与命令行目录，版本和管理器一致；CI 里构建；`docs/versions.md` | 0 |
 | 2 | 管理器 | `RemoteRuntime` 与远程操作队列、管理接口；三个驱动的远程路径（Codex `exec`）；建会话、附件、归档、续接判断；版本检查 | 1 |
