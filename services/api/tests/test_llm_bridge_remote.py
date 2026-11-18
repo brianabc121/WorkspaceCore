@@ -302,8 +302,15 @@ async def rig(make_client: Any, migrated_database_url: str, tmp_path: Path) -> A
     try:
         bridge_app_module = importlib.import_module("bridge.app")
         bridge_config = importlib.import_module("bridge.config")
+        # 管理器本机的 claude 用管理器测试的假命令行（CI 机器上没有装 claude）：
+        # 只用来查登录状态；回合在“容器”里跑（FakeAgent）
+        wrapper = tmp_path / "bin-claude"
+        wrapper.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{FAKE_CLI}" "$@"\n')
+        wrapper.chmod(0o755)
         bridge_app = bridge_app_module.create_app(
-            bridge_config.Settings(data_dir=tmp_path / "bridge", admin_token=BRIDGE_TOKEN)
+            bridge_config.Settings(
+                data_dir=tmp_path / "bridge", admin_token=BRIDGE_TOKEN, claude_bin=str(wrapper)
+            )
         )
         async with (
             bridge_app.router.lifespan_context(bridge_app),
