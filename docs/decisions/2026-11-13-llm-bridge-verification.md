@@ -107,6 +107,20 @@
 没能核验的：`CODEBUDDY_API_KEY` 登录后的真实回合；个人订阅的登录态能否在容器里使用；
 WorkBuddy 桌面端的会话与 CodeBuddy 命令行的会话是否是同一份。在核验之前，页面上写明“看到的是 CodeBuddy 命令行的会话”。
 
+### 4.1 长时间任务用到的事件和开关（T-0291、T-0292，2026-11-18）
+
+方案见 `docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md` 第 3 节。核验方式和 T-0288 一样：锁定版本的程序文件只解包、不运行，读里面的事件名、字段名和环境变量名；Codex 用 `codex app-server generate-json-schema` 生成的协议。**都没有跑真实回合。**
+
+| 用到的 | 来源 | 驱动怎么用 |
+|---|---|---|
+| Claude Code 2.1.323、CodeBuddy Code 2.184.0 的 stream-json `system` 事件 `task_started` / `task_progress` / `task_updated`（带 `patch`）/ `task_notification`：`task_id`、`status`、`description`、`summary`、`task_type`、`last_tool_name` | 程序文件 | 记成回合进度里的“官方程序的后台任务”（`bridge/drivers/cli_stream.py` `_task_event`）；回合结束时还有没完成的，记一条提示 |
+| `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS`、`CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS` | 程序文件；Claude 的含义另见官方文档 | 只在托管作业能用的会话里设成 `1`，并用 `--append-system-prompt` 告诉模型用 `llm-task` |
+| Claude `--append-system-prompt` | `--help` | 同上 |
+| Codex 0.169.0 的 `item/started`（`commandExecution` 带 `command`）、`item/commandExecution/outputDelta`（`itemId`、`delta`）、`item/completed` | 生成的协议 | 回合进度里的“正在跑的命令”和输出末尾，只在内存里 |
+| Codex `developerInstructions` | 生成的协议（第 2 节已用） | 开发会话能开作业时加上 `llm-task` 的说明 |
+
+没能核验的：这几种事件在真实回合里的顺序和频率；Claude `-p` 回答结束后等后台命令的实际时限；CodeBuddy 回答结束时怎样处理后台任务；Codex 的 `workspace-write` 沙箱没打开联网时，`llm-task` 连不上管理器的本机地址（按 Codex 文档推断，`llm-task` 的报错写明了这种情况）。部署后在真实账号上验证，见方案 12.4。
+
 ## 5. 测试怎么覆盖
 
 | 层 | 做法 |

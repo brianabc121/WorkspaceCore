@@ -185,7 +185,7 @@ MCP 工具作为以后的选项。
 | 一条循环最长多久 | 72 小时 |
 | 连续几轮失败（回合失败或作业失败）就暂停 | 3 |
 | 每个会话每天最多几个自动回合 | 48 |
-| 每个会话同时运行的作业 | 3；整个管理器同时 6 个 |
+| 每个会话同时运行的作业 | **不限**（人类 2026-11-18 决定）；整个管理器也默认不限。两项都可以在“运行设置”里设上限，0 表示不限 |
 | 单个作业最长 | 24 小时（可设 1–72 小时） |
 | 每个会话待执行的预约 | 5 个；最早 1 分钟后，最远 7 天 |
 
@@ -250,15 +250,17 @@ MCP 工具作为以后的选项。
 - **第 1 期**：先把它报出的后台任务显示出来，不关掉。
 - **第 3 期**：托管作业上线后，给 Claude、CodeBuddy 设关闭后台的环境变量（`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`、`CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS=1`），并在说明里告诉模型“要等很久就用 `llm-task job`”。避免它把东西放到后台、回答结束后被悄悄停掉。
 
-## 6. 接口与工具（草案）
+## 6. 接口与工具
+
+实际做成的名字以这张表为准（起草时的名字见第 12.2 节的对照）。
 
 | 层 | 新增 |
 |---|---|
-| 管理器 `/mcp`（外层智能体经工作台调用） | `llm_send` 加 `deliver_at`；`llm_session_tasks`（作业、预约、循环状态）；`llm_job_stop`；`llm_timer_cancel`；`llm_chain_resume` / `llm_chain_stop` |
-| 管理器 `/admin`（页面用） | `GET /admin/sessions/{id}/tasks`；`POST /admin/jobs/{id}/stop`；`GET /admin/jobs/{id}/log`；`POST /admin/sessions/{id}/timers`；`DELETE /admin/timers/{id}`；`POST /admin/chains/{id}/resume`、`/stop` |
-| 管理器本机接口（只给会话里的 `llm-task` 命令用） | `POST /session-api/jobs`、`GET /session-api/jobs/{id}`、`/log`、`/stop`；`POST /session-api/timers`；用回合令牌认证，只能动自己的会话 |
-| 工作台 | 上面这些的 `llm_bridge_*` 转发工具与页面接口；审计（开作业、停作业、预约、继续或停止循环）；扩展 `watches.py` |
-| 设置 | 管理器：`jobs_enabled`（默认关）与 5.6 的上限；开发环境：`allow_jobs`、`turn_timeout_seconds` |
+| 管理器 `/mcp`（外层智能体经工作台调用） | 读：`llm_tasks`（作业、预约、循环状态，以及正在跑的回合的进度）、`llm_job_log`；写：`llm_job_start`、`llm_job_stop`、`llm_timer_create`、`llm_timer_cancel`、`llm_chain_control`（`resume` / `stop`）；`llm_turn_get` 加 `activity` |
+| 管理器 `/admin`（页面用） | `GET /admin/sessions/{id}/tasks`；`POST /admin/sessions/{id}/jobs`、`/timers`、`/chain`；`POST /admin/jobs/{id}/stop`；`GET /admin/jobs/{id}/log`；`POST /admin/timers/{id}/cancel` |
+| 管理器本机接口（只给会话里的 `llm-task` 命令用） | `GET /session-api/tasks`；`GET\|POST /session-api/jobs`、`GET /session-api/jobs/{id}`、`/log`、`POST /stop`；`GET\|POST /session-api/timers`、`POST /timers/{id}/cancel`。用回合令牌认证，只能动自己的会话 |
+| 工作台 | 读工具 `llm_bridge_tasks`、`llm_bridge_job_log`；直接执行的工具 `llm_bridge_job_start`、`llm_bridge_job_stop`、`llm_bridge_timer_create`、`llm_bridge_timer_cancel`、`llm_bridge_chain_control`（例外十）；页面接口 `/llm_bridge/bridges/{id}/sessions/{sid}/tasks\|jobs\|timers\|chain`、`/jobs/{jid}/stop\|log`、`/timers/{tid}/cancel`；审计；`watches.py` 盯预约和作业引出的自动回合 |
+| 设置 | 管理器“运行设置”：`jobs_enabled`（默认开，见 12.2）、`jobs_per_session`、`jobs_total`（0 = 不限）、`job_max_seconds`、`timers_per_session`、`timer_max_days`、`chain_max_rounds`、`chain_max_hours`、`chain_max_failures`、`auto_turns_per_day`；开发环境：`turn_timeout_seconds` |
 
 ## 7. 第 1 期的细节（最先做、改动最小）
 
@@ -281,7 +283,7 @@ MCP 工具作为以后的选项。
   - 外层智能体通过工作台开作业、预约、继续循环，按 AGENTS.md 第 8 节，是新的“直接执行、不审批”的工具，要写进例外九；
   - 会话里的模型自己开作业、自己预约，等于允许它在没人看着时连续消耗额度（有 5.6 的上限）。
 
-  这两件都要人类决定（第 10 节）。
+  这两件人类已在 2026-11-18 决定（第 10 节）。
 
 ## 9. 分期，以及哪些要先验证
 
@@ -301,6 +303,8 @@ MCP 工具作为以后的选项。
 2. **外层智能体的新工具按“直接执行、不审批”处理**：写进 `docs/AGENTS.md` 第 8 节，作为例外十。
 3. 然后**按优化后的方案全面落实代码**，四期一起做。
 
+4. 起草时建议“每个会话同时最多 3 个作业”，人类答复：“这一条要改一下，不做上限限制”。所以每个会话、整个管理器同时运行的作业数都**默认不限**，管理员可以在“运行设置”里设上限。
+
 其余没有单独答复的，按方案的推荐执行，都可以在“运行设置”里调整：
 - 方向：等待不占回合，由管理器托管作业和预约；暂不做常驻官方程序（5.11）。
 - 5.6 的默认上限。
@@ -315,3 +319,37 @@ MCP 工具作为以后的选项。
 - 我在 2026-11-18 的对话里根据程序文本说过“Claude 回答完 5 秒后就杀掉后台 shell”，**以官方文档为准，这个说法不对**：它会先等后台命令（有时限），进程退出时才全部杀掉。程序里的“5 秒宽限”是哪种情况下的收尾，没有核实。
 - 业内资料里有几个站点本会话打不开（docs.github.com、openai.com、temporal.io、aws、cloudflare），用的是搜索引擎对官方页面的摘录；采用某个具体数字之前再核对一遍。
 - CodeBuddy 回答结束时怎样处理后台任务，没有核实。
+
+## 12. 实施情况（T-0291、T-0292）
+
+### 12.1 做了什么
+
+| 期 | 管理器（`services/llm-bridge`） | 工作台与页面 |
+|---|---|---|
+| 1 看得见 | `bridge/activity.py`：回合进行中的动静（最后一次有动静的时间、正在跑的命令或工具、Codex 输出的最后 40 行、官方程序报出的后台任务），只在内存里；`turn_view` / `llm_turn_get` 带 `activity`。驱动：Codex 接上 `item/started`、`item/commandExecution/outputDelta`、`item/completed`；Claude / CodeBuddy 接上 `task_*` 事件；回合结束时还有没完成的后台任务，记一条提示。开发环境可单独设单回合时限 | 对话页“后台任务”面板显示正在跑什么、安静了多久；开发环境弹窗加“单回合时限” |
+| 2 预约回来 | `timers` 表；调度协程（原来的 `_resume_loop`）一起看预约，只睡到最近的到点时间；停机期间到点的补发一次并写明晚了多久 | 页面可预约、取消；工作台 `llm_bridge_timer_create` / `_cancel`；预约引出的自动回合结束后叫醒发起的智能体（`watches.py` 认 `bw_` 编号） |
+| 3 托管作业 | `bridge/jobs.py`：`bash -lc`、独立进程组、先 TERM 再 KILL、主进程结束后整组停掉（不留孤儿）、日志上限与截断；`jobs` 表；结束后自动开回合（消息开头写明“不是人发的、不代表任何人的批准”，带退出码、用时、日志末尾 40 行和留的话）；多个结束通知合并进同一个排着的自动回合；管理器重启后“运行中”的作业记为结果未知并告诉会话；托管作业可用时给 Claude / CodeBuddy 关掉官方后台（`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` / `CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS`），并在系统提示里告诉模型用 `llm-task` | “后台任务”面板：运行中、预约、已完成，看日志、停作业；“运行设置”加一组“后台任务”；工作台 `llm_bridge_job_start` / `_stop` / `_log`，智能体开作业时通知管理员 |
+| 4 会话里的命令与护栏 | `bridge/session_cli.py`：`llm-task` 命令（只用标准库），启动时写到 `<数据目录>/bin/llm-task` 并放进官方程序的 PATH；回合令牌写进会话工作目录的 `.llm-task/session.json`（加进 `.git/info/exclude`），回合结束删掉、作废，每分钟最多 60 次调用；`chains` 表与护栏（轮数、时长、连续失败、每天自动回合数），到了上限暂停并在会话里留一条提示 | 面板顶部显示暂停原因，带“继续”“停止”；工作台 `llm_bridge_chain_control` |
+
+另外 `BridgeError` 挪到 `bridge/errors.py`（`engine.py` 照旧导出），`bridge/longrun.py` 管这一切的规则。
+
+### 12.2 和起草时不一样的地方
+
+- **名字**：起草时写的 `llm_send` 加 `deliver_at`、`llm_session_tasks`、`llm_chain_resume` / `_stop`，做成了独立的 `llm_timer_create`、`llm_tasks`、`llm_chain_control`（第 6 节）。定时发一条消息和“预约回来”是同一件事，不再给 `llm_send` 加参数。
+- **开关**：起草时写“`jobs_enabled` 默认关”和开发环境的 `allow_jobs`。实际是：作业本来就只在管理员设为“可以执行命令”档位的开发环境里能开（这一档是管理员明确选的），`jobs_enabled` 默认开、作为总开关；不再给环境单独加一项，免得两个开关意思重叠。
+- **同时运行的作业**：按人类的决定默认不限（第 10 节第 4 条）。
+- **日志截断**：写满 20 MB 后不再写文件，只在内存里留最近 256 KB，作业结束时补到文件末尾并写明中间省略了多少。读取时脱敏（`bridge.redact`）。命令按原样存（要用它运行），给人和智能体看时脱敏。
+- **单回合时限**：开发环境的“单回合时限”范围 30 秒到 6 小时，不填用管理器的设置。
+- **会话页面上的回合**：自动回合的消息开头带固定标记，页面据此标明“MCP 管理器（自动接着做）”。
+
+### 12.3 存储升级
+
+管理器的 SQLite 在启动时用 `CREATE TABLE IF NOT EXISTS` 加三张新表（`jobs`、`timers`、`chains`）和它们的索引，不改、不删旧表的列和数据。升级后第一次启动自动建表；退回旧版本的管理器时，旧版本不认识这三张表，直接忽略，原有会话、回合不受影响（只是作业和预约不再执行）。作业日志写在数据目录的 `jobs/` 下，作业结束 7 天后删掉日志文件（记录留着）；`llm-task` 写在数据目录的 `bin/` 下，每次启动重写。工作台没有数据表变化。
+
+### 12.4 验证到哪一步
+
+- 管理器单元测试：活动视图、环境单独时限、预约（最早 1 分钟、个数上限、补发）、合并、轮数 / 时长 / 每天 / 连续失败四种护栏、作业结束后接着做、只在“可以执行命令”档位开作业、停止、归档、重启后结果未知、回合令牌只对自己的会话和这一回合有效、`llm-task` 命令、进程组与孤儿进程、驱动的事件与说明。
+- 本机起一个真实的管理器（仿真平台），经 HTTP 跑通 `llm-task job start` / `at` / `status`：作业结束后自动开了回合，回合结束后令牌作废。
+- 工作台测试：工具的权限、审计（不含令牌和密钥）、通知管理员、叫醒；前端测试与浏览器截图。
+- **没有在真实账号上跑过**（第 11 节）。部署后先在一个“可以执行命令”档位的开发环境里，让三家各跑一次 `llm-task job start -- sleep 120` 和 `llm-task at +2m`，确认能连上本机地址、自动回合正常。Codex 在没打开“允许联网”的环境里连不上本机地址，`llm-task` 会写明原因。
+

@@ -672,6 +672,19 @@ async def run(
                 output.data["turn_id"],
             )
         output.data["will_notify"] = pending
+    if spec.name == "llm_bridge_job_start":
+        # 智能体给会话开了后台作业（例外十）：通知管理员，命令脱敏后只写开头
+        job = output.data.get("job") or {}
+        await notifications.notify_admins(
+            service.db,
+            current.workspace_id,
+            type_="llm_bridge.job_started",
+            severity="info",
+            title=f"智能体「{current.name}」给大模型会话开了后台作业「{job.get('name')}」",
+            body=agent_ops.redact(str(job.get("command") or ""))[:200] + f"（{output.bridge}）",
+            link=_session_link(bridge_id, job.get("session_id")),
+            key=str(job.get("id")),
+        )
     if spec.name in ("llm_bridge_job_start", "llm_bridge_timer_create"):
         # 结束后叫我（默认是）：盯着这个作业 / 预约，它引出的那一回合结束时唤醒这个实例
         item = output.data.get("job") or output.data.get("timer") or {}

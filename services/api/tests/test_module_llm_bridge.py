@@ -1416,6 +1416,23 @@ async def test_agent_timers_jobs_and_chain_wake_it_up_and_are_audited(rig: Rig) 
         )
     )
     assert job["will_notify"] is True and job["job"]["origin"] == "caller"
+    # 通知管理员（例外十）
+    notes = (await env.get("/api/v1/notifications", limit=50))["items"]
+    started = next(n for n in notes if n["type"] == "llm_bridge.job_started")
+    assert "openclaw-long" in started["title"] and "构建" in started["title"]
+    # 没有“新建会话和发送”权限的实例：看不到也调用不了写工具
+    reader = await new_instance(env, name="openclaw-reader")
+    await rig.grant(reader, can_write=False, environment_ids=[env_id])
+    reader_token = await issue_token(env, reader)
+    denied = tool_error(
+        await call(
+            env,
+            reader_token,
+            "llm_bridge_job_start",
+            {"session_id": dev["session_id"], "command": "echo hi"},
+        )
+    )
+    assert denied["code"] in ("FORBIDDEN_CAPABILITY", "FORBIDDEN_TOOL", "NOT_FOUND")
     follow = await until(lambda: (store.get_job(job["job"]["id"]) or {}).get("follow_turn_id"))
     await watches.watch_tick({"sync": env.sync})
     ok(await call(env, agent, "llm_bridge_turn_get", {"turn_id": follow, "wait_seconds": 10}))
@@ -1470,3 +1487,6 @@ async def test_agent_timers_jobs_and_chain_wake_it_up_and_are_audited(rig: Rig) 
     assert actions["llm_bridge.job_stopped"] == "停掉大模型会话的后台作业"
     assert actions["llm_bridge.timer_created"] == "预约给大模型会话发消息"
     assert actions["llm_bridge.chain_controlled"] == "恢复或停止大模型会话的自动接着做"
+    # 审计里不记令牌、不记命令原文以外的密钥
+    dumped = str([e for e in logs if e["action"].startswith("llm_bridge.")])
+    assert "token" not in dumped.lower() and secret not in dumped

@@ -605,3 +605,37 @@ def test_cli_driver_tells_the_model_about_llm_task(tmp_path: Path) -> None:
     plain = SessionSpec(mode="dev", model="opus", workdir=tmp_path, sandbox="exec", native_id="n1")
     assert "--append-system-prompt" not in claude._args(plain)
     assert claude._background_env(plain) == {}
+
+
+async def test_chain_pauses_at_the_time_and_daily_limits(bridge: Bridge) -> None:
+    # 循环护栏（5.6）：一条循环最长多久、每个会话 24 小时内最多几个自动回合
+    session = await _chat(bridge)
+    store = bridge.engine.store
+
+    async def fire(text: str) -> dict[str, Any]:
+        made = await bridge.tool(
+            "owner", "llm_timer_create", {"session_id": session, "text": text, "after_seconds": 600}
+        )
+        timer_id = made["timer"]["id"]
+        _due_now(bridge, timer_id)
+        await _wait(lambda: (store.get_timer(timer_id) or {})["status"] != "pending", "预约处理")
+        row = store.get_timer(timer_id)
+        assert row is not None
+        if row["fired_turn_id"]:
+            await _turn_until(bridge, row["fired_turn_id"], lambda v: v["status"] == "completed")
+        return row
+
+    bridge.engine.update_settings({"chain_max_hours": 1})
+    store.save_chain(session, rounds=1, started_at=time.time() - 7200)  # 两小时前开始的循环
+    late = await fire("太久了")
+    assert late["status"] == "skipped" and "持续了 1 小时以上" in late["reason"]
+    # 人发了一条消息：从头算；每天上限 1 个自动回合
+    await bridge.tool(
+        "owner", "llm_send", {"session_id": session, "text": "继续", "request_id": "r1"}
+    )
+    bridge.engine.update_settings({"auto_turns_per_day": 1})
+    first = await fire("第一个")
+    assert first["status"] == "fired"
+    second = await fire("第二个")
+    assert second["status"] == "skipped" and "24 小时内已经自动发起了 1 个回合" in second["reason"]
+    assert store.get_chain(session)["status"] == "paused"
