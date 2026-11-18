@@ -180,8 +180,9 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
     def sleep(seconds: float) -> None:  # 假时钟：睡一下就往前走，不会原地打转
         fake.now += seconds
 
-    monkeypatch.setattr(agent_module.time, "monotonic", fake)
-    monkeypatch.setattr(agent_module.time, "sleep", sleep)
+    # agent 模块用的就是标准库的 time：按名字打补丁
+    monkeypatch.setattr("app.runner_agent.agent.time.monotonic", fake)
+    monkeypatch.setattr("app.runner_agent.agent.time.sleep", sleep)
     return fake
 
 
@@ -727,10 +728,25 @@ def _create_agent(docker: _CreateDocker) -> tuple[Agent, list[str]]:
     agent._image_for = lambda p: {"Id": "sha256:new", "RepoDigests": []}  # type: ignore[method-assign]
     agent._env_network = lambda network, labels: None  # type: ignore[method-assign]
     agent._attach_proxy = lambda env_id, network, policy: None  # type: ignore[method-assign]
-    agent._inject_secrets = lambda p, container: steps.append("secrets")  # type: ignore[method-assign]
-    agent._run_helper = lambda p, mounts, cmd: steps.append("helper") or b""  # type: ignore[method-assign]
-    agent._restore = lambda p, snapshot: steps.append("restore")  # type: ignore[method-assign]
-    agent._put = lambda p, files: steps.append("files") or 0  # type: ignore[method-assign]
+
+    def inject(payload: dict[str, Any], container: str) -> None:
+        steps.append("secrets")
+
+    def helper(payload: dict[str, Any], mounts: list[dict[str, Any]], cmd: list[str]) -> bytes:
+        steps.append("helper")
+        return b""
+
+    def restore(p: dict[str, Any], snapshot: dict[str, Any]) -> None:
+        steps.append("restore")
+
+    def put(p: dict[str, Any], files: list[dict[str, Any]]) -> int:
+        steps.append("files")
+        return 0
+
+    agent._inject_secrets = inject  # type: ignore[method-assign]
+    agent._run_helper = helper  # type: ignore[method-assign]
+    agent._restore = restore  # type: ignore[method-assign]
+    agent._put = put  # type: ignore[method-assign]
     return agent, steps
 
 
