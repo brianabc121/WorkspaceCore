@@ -295,7 +295,7 @@ async def _forward(
     # 要发给第三方平台的内容先过密钥扫描：像密钥的不发、不存（例外九的“密钥拦截”）
     if any(
         isinstance(arguments.get(key), str) and secret_scan.scan(arguments[key])
-        for key in ("text", "title")
+        for key in ("text", "title", "command", "note")
     ):
         raise ToolCallError(
             "VALIDATION_FAILED",
@@ -491,10 +491,11 @@ HANDLERS: dict[str, Callable[..., Awaitable[BaseModel]]] = {
 
 def _record_arguments(parsed: BaseModel) -> dict[str, Any]:
     data = parsed.model_dump(mode="json", exclude_none=True)
-    text = data.get("text")
-    if isinstance(text, str):
-        clean = agent_ops.redact(text)
-        data["text"] = clean if len(clean) <= TEXT_LIMIT else clean[:TEXT_LIMIT] + "…"
+    for key in ("text", "command", "note"):  # 消息、作业的命令和留言：脱敏后再记
+        value = data.get(key)
+        if isinstance(value, str):
+            clean = agent_ops.redact(value)
+            data[key] = clean if len(clean) <= TEXT_LIMIT else clean[:TEXT_LIMIT] + "…"
     return data
 
 
@@ -533,6 +534,11 @@ _AUDIT_ACTIONS = {
     "llm_bridge_turn_cancel": "agent_turn_cancelled",
     "llm_bridge_session_archive": "agent_session_archived",
     "llm_bridge_session_compact": "agent_session_compacted",
+    "llm_bridge_job_start": "agent_job_started",
+    "llm_bridge_job_stop": "agent_job_stopped",
+    "llm_bridge_timer_create": "agent_timer_created",
+    "llm_bridge_timer_cancel": "agent_timer_cancelled",
+    "llm_bridge_chain_control": "agent_chain_controlled",
 }
 
 
@@ -542,6 +548,12 @@ def _result_ref(bridge_id: str, data: dict[str, Any]) -> dict[str, Any]:
     for key in ("session_id", "turn_id"):
         if isinstance(data.get(key), str):
             ref[key] = data[key]
+    for key in ("job", "timer"):  # 后台作业、预约：编号和所属会话
+        item = data.get(key)
+        if isinstance(item, dict) and isinstance(item.get("id"), str):
+            ref[f"{key}_id"] = item["id"]
+            if isinstance(item.get("session_id"), str):
+                ref["session_id"] = item["session_id"]
     return ref
 
 
@@ -565,6 +577,17 @@ def _summary(tool: str, output: BridgeToolOutput) -> str:
         return f"手动压缩 {where} 的会话：{data.get('status')}"
     if tool == "llm_bridge_turn_cancel":
         return f"取消回合：{data.get('status')}"
+    job, timer = data.get("job") or {}, data.get("timer") or {}
+    if tool == "llm_bridge_job_start":
+        return f"开后台作业「{job.get('name')}」（{job.get('id')}）"
+    if tool == "llm_bridge_job_stop":
+        return f"停掉后台作业 {job.get('id')}：{job.get('status_label')}"
+    if tool == "llm_bridge_timer_create":
+        return f"预约给会话发消息（{timer.get('id')}）"
+    if tool == "llm_bridge_timer_cancel":
+        return f"取消预约 {timer.get('id')}"
+    if tool == "llm_bridge_chain_control":
+        return f"自动接着做：{(data.get('chain') or {}).get('status_label')}"
     return f"归档 {where} 的会话"
 
 
@@ -649,6 +672,14 @@ async def run(
                 output.data["turn_id"],
             )
         output.data["will_notify"] = pending
+    if spec.name in ("llm_bridge_job_start", "llm_bridge_timer_create"):
+        # 结束后叫我（默认是）：盯着这个作业 / 预约，它引出的那一回合结束时唤醒这个实例
+        item = output.data.get("job") or output.data.get("timer") or {}
+        if getattr(parsed, "notify", True) and isinstance(item.get("id"), str):
+            await watches.add(
+                service.db, current, uuid.UUID(bridge_id), str(item.get("session_id")), item["id"]
+            )
+            output.data["will_notify"] = True
     if spec.name == "llm_bridge_send" and output.data.get("takeover"):
         data = output.data
         await notifications.notify_admins(

@@ -737,8 +737,13 @@ class LongRun:
         }
 
     def tasks(self, session: Row) -> Row:
+        running = self.store.running_turn(session["id"])
+        activity = self.engine.turn_activity(running["id"]) if running else None
         return {
             "session_id": session["id"],
+            # 正在跑的回合在做什么（5.7）：页面的“后台任务”面板一次取全
+            "running_turn_id": running["id"] if running else None,
+            "activity": activity,
             "jobs": [self.job_view(j) for j in self.store.session_jobs(session["id"])],
             "timers": [self.timer_view(t) for t in self.store.session_timers(session["id"])],
             "chain": self.chain_view(session["id"]),

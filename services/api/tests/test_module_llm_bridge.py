@@ -1316,3 +1316,157 @@ async def test_dev_session_files_can_be_browsed_previewed_and_downloaded(rig: Ri
         "GET", f"{base}/sessions/{session_id}/files/content", params={"path": "没有.txt"}
     )
     assert missing.status_code == 404
+
+
+@pytest.mark.integration
+async def test_agent_timers_jobs_and_chain_wake_it_up_and_are_audited(rig: Rig) -> None:
+    """长时间任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md，例外十）：智能体预约、开后台作业，
+    直接执行；它们引出的那一回合结束后叫醒智能体；页面上能看、能停；都记审计。"""
+    import asyncio
+    import time
+
+    from sqlalchemy import select
+
+    from app.models.im import AgentWakeup
+    from app.modules.llm_bridge import watches
+
+    env = rig.env
+    engine = rig.bridge_app.state.engine
+    store = engine.store
+    made = await rig.api(
+        "POST",
+        f"/bridges/{rig.bridge_id}/environments",
+        json={
+            "platform": "claude",
+            "name": "能跑命令",
+            "sandbox": "exec",
+            "turn_timeout_seconds": 600,
+        },
+    )
+    assert made.status_code == 201, made.text
+    env_id = made.json()["id"]
+    assert made.json()["turn_timeout_seconds"] == 600
+    instance = await new_instance(env, name="openclaw-long")
+    await rig.grant(instance, can_write=True, environment_ids=[env_id])
+    agent = await issue_token(env, instance)
+
+    async def wakeups() -> list[str]:
+        async with env.sync.sessions() as db:
+            rows = await db.scalars(select(AgentWakeup).where(AgentWakeup.source == "llm_bridge"))
+            return [w.prompt for w in rows]
+
+    async def until(check: Any) -> Any:
+        for _ in range(200):
+            value = check()
+            if value:
+                return value
+            await asyncio.sleep(0.05)
+        raise AssertionError("等不到")
+
+    # 预约：直接执行；到点后管理器自动发出消息，那一回合结束时叫醒智能体
+    chat = ok(
+        await call(env, agent, "llm_bridge_session_create", {"platform": "claude", "mode": "chat"})
+    )
+    timer = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_timer_create",
+            {"session_id": chat["session_id"], "text": "去看 CI 结果", "after_seconds": 3600},
+        )
+    )
+    assert timer["will_notify"] is True and timer["timer"]["status"] == "pending"
+    tasks = ok(await call(env, agent, "llm_bridge_tasks", {"session_id": chat["session_id"]}))
+    assert [t["id"] for t in tasks["timers"]] == [timer["timer"]["id"]]
+    assert await watches.watch_tick({"sync": env.sync}) == 0
+    store.update_timer(timer["timer"]["id"], run_at=time.time() - 1)
+    engine.wake_scheduler()
+    fired = await until(lambda: (store.get_timer(timer["timer"]["id"]) or {}).get("fired_turn_id"))
+    await watches.watch_tick({"sync": env.sync})  # 跟到它引出的那一回合
+    done = ok(await call(env, agent, "llm_bridge_turn_get", {"turn_id": fired, "wait_seconds": 10}))
+    assert done["status"] == "completed" and "MCP 管理器自动发出" in done["result"]
+    assert await watches.watch_tick({"sync": env.sync}) == 1
+    assert any(f"{fired}（completed）" in prompt for prompt in await wakeups())
+
+    # 后台作业：只在“可以执行命令”档位；结束后自动接着做，那一回合结束时叫醒
+    dev = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_session_create",
+            {"platform": "claude", "mode": "dev", "environment": env_id},
+        )
+    )
+    secret = "sk-" + "Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0Fe9Dc8"
+    blocked = tool_error(
+        await call(
+            env,
+            agent,
+            "llm_bridge_job_start",
+            {"session_id": dev["session_id"], "command": f"echo {secret}"},
+        )
+    )
+    assert blocked["code"] == "VALIDATION_FAILED" and "密钥" in blocked["message"]
+    job = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_job_start",
+            {"session_id": dev["session_id"], "command": "echo built", "name": "构建"},
+        )
+    )
+    assert job["will_notify"] is True and job["job"]["origin"] == "caller"
+    follow = await until(lambda: (store.get_job(job["job"]["id"]) or {}).get("follow_turn_id"))
+    await watches.watch_tick({"sync": env.sync})
+    ok(await call(env, agent, "llm_bridge_turn_get", {"turn_id": follow, "wait_seconds": 10}))
+    await watches.watch_tick({"sync": env.sync})
+    assert any(f"{follow}（completed）" in prompt for prompt in await wakeups())
+    log = ok(await call(env, agent, "llm_bridge_job_log", {"job_id": job["job"]["id"]}))
+    assert "built" in log["text"]
+
+    # 页面：看后台任务、预约、停作业、停止 / 恢复自动接着做
+    base = f"/bridges/{rig.bridge_id}"
+    running = ok(
+        await call(
+            env,
+            agent,
+            "llm_bridge_job_start",
+            {"session_id": dev["session_id"], "command": "sleep 30"},
+        )
+    )
+    page = (await rig.api("GET", f"{base}/sessions/{dev['session_id']}/tasks")).json()
+    assert page["jobs_allowed"] is True and page["jobs"][0]["id"] == running["job"]["id"]
+    stopped = await rig.api("POST", f"{base}/jobs/{running['job']['id']}/stop", json={})
+    assert stopped.status_code == 200 and stopped.json()["job"]["status"] == "stopped"
+    planned = await rig.api(
+        "POST",
+        f"{base}/sessions/{dev['session_id']}/timers",
+        json={"text": "明早看", "after_seconds": 600},
+    )
+    assert planned.status_code == 200, planned.text
+    leaky = await rig.api(
+        "POST",
+        f"{base}/sessions/{dev['session_id']}/timers",
+        json={"text": secret, "after_seconds": 600},
+    )
+    assert leaky.status_code == 422
+    paused = await rig.api(
+        "POST", f"{base}/sessions/{dev['session_id']}/chain", json={"action": "stop"}
+    )
+    assert paused.json()["chain"]["status"] == "paused"
+    assert store.get_timer(planned.json()["timer"]["id"])["status"] == "cancelled"
+    resumed = await rig.api(
+        "POST", f"{base}/sessions/{dev['session_id']}/chain", json={"action": "resume"}
+    )
+    assert resumed.json()["chain"]["status"] == "active"
+    page_log = await rig.api("GET", f"{base}/jobs/{job['job']['id']}/log")
+    assert page_log.status_code == 200 and "built" in page_log.json()["text"]
+
+    # 审计：智能体的和页面上的都记
+    logs = (await env.get("/api/v1/audit-logs", limit=50))["items"]
+    actions = {e["action"]: e["action_label"] for e in logs}
+    assert actions["llm_bridge.agent_timer_created"] == "智能体预约给大模型会话发消息"
+    assert actions["llm_bridge.agent_job_started"] == "智能体给大模型会话开后台作业"
+    assert actions["llm_bridge.job_stopped"] == "停掉大模型会话的后台作业"
+    assert actions["llm_bridge.timer_created"] == "预约给大模型会话发消息"
+    assert actions["llm_bridge.chain_controlled"] == "恢复或停止大模型会话的自动接着做"

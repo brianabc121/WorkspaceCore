@@ -2,6 +2,8 @@
 
 智能体发送时带 notify=true、回合又没在等待时间内做完，就记一条“盯着这个回合”。后台任务隔十几秒
 向管理器问一次这些回合的状态（只问状态，不取内容）：结束了就给这个实例排一次唤醒。
+后台作业（bj_）和预约（bw_）也一样盯（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.8）：管理器先回答
+scheduled（还在等），作业结束、预约到点后带上它引出的那一回合，改盯那一回合，结束时叫醒。
 唤醒的提示词里只有回合编号和状态，没有模型写的内容——内容要智能体自己用工具取。
 至少叫一次：轮询保留作兜底，智能体收到后按编号取结果，重复收到也不会做两遍。
 """
@@ -34,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 EXPIRE_AFTER = timedelta(days=7)  # 盯了这么久还没结束的不再盯
 MAX_LISTED = 20  # 一次唤醒里最多列这么多个回合
-_ITEM = re.compile(r"bt_[0-9a-f]{20}（[a-z_]+）")
+_ITEM = re.compile(r"b[tjw]_[0-9a-f]{20}（[a-z_]+）")
 _FINAL = ("completed", "failed", "unknown", "cancelled")
 
 
@@ -61,7 +63,8 @@ def _prompt(items: list[str]) -> str:
     more = f"等 {len(items)} 个" if len(items) > MAX_LISTED else ""
     return (
         f"[大模型会话] 你让大模型做的事有结果了：{listed}{more}。"
-        "用 llm_bridge_turn_get 按回合编号取结果；括号里是状态，"
+        "用 llm_bridge_turn_get 按回合编号（bt_）取结果；后台作业（bj_）、预约（bw_）"
+        "没有引出回合时用 llm_bridge_tasks 查看。括号里是状态，"
         "interrupted 之外的状态都不会再变。"
     )
 
@@ -71,7 +74,11 @@ async def _wake(db: AsyncSession, watch: LlmBridgeTurnWatch, outcome: str) -> No
     instance = await db.get(AgentInstance, watch.instance_id)
     if instance is None or instance.status == "disabled":
         return
-    item = f"{watch.first_turn_id}（{outcome}）"
+    # 盯的是作业 / 预约、又已经跟到它引出的回合：报那一回合（智能体按回合编号取结果）
+    shown = watch.first_turn_id
+    if shown[:3] in ("bj_", "bw_") and watch.turn_id.startswith("bt_"):
+        shown = watch.turn_id
+    item = f"{shown}（{outcome}）"
     pending = await db.scalar(
         select(AgentWakeup)
         .where(
@@ -107,6 +114,10 @@ def _decide(state: dict[str, Any]) -> tuple[str, str | None]:
     status = str(state.get("status") or "missing")
     nxt = state.get("next_turn_id")
     if status in ("queued", "running"):
+        return "wait", None
+    if status == "scheduled":  # 后台作业还在跑、预约还没到点；有了它引出的回合就改盯那一回合
+        if isinstance(nxt, str) and nxt:
+            return "follow", nxt
         return "wait", None
     if status == "interrupted":
         if isinstance(nxt, str) and nxt:

@@ -74,8 +74,13 @@ async def test_running_turn_shows_what_it_is_doing(bridge: Bridge) -> None:
         "summary": "",
         "started_at": 0,
     }
+    tasks = (await bridge.admin("GET", f"/admin/sessions/{session}/tasks")).json()
+    assert tasks["running_turn_id"] == sent["turn_id"]
+    assert tasks["activity"]["current"]["text"] == "make test"
     done = await _turn_until(bridge, sent["turn_id"], lambda v: v["status"] == "completed")
     assert "activity" not in done
+    idle = (await bridge.admin("GET", f"/admin/sessions/{session}/tasks")).json()
+    assert idle["running_turn_id"] is None and idle["activity"] is None
     # 后台任务到回答结束时还没做完：会话记录里留一句提醒
     notices = [
         m["text"]

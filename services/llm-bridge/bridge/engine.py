@@ -1155,6 +1155,11 @@ class Engine:
                 self._work(session_id, queue), name=f"session-{session_id}"
             )
 
+    def turn_activity(self, turn_id: str) -> Row | None:
+        """进行中的回合的动静（5.7）；不在进行中为空。"""
+        activity = self._activity.get(turn_id)
+        return activity.view() if activity is not None else None
+
     def enqueue(self, turn: Row) -> None:
         """给长时间任务用：排一个已经建好的回合。"""
         self._enqueue(turn)

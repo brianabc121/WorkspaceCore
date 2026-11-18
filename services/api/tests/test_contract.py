@@ -917,6 +917,9 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "llm_bridge_turn_get",
             "llm_bridge_queue",
             "llm_bridge_file_get",
+            # 后台作业、预约（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md，人类 2026-11-18 决定）
+            "llm_bridge_tasks",
+            "llm_bridge_job_log",
         },
         "write": {
             "create_task",
@@ -971,6 +974,12 @@ def test_v2_mcp_tools_match_the_plan() -> None:
             "llm_bridge_session_archive",
             # 手动压缩上下文（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2；人类 2026-11-16 同意）
             "llm_bridge_session_compact",
+            # 例外十：开作业、停作业、预约、取消预约、恢复或停止自动接着做（人类 2026-11-18 决定）
+            "llm_bridge_job_start",
+            "llm_bridge_job_stop",
+            "llm_bridge_timer_create",
+            "llm_bridge_timer_cancel",
+            "llm_bridge_chain_control",
         },
     }
     for spec in TOOLS.values():
