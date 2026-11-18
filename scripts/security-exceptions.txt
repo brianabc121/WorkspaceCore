@@ -1,0 +1,4 @@
+# 依赖漏洞的临时例外：scripts/security-scan.sh deps 读这个文件（T-0290，人类 2026-11-18 决定）。
+# 一行一条：公告编号  最后有效的日期（含当天，UTC）  说明。过了日期自动失效，扫描照常失败。
+# 只登记没有修复版本、并且确认不影响生产的公告；上游有修复版本后升级依赖，并删掉这一行。
+GHSA-fc5q-39xc-vjpf 2026-12-18 picomatch <=4.0.7 的 ReDoS（高危，暂无修复版本）；只经 vite、vitest、eslint、vue-tsc 等开发和构建工具引入（apps/web 的 devDependencies），生产的前端镜像只有构建出的静态文件
