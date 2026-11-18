@@ -19,10 +19,10 @@ import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any, Literal
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
@@ -559,17 +559,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/admin/sessions/{session_id}/files/content", response_model=None)
     async def admin_session_file(
         request: Request, session_id: str, _: Admin, path: str, download: bool = False
-    ) -> dict[str, Any] | FileResponse:
+    ) -> dict[str, Any] | StreamingResponse:
         engine = engine_of(request)
         if not download:
             return engine.work_file(session_id, path)
-        target = engine.work_file_path(session_id, path)
-        return FileResponse(
-            target,
+        # 从检查时打开的同一个文件发送，不按路径重新打开（T-0289 审查：防止中途换成指出去的链接）
+        found = engine.work_file_download(session_id, path)
+        quoted = quote(found.name)
+        disposition = (
+            f"attachment; filename*=utf-8''{quoted}"
+            if quoted != found.name
+            else f'attachment; filename="{found.name}"'
+        )
+        return StreamingResponse(
+            found.chunks(),
             media_type="application/octet-stream",
-            filename=target.name,
-            content_disposition_type="attachment",
-            headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store"},
+            headers={
+                "Content-Length": str(found.size),
+                "Content-Disposition": disposition,
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store",
+            },
         )
 
     @app.get("/admin/sessions/{session_id}/queue")

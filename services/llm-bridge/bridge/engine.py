@@ -1785,9 +1785,10 @@ class Engine:
         """一个文件的信息和开头一段文字（脱敏）。"""
         return dict(self._in_workdir(session_id, workfiles.preview, path))
 
-    def work_file_path(self, session_id: str, path: str) -> Path:
-        """下载用的原文件。"""
-        return Path(self._in_workdir(session_id, workfiles.download, path))
+    def work_file_download(self, session_id: str, path: str) -> workfiles.Download:
+        """下载用的原文件：已经打开并检查过，调用方发完会关掉。"""
+        download: workfiles.Download = self._in_workdir(session_id, workfiles.download, path)
+        return download
 
     # ---- 连不连得上各平台（T-0240）----
     async def connectivity(self, refresh: bool = False) -> Row:
