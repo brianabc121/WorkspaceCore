@@ -576,8 +576,9 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | `POST /api/v1/runner/host/ssh/revoke` | 吊销专用密钥（`version`、`force`）：用它登录删掉 `authorized_keys` 里的那一行，再删工作台保存的私钥；连不上时 `force=true` 只删私钥并返回 `warning` |
 | `DELETE /api/v1/runner/host/ssh?version=` | 删除 SSH 地址（`204`）；装着专用公钥时 `409`，先吊销 |
 | `GET /api/v1/runner/environments` | 环境列表：`state`、`instance_id`、`lifetime`、`include_deleted`，T-0185 加 `q`（用途或环境 ID 包含查询，1–100 字，`%` / `_` 按字面）、`sort`（`last_used` 默认 / `cpu` / `memory`：实时读数高的在前，过期、未知、未运行排最后，同分按 ID）、`cursor`（≤ 512，绑定工作空间、全部筛选、排序与每页条数，不匹配 `422`）、`limit`（1–500，缺省 500 兼容旧页面）；响应加 `total`（同样筛选下的全部匹配数，在分页前计算）与 `next_cursor`。每项含智能体写的用途 `untrusted.purpose`、配置记录 `spec`、运行时 / 用户 / 网络、内存与磁盘占用、出口访问记录 `egress.hosts`（`域名:端口` → 次数、字节、拒绝次数）、删除条件、`next_step`、`wake_seconds`、保留分 `retention_score`（分低的先回收；只算运行中与已停止的环境）与 `retention_infinite`（无穷大：常驻环境的数据超过快照上限、重建不出来，只会被停止、不会被自动归档）、快照大小与时间、归档时间、`version`；T-0185 起每项带 `metrics`：`cpu_used_cores` / `cpu_percent_of_limit` / `cpu_window_seconds` / `cpu_reported_at` / `cpu_status`、`memory_used_bytes` / `memory_percent_of_limit` / `memory_reported_at` / `memory_status`、`data_volume_bytes` / `data_volume_reported_at` / `data_volume_status`；状态 `ok`（有值、上报时间在 180 秒内、主机在线且没停用）/ `stale`（有旧值，保留数字与时间，时间可能未知）/ `unavailable`（没有值）/ `not_running`（不在运行的环境的 CPU / 内存）；百分比按配置的 `cpus`、`memory_mb × 1024²` 算，可以超过 100 |
+| （列表与详情的归属字段，迁移 0079） | 每项加 `owner_kind`（`instance` / 模块 key）、`owner_label`（模块建的环境显示的申请方，例如“MCP 管理器「1 号」· 远程容器「开发机」”）、`no_auto_archive` |
 | `GET /api/v1/runner/environments/{id}` | 一个环境的详情（T-0185），与列表项相同；不在列表筛选里也能读；其他工作空间与不存在的都 `404`；只读本地记录，不连 Docker / SSH |
-| `POST /api/v1/runner/environments/{id}/actions` | `action` ∈ `start` / `stop` / `archive`（常驻先停止、做快照，完成后才归档；被保护的 `409`）/ `delete`（立即进入待删除；常驻先做快照，快照保留 30 天）/ `keep`（撤销待删除：回到停止，归档过的回到归档）/ `restore`（归档的按配置记录重建；已删除的常驻环境在快照保留期内从快照恢复，没有快照 `409 SNAPSHOT_NOT_FOUND`）/ `pin` / `unpin`（保护：不被自动回收），带 `version`；审计 `runner.environment_<action>` |
+| `POST /api/v1/runner/environments/{id}/actions` | `action` ∈ `start` / `stop` / `archive`（常驻先停止、做快照，完成后才归档；被保护的 `409`）/ `delete`（立即进入待删除；常驻先做快照，快照保留 30 天）/ `keep`（撤销待删除：回到停止，归档过的回到归档）/ `restore`（归档的按配置记录重建；已删除的常驻环境在快照保留期内从快照恢复，没有快照 `409 SNAPSHOT_NOT_FOUND`）/ `pin` / `unpin`（保护：不被自动回收），带 `version`；审计 `runner.environment_<action>`。模块建的环境（`owner_kind` 不是 `instance`，例如 MCP 管理器的远程开发容器）不能 `archive` / `delete` / `keep` / `restore`：`409 MANAGED_BY_MODULE`（在模块自己的页面上删） |
 | `GET /api/v1/runner/templates` | 模板（`RunnerTemplateAdminOut`：谁建的、`untrusted.description`、规格、构建状态、构建日志的结尾 `build_log`（最多 20000 字，已脱敏）、镜像 digest、构建耗时、镜像大小、使用次数、乐观并发的 `version`）；新建、修改、改状态、重新构建都返回同样的结构 |
 | `PUT /api/v1/runner/templates` | 管理员新建 / 修改模板（`name` 只能是小写字母数字与 `._-`）：规格变了版本号加一并下发构建；修改带 `version`；审计 `runner.template_saved` |
 | `PUT /api/v1/runner/templates/{id}/status` | `active` / `disabled`，带 `version`；审计 `runner.template_status` |
@@ -593,8 +594,11 @@ viewer 能看；member 能开、评论、改标签、指派、关联任务，关
 | 方法与路径 | 说明 |
 |---|---|
 | `POST /runner-api/v1/poll` | 上报版本与容量（`runtimes`、`kvm`、CPU、内存、磁盘），长轮询领指令（`wait_seconds` ≤ 25，一次最多 10 条，`FOR UPDATE SKIP LOCKED` 后标为 `sent`）。需要注入密钥的指令（`create_env` / `start_env` / `exec`）**这时才解密**放进 `payload.secret_values`（不落库，每次写取密钥记录）；`no-store` |
+| （托管进程，迁移 0079） | 指令 `proc_start` / `proc_input` 领取时工作台才从 Redis 取出（加密存放，10 分钟过期，取一次就删）标准输入和凭据放进 `payload.proc_input`（`{stdin_b64, secret_env}` / `{data}`），取不到时是 `{missing: true}`；另有 `proc_signal`（`TERM` / `KILL`，结果 `{signaled}`）。`proc_start` 的结果 `{started, pgid}` 之后运行才算 `running` |
 | `POST /runner-api/v1/commands/{id}/result` | `status`（`done` / `failed`）、`result`、`error`；重复回报只认第一次（`accepted: false`）；不是这台服务器的指令 `404` |
 | `POST /runner-api/v1/report` | 每分钟对账：带工作台标签的容器、数据卷、镜像与占用、没有标签的容器数（只计数）、出口访问记录。T-0184 起容器项可带 `cpu_used_cores` 与 `cpu_window_seconds`（同时有值或同时为空；有限、非负、窗口 1–180 秒，不合规整份报告 `422`），旧 runner-agent 不带也照常对账；`mem_bytes` 读不到时为空（不再报 0），数据卷 `bytes` 为负数时按未知处理。返回 `lost`（记录里有、实际没有：标为 `failed` 并通知管理员）与 `stray`（实际有、记录里没有：runner-agent 先停止、24 小时后删除） |
+| `POST /runner-api/v1/procs/{run_id}/output` | 托管进程的一块输出：`offset`（这一块的起始字节）、`data_b64`（≤ 256 KB）。工作台交给建它的模块（清单字段 `runner_proc_sink`），返回 `acked`（已确认的字节数）；`offset` 和已确认数对不上时不收，只返回 `acked`（总是 `200`），runner-agent 从那里重发；不是这台服务器的进程 `404` |
+| `POST /runner-api/v1/procs/{run_id}/exit` | 结束：`exit_code`、`state`（`exited` / `killed` / `timeout` / `lost`）、`stderr_tail`、`error`；在输出全部确认后回报；重复回报只认第一次（`accepted: false`）。`/report` 的应答另带 `procs`：这台服务器上已经起来、还没结束的托管进程（`run_id`、`env_id`、`container`、`proc_dir`、`acked`、`timeout_at`），runner-agent 重启后据此接着读 |
 | `PUT /runner-api/v1/snapshots/{id}/parts/{n}` | 上传快照的第 `n` 块（`application/octet-stream`，≤ 16 MB，`n` < 100000）。工作台用这份快照自己的数据密钥（AES-256-GCM，附加数据“快照 ID:块号”）加密后存进对象存储；只认这台服务器、状态是上传中的快照（否则 `404` / `409 SNAPSHOT_CLOSED`），存储不可用 `503 STORAGE_UNAVAILABLE` |
 | `GET /runner-api/v1/snapshots/{id}/parts/{n}` | 恢复时取第 `n` 块（解密后的原文，`no-store`）。快照没就绪 `409 SNAPSHOT_NOT_READY`；没有这一块 `404`；校验失败 `500 SNAPSHOT_CORRUPT` |
 
@@ -1072,3 +1076,29 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
 `failed` / `unknown`（带 `failure.kind`、`failure.message`）/ `cancelled`。错误码：`FORBIDDEN_CAPABILITY`（没有授权、平台不在允许范围、管理员没有给这个实例开任何 MCP 管理器）、
 `NOT_FOUND`（包括 `bridge` 填了没有授权的管理器）、`VALIDATION_FAILED`、`CONFLICT`（会话已归档、`request_id` 用在了别的会话）、`RATE_LIMITED`、`NOT_SUPPORTED`（接口桩通道、这座桥没有控制这个平台）、
 `EXTERNAL_UNAVAILABLE`（会话桥连不上、平台未登录、账号不一致）。
+
+### 远程开发容器（迁移 0079；`docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md`）
+
+开发环境可以放在容器服务器上的远程开发容器里：官方程序整个在容器里跑，工作台中转（管理器 → 工作台 → runner-agent）。
+查看 owner / admin，写 owner；都校验工作空间，写操作带 CSRF、记审计（`llm_bridge.remote_container_*`、`llm_bridge.remote_login`）。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/v1/llm_bridge/remote/targets` | 能放远程容器的容器服务器（`available`、不能选的原因：Kubernetes 类、不在线）、资源预设（`small` / `medium` / `large`）、工作空间上限 `limits`（个数 5、合计 16 核 / 32768 MB / 200 GB）与已用 `used`、内置镜像里的命令行版本、各网络档放行的域名 |
+| `GET /api/v1/llm_bridge/bridges/{id}/containers` | 这个管理器的远程容器：`state`（`building` 构建镜像中 / `creating` / `running` / `stopped` / `archived` / `deleting` / `failed` / `gone`）、`state_reason`、服务器、资源、运行时、网络与域名、密钥名称、空闲停止、命令行版本与 `versions_ok`、`updating_image`、`image_error`、`runner_environment_id`、`version` |
+| `POST /api/v1/llm_bridge/bridges/{id}/containers` | 新建（`201`）：`name`、`host_id`、`image_kind`（`builtin` / `template` / `custom`）、`image`、`preset` 或 `resources`、`runtime`（`gvisor` / `runc`）、`network`（`models` / `models_registries` / `all`，默认 `all`）、`domains`、`secrets`、`idle_stop_minutes`（0 / 30 / 120）。先在那台服务器上构建内置镜像（自定义镜像再加一层命令行），好了以后定时任务自动建容器；超过上限 `409 QUOTA_EXCEEDED`；同名 `409 CONFLICT` |
+| `PATCH /api/v1/llm_bridge/bridges/{id}/containers/{cid}` | 改 `idle_stop_minutes`、`network`、`domains`（带 `version`）；网络在下一次启动或执行时生效；资源不能改 |
+| `POST /api/v1/llm_bridge/bridges/{id}/containers/{cid}/actions` | `start` / `stop` / `retry`（失败后重来）/ `update_image`（按管理器现在的命令行版本重建镜像，再按新镜像重建容器，数据卷保留），带 `version` |
+| `DELETE /api/v1/llm_bridge/bridges/{id}/containers/{cid}` | 删除（`204`）：容器连数据卷删、不做快照；还有开发环境用它 `409 CONTAINER_IN_USE` |
+| `GET /api/v1/llm_bridge/bridges/{id}/containers/{cid}/platforms` | 各账号槽位在容器里：`injected`（凭据随回合注入，不用登录）/ `ready` / `needs_login` / `mismatch`（不是同一个账号），`detail`、`identity`、`can_login` |
+| `POST /api/v1/llm_bridge/bridges/{id}/containers/{cid}/login/{slot}` | 在容器里登录：`action`（`start` / `code` / `cancel`）、`code`（Claude 授权码）；返回和管理器登录相同的进度结构 |
+| `GET /api/v1/llm_bridge/bridges/{id}/containers/{cid}/login/{slot}` | 登录进度 |
+
+其他接口的变化：
+
+- `POST /api/v1/llm_bridge/bridges/{id}/environments` 加 `location`（`local` / `remote`），远程时 `remote_container_id`（已有的）或 `new_container`（新建，字段同上）二选一；远程的 Codex 只能 `sandbox=exec`（`422`）。管理器没收下时新建的容器登记一起撤回。`PUT` 不能改运行位置（`422`）。环境的返回加 `location`、`remote_container`、`remote_label`。
+- 会话工作目录的三个文件接口对远程会话改由工作台经容器服务器读（管理器回答 `REMOTE_SESSION`）：只读、解析符号链接后必须在 `/workspace/sessions/<会话号>` 里、预览脱敏规则相同；下载最多 20 MB。环境会话列表的每项加 `remote`（`{container, path}`）。
+- 智能体工具没有新增：`llm_bridge_environments` 的结果带 `location`，远程环境照常用 `llm_bridge_session_create` / `llm_bridge_send`。
+
+**管理器的管理接口**（只给工作台，管理令牌）：`GET /admin/remote/ops?wait=&limit=`、`POST /admin/remote/ops/{id}/result`、`POST /admin/remote/procs/{id}/output`、`POST /admin/remote/procs/{id}/exit`、`GET|DELETE /admin/remote/containers/{c}`、`POST|GET /admin/remote/containers/{c}/login/{slot}`，形状见方案 21.2。工作台的定时任务 `remote_tick`（每分钟，跑约 50 秒）长轮询这些操作。
+

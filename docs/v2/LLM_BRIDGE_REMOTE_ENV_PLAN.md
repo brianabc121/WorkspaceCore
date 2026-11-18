@@ -1,6 +1,6 @@
 # 开发环境的“云端远程容器”：在容器服务器上给 Codex / Claude / CodeBuddy 建专用容器（设计方案）
 
-> 状态：**已决定，待实施**。起草：claude，2026-11-18，依据 main `4501ee7` 的代码。
+> 状态：**已决定，已实施**（第 22 节是实施记录）。起草：claude，2026-11-18，依据 main `4501ee7` 的代码。
 > 人类 2026-11-18 看过草案后答复“按照推荐的来”：第 17 节 D1 ~ D8 全部按推荐执行；D6 的补充已写进 `docs/AGENTS.md` 第 8 节例外九。
 >
 > **需求原文**（人类 2026-11-18）：
@@ -528,3 +528,82 @@ PR #255 给管理器加了托管后台作业和会话里的 `llm-task` 命令（
 - Codex 命令行：`@openai/codex@0.169.0` 的 `codex exec --help`、`codex exec resume --help`（本会话实测）
 - CodeBuddy Code：`@tencent-ai/codebuddy-code@2.184.0` 的 `codebuddy --help`（本会话实测）
 - 本仓库：`docs/v2/LLM_BRIDGE_PLAN.md`、`docs/v2/LLM_BRIDGE_DEPLOY_PLAN.md`、`docs/v2/RUNNER_PLAN.md`、`docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md`（PR #255）
+
+## 21. 实施接口（契约，2026-11-18 人类要求“根据这份方案全面落实代码”）
+
+三部分并行开发（runner-agent、MCP 管理器、工作台），以本节为准；实施中改了哪里就同步改这一节。
+
+### 21.1 容器里的路径
+
+| 路径 | 用途 |
+|---|---|
+| `/opt/mw/cli/bin/{node,claude,codex,codebuddy}` | 内置镜像里的命令行（root 拥有），`PATH` 最前面是 `/opt/mw/cli/bin` |
+| `/workspace/sessions/<会话号>/` | 会话的工作目录 |
+| `/workspace/.home/` | `HOME`；`CLAUDE_CONFIG_DIR=/workspace/.home/.claude`、`CODEX_HOME=/workspace/.home/.codex`、`CODEBUDDY_CONFIG_DIR=/workspace/.home/.codebuddy` |
+| `/workspace/.mw/procs/<运行号>/` | 托管进程：`stdin`、`out`、`err`（只留最后 64 KB）、`pid`（进程组号）、`exit`、`in`（命名管道，只有交互进程有） |
+
+### 21.2 管理器 ⇄ 工作台（管理器的管理接口，管理令牌）
+
+| 接口 | 请求 | 应答 |
+|---|---|---|
+| `GET /admin/remote/ops?wait=0..25&limit=1..20` | — | `{"ops": [op, ...]}`；取走的操作标为 `sent`；`sent` 超过 60 秒没回结果的会再次给出（工作台按操作号去重） |
+| `POST /admin/remote/ops/{op_id}/result` | `{"ok": true, "data": {...}}` 或 `{"ok": false, "error": {"code": "...", "message": "..."}}` | 204；不认识的操作 404 |
+| `POST /admin/remote/procs/{proc_id}/output` | `{"offset": 已确认的字节数, "data_b64": "..."}` | `{"acked": 新的已确认字节数}`；`offset` 小于已确认数时只返回已确认数（重复的块），大于时 409 并带 `acked`；不认识的进程 404（工作台随后停掉它） |
+| `POST /admin/remote/procs/{proc_id}/exit` | `{"exit_code": int\|null, "state": "exited"\|"killed"\|"timeout"\|"lost"\|"failed", "error": str\|null, "stderr_tail": str}` | 204；只在输出全部确认后发 |
+
+操作（`op`）：`{"id": "ro_…", "kind": …, "container": "<远程容器号，工作台的 UUID>", "args": {…}, "created_at": 秒}`
+
+| kind | args | 成功的 data |
+|---|---|---|
+| `start_proc` | `proc_id`（`rp_…`）、`purpose`（`turn` / `login` / `job` / `prepare`）、`platform`（`codex` / `claude` / `workbuddy`，`prepare` 时为 null）、`session_id`、`argv`、`cwd`、`env`（不含密钥）、`secret_env`（凭据，只在内存里转）、`stdin_b64`、`timeout_seconds`、`interactive`；`prepare` 另有 `repo_url`、`branch`（工作台自己拼命令，忽略 `argv`） | `{"run_id": "<容器服务器运行号>"}` |
+| `signal_proc` | `proc_id`、`signal`（`TERM` / `KILL`） | `{}` |
+| `input_proc` | `proc_id`、`data`（≤ 4 KB） | `{}` |
+| `put_files` | `session_id`、`files: [{"path": 相对会话目录, "b64": …}]`（合计 ≤ 20 MB） | `{"written": n}` |
+| `helper` | `name`：`remove_session`（`session_id`）、`transcript_exists`（`platform`、`native_id`）、`versions`（无） | `{"exit_code": int, "output": str}`；`transcript_exists` 另给 `{"exists": bool}`，`versions` 另给 `{"versions": {"codex": "0.169.0", ...}}` |
+| `status` | — | `{"state": 容器状态, "host": 服务器名, "cpus", "memory_mb", "versions_ok": bool}` |
+
+工作台校验：容器属于这个管理器和工作空间、不在待删除 / 已删除；`turn` / `login` 的 `argv[0]` 必须是这个平台的命令行（`codex` / `claude` / `codebuddy`，或 `/opt/mw/cli/bin/` 下的同名文件），`login` 的第二个参数必须是登录子命令；`job` 的 `argv` 必须是 `["bash", "-c", 命令]`；路径都必须在 `/workspace/sessions/<会话号>` 下。
+
+### 21.3 工作台 ⇄ runner-agent
+
+- 托管进程记在 `runner_runs` 里：新列 `kind`（`exec` 默认 / `proc`）、`owner_kind`、`owner_ref`、`acked_offset`。状态沿用：`queued` → `running` → `done` / `failed` / `timeout` / `unknown`；没结束的运行让回收认为容器正忙。
+- 新指令（`runner_commands.kind`）：
+  - `proc_start`：载荷 = 环境的 `runtime_payload` + `{"run_id", "proc_dir", "argv", "cwd", "env", "timeout", "interactive"}`。标准输入和凭据不落库：放在 Redis `runner:proc-input:<指令号>`（10 分钟过期），runner-agent 领指令时工作台才放进 `payload["proc_input"] = {"stdin_b64", "secret_env"}` 并删掉 Redis 里的；取不到时放 `{"missing": true}`，runner-agent 回报失败“输入已过期”。结果 `{"started": true, "pgid": int}`。
+  - `proc_signal`：`{"env_id", "container", "run_id", "proc_dir", "signal"}`；结果 `{}`。runner-agent 用 `kill -TERM "-<进程组号>"`，`TERM` 后 10 秒还在就 `KILL`。
+  - `proc_input`：`{"env_id", "container", "run_id", "proc_dir"}` + 领指令时注入的 `payload["proc_input"] = {"data"}`；写进命名管道 `in`。
+- 新接口（运行服务器凭证）：
+  - `POST /runner-api/v1/procs/{run_id}/output`：`{"offset", "data_b64"}`（每块 ≤ 256 KB）→ `{"acked"}`；工作台按 `owner_kind` 交给模块（21.4），模块转给管理器。
+  - `POST /runner-api/v1/procs/{run_id}/exit`：`{"exit_code", "state": "exited"|"killed"|"timeout"|"lost", "stderr_tail", "error"}` → `{"accepted"}`；工作台结束这条运行并交给模块。
+  - `POST /runner-api/v1/report` 的应答加 `procs: [{"run_id", "env_id", "container", "proc_dir", "acked", "timeout_at"}]`：这台服务器上还在跑的托管进程，runner-agent 据此（重启后）接着读。
+- runner-agent 的读取：每个托管进程每 0.5 秒（连续 10 秒没有新输出后每 2 秒）用一次 `docker exec` 读 `out` 的大小、`exit` 和从已确认处开始的最多 256 KB；超过时限先 `TERM` 后 `KILL`，回报 `timeout`；容器没了回报 `lost`；`exit` 出现且输出全部确认后回报结束，再删掉进程目录。
+
+### 21.4 工作台的核心与模块
+
+- `runner_environments` 新列：`owner_kind`（`instance` 默认 / 模块 key，例如 `llm_bridge`）、`owner_ref`、`owner_label`、`no_auto_archive`（默认 false）。`owner_kind != 'instance'` 的环境：不算孤儿、不按实例配额、不自动归档（`no_auto_archive`）、空闲停止看 `runtime_metadata.idle_stop_seconds`（0 表示不停）；容器服务器页面上归档 / 删除 / 改删除条件返回 `409 MANAGED_BY_MODULE`。
+- 模块清单新字段 `runner_proc_sink: "包.模块:属性"`：对象有 `async output(db, settings, run, offset, data) -> int` 和 `async exit(db, settings, run, info) -> None`。核心按 `owner_kind`（模块 key）找它。
+- 核心给模块用的函数在 `app/domain/runner_managed.py`：建容器、启动 / 停止 / 删除、改资源、起托管进程、发信号、送输入、跑一条辅助命令并等结果、写文件、列目录、读文件。
+
+### 21.5 页面接口
+
+见第 12 节；字段名以 `services/api/openapi.json` 为准。
+
+## 22. 实施记录（与方案不同或方案没写到的地方，2026-11-18）
+
+人类 2026-11-18 要求“根据这份方案全面落实代码”。分三路实现（runner-agent、MCP 管理器、工作台与页面），接口按第 21 节。
+
+1. **托管进程挂在“运行记录”上**：没有另建 `runner_procs` 表，而是 `runner_runs` 加 `kind=proc`（迁移 0079）。没结束的运行本来就让回收认为容器正忙，所以“正在跑回合的容器不回收”不用另写。
+2. **托管进程的输入不落库**：标准输入（提问、图片）和凭据用工作台的凭证密钥加密后放 Redis（10 分钟过期），runner-agent 领指令时才解开、取一次就删。交互输入（登录的授权码）也一样。
+3. **回收**：模块建的环境不算孤儿（原来“没有创建者实例”的环境会被删）；不自动归档（资源紧张时也只停止）；空闲停止看容器自己的设置（0 = 不停）。
+4. **镜像**：内置模板按服务器建（名字 `mw-llm-dev-<服务器号前 8 位>`），模板构建好了以后由定时任务 `remote_tick` 接着建容器。自定义镜像 / 模板再加一层命令行（`COPY --from=<内置镜像>`），派生模板按容器建。“更新镜像”：按新版本重建模板，好了以后 `create_env` 带 `recreate`，runner-agent 删旧容器、按新镜像重建，数据卷保留。
+5. **中转**：工作台的定时任务每分钟一次、跑约 50 秒，对每个有远程容器的管理器长轮询；长轮询时不占数据库连接。输出由 runner-api 的请求直接转给管理器；管理器暂时收不下时不确认，runner-agent 从已确认处重发（输出还在容器里），所以没有用 Redis 缓存输出。结束转不出去的由定时任务补发。
+6. **工作台的校验**（21.2）：登录进程的工作目录是 `/workspace/.home`、第二个参数是 `login`（Codex）或 `auth`（Claude）；后台作业是 `bash -c`，管理器在命令前加 `exec 2>&1`；`HOME` 由容器设定，调用方传的会被丢掉，代理变量不能改。
+7. **管理器这边**（`services/llm-bridge`）：
+   - 固定参考资料不写进仓库的 `CLAUDE.md` / `AGENTS.md`（会覆盖仓库自己的），改为每回合作为系统提示带上（Codex 用 `-c developer_instructions=…`）；
+   - 远程 Codex 只有“可执行命令”档（核验记录 V2）；
+   - Codex 在容器里登录后查不到邮箱，记为 `ready` 并提示人确认是同一个账号；
+   - 版本表按程序名（`codex` / `claude` / `codebuddy`）比对；管理器读不到自己的版本时（开发、测试环境）跳过检查。
+8. **会话里的 `llm-task`** 在远程会话里暂不可用（返回 `NOT_SUPPORTED`，写明原因）；后台作业从页面或外层智能体的工具开时照常在容器里跑。第 14 节说的“请求文件”做法留到下一期。
+9. **页面**：容器建好后能改网络、另加的域名和空闲停止；资源不能改（要更大的新建一个）。远程会话的文件下载上限是 20 MB（容器服务器读文件的上限），本地会话仍是 50 MB。
+10. **上限**（D8）固定为 5 个 / 16 核 / 32 GB / 200 GB，还没有设置页面。
+11. **没做的**：管理器级的远程容器总览页（现在从用它的开发环境进入）；Kubernetes 类容器服务器；真实账号下的 V1、V4、V5、V7（要人类验收）。
+

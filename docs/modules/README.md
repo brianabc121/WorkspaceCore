@@ -70,6 +70,7 @@ apps/web/tests/<key>*.test.ts
 | `sealed_fields` | `SealedField` 元组 | 凭证轮换（`python -m app.commands.rotate_credentials`，见 docs/deployment.md）会处理这些加密列 |
 | `service_checks` | `ServiceCheckSpec(id, 名称, "包.模块:probe")` | 运维页显示该外部服务能否连通（只在启用了模块的工作空间显示） |
 | `on_toggle` | `async def on_toggle(db, settings, runtime, workspace_id, enabled) -> HookOutcome` | owner 启用 / 停用之后、或在应用中心“重试同步”时调用（开关已提交）；用来让外部服务跟着变化，例如新闻早报停用后重新生成 TrendRadar 配置、不再推送。要按数据库里的最新状态协调、可以重复执行；返回 `HookOutcome.applied()` / `.not_required("原因")` / `.failed("原因")`（原因用固定类别，见 `app/modules/sync.py`），只有 `applied` 记为同步成功。宿主给它单独的会话、限时 15 秒，结果写进同步记录，失败不回滚开关（T-0210） |
+| `runner_proc_sink` | `"包.模块:属性"`，对象有 `async output(db, settings, run, offset, data, runtime=None) -> int` 和 `async exit(db, settings, run, info, runtime=None)` | 模块在容器服务器上建的环境（`owner_kind` = 模块 key，`app/domain/runner_managed.py`）里的托管进程：runner-agent 交上来的输出和结束交给它，`output` 返回已确认的字节数（没收下就返回原来的 `offset`，runner-agent 从那里重发）。例子：MCP 管理器的远程开发容器（`docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md` 21.4） |
 
 为什么 `event_topics` 和 `widgets` 还要改宿主文件：它们是 OpenAPI 里的枚举和联合类型，前端据此生成类型，必须静态声明。
 模块清单再声明一次，一致性测试保证两边一致。
