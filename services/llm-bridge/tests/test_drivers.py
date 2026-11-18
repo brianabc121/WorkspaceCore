@@ -929,3 +929,46 @@ async def test_cli_reports_background_tasks_and_finished_steps(tmp_path: Path) -
     }
     assert ("command", {"command": "make test", "step": "toolu_b"}) in sink.events
     assert ("step_done", {"step": "toolu_b"}) in sink.live
+
+
+def _env_dump(tmp_path: Path, script: str, dump: Path) -> str:
+    """和 _wrapper 一样，只是先把收到的环境变量写进 dump。"""
+    path = tmp_path / f"bin-env-{script}"
+    path.write_text(
+        "#!/bin/sh\n"
+        f'"{sys.executable}" -c "import json, os, sys; '
+        f'json.dump(dict(os.environ), open(sys.argv[1], \'w\'))" "{dump}"\n'
+        f'exec "{sys.executable}" "{FAKES / script}" "$@"\n'
+    )
+    path.chmod(0o755)
+    return str(path)
+
+
+async def test_official_programs_never_get_the_bridge_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 管理器自己的 BRIDGE_*（管理令牌）一个都不传给官方程序：它们跑的命令继承它们的环境，
+    # 它们的 /proc/<pid>/environ 同一个用户也读得到（T-0293）。以前 Codex 拿的是完整的 os.environ
+    monkeypatch.setenv("BRIDGE_ADMIN_TOKEN", "must-not-leak")
+    monkeypatch.setenv("BRIDGE_DATA_DIR", "/data")
+    monkeypatch.setenv("UNRELATED_SECRET", "x")
+    codex_dump, cli_dump = tmp_path / "codex.json", tmp_path / "cli.json"
+    codex = CodexDriver(
+        _env_dump(tmp_path, "fake_codex.py", codex_dump), tmp_path / "codex-home", rpc_timeout=10
+    )
+    try:
+        await codex.status()
+    finally:
+        await codex.stop()
+    cli = CliStreamDriver(
+        claude_profile(_env_dump(tmp_path, "fake_cli.py", cli_dump)),
+        tmp_path / "home" / "cfg",
+        tmp_path / "secrets",
+        rpc_timeout=10,
+    )
+    await cli.status()
+    for dump in (codex_dump, cli_dump):
+        env = json.loads(dump.read_text())
+        leaked = sorted(k for k in env if k.startswith("BRIDGE_") or k == "UNRELATED_SECRET")
+        assert leaked == [], (dump.name, leaked)
+    assert json.loads(codex_dump.read_text())["CODEX_HOME"] == str(tmp_path / "codex-home")

@@ -21,7 +21,7 @@ docker exec "$container" sh -c 'tr "\0" " " </proc/1/cmdline' | grep -q 'bridge/
 readable="$(docker exec "$container" sh -c '
   for p in /proc/[0-9]*; do
     [ "${p#/proc/}" = "$$" ] && continue
-    case "$(tr "\0" " " <"$p/cmdline" 2>/dev/null)" in
+    case "$(tr "\0" " " 2>/dev/null <"$p/cmdline")" in
       *pid1.py*|*uvicorn*) if cat "$p/environ" >/dev/null 2>&1; then echo "${p#/proc/}"; fi ;;
     esac
   done')"
@@ -61,6 +61,19 @@ mcp '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | grep -q '"llm
 # Codex 的模型列表来自真实的 app-server（不需要登录）
 mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"llm_models","arguments":{"platform":"codex","mode":"chat"}}}' \
   | grep -q '"default": *true' || fail "Codex 模型列表"
+# 官方程序的进程（这里是刚才列模型时起来的 codex app-server）环境里不能有管理令牌：
+# 它们跑的命令继承这份环境，同一个用户也读得到它们的 /proc/<pid>/environ（T-0293）。
+# docker exec 自己带着容器的环境变量，所以这里把它的 BRIDGE_ADMIN_TOKEN 置空，只找非空的
+docker exec "$container" sh -c 'grep -l "app-serve[r]" /proc/[0-9]*/cmdline' >/dev/null 2>&1 \
+  || fail "没找到 codex app-server，下一项查不到它"
+leaky="$(docker exec -e BRIDGE_ADMIN_TOKEN= "$container" sh -c '
+  for p in /proc/[0-9]*; do
+    [ "${p#/proc/}" = "$$" ] && continue
+    if tr "\0" "\n" 2>/dev/null <"$p/environ" | grep -q "^BRIDGE_ADMIN_TOKEN=."; then
+      echo "${p#/proc/}: $(tr "\0" " " 2>/dev/null <"$p/cmdline" | cut -c1-80)"
+    fi
+  done')"
+[ -z "$leaky" ] || fail "这些进程的环境变量里有管理令牌：$leaky"
 # 没登录时新建会话要被明确拒绝
 mcp '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"llm_session_create","arguments":{"platform":"claude","mode":"chat"}}}' \
   | grep -q 'NOT_LOGGED_IN' || fail "未登录时应返回 NOT_LOGGED_IN"

@@ -42,6 +42,7 @@ from bridge.drivers.base import (
     SessionSpec,
     TurnOutcome,
     positive_int,
+    program_env,
 )
 
 logger = logging.getLogger("bridge.codex")
@@ -155,7 +156,11 @@ class CodexDriver(Driver):
             if self._proc is not None and self._proc.returncode is None:
                 return
             self._home.mkdir(parents=True, exist_ok=True)
-            env = {**os.environ, "CODEX_HOME": str(self._home)}
+            # 只给白名单里的环境变量，不带管理器的 BRIDGE_*（管理令牌）：Codex 跑的命令继承
+            # app-server 的环境，它的 /proc/<pid>/environ 同一个用户也读得到（T-0293）
+            env = program_env(CODEX_HOME=str(self._home))
+            if os.environ.get("HOME"):
+                env["HOME"] = os.environ["HOME"]
             try:
                 self._proc = await asyncio.create_subprocess_exec(
                     self._binary,
