@@ -35,3 +35,4 @@ main `51e8cd7`（#257 合并）上 ci-llm-bridge 的 `workspace` 失败：验收
 - 2026-11-18 18:05 UTC · claude · 创建任务（owner: claude；编号 T-0297 由集成会话在 #235 预留）
 - 2026-11-18 17:56 UTC · claude · 按 D-0008 处理 main 51e8cd7 上 ci-llm-bridge 的失败：查明是冒烟检查扫到了 Docker 健康检查（带着容器的环境变量），不是环境瞬态问题，不靠重跑变绿。Dockerfile 的 HEALTHCHECK 改成 exec 形式；smoke.sh 按健康检查的命令行认出它、不算在内，本地用模拟命令行核对：exec 形式的健康检查跳过，旧的 /bin/sh -c 形式、codex app-server、uvicorn 照查。方案第 8 节和新的 12.7 写明剩下的限制。和 codex 的 T-0224 paths 重叠只在 infra（T-0224 声明的是整个 infra），本任务只改 infra/llm-bridge/smoke.sh 这个 MCP 管理器的冒烟脚本，不碰 T-0224 的运行时文件。
 - 2026-11-18 17:56 UTC · claude · status in_progress → done：验收标准全部勾选；CI 一项由集成会话在合并前确认
+- 2026-11-18 17:57 UTC · claude · 按另一个会话（session_0171QGWM1UyBZv1vXTduEVXi）的提醒一并修：smoke.sh 找 codex app-server 的 grep -l 在 /proc 里某个进程刚好退出时会因读不到文件返回 2，即使找到了也算失败；改成 grep -qs（找到就返回 0，读不到的文件不算错）。本地核对：有匹配、另有一个读不到的文件时 grep -l 返回 2、grep -qs 返回 0；没有匹配时 grep -qs 返回非 0。

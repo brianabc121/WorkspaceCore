@@ -64,7 +64,7 @@ mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"llm_models"
 # 官方程序的进程（这里是刚才列模型时起来的 codex app-server）环境里不能有管理令牌：
 # 它们跑的命令继承这份环境，同一个用户也读得到它们的 /proc/<pid>/environ（T-0293）。
 # docker exec 自己带着容器的环境变量，所以这里把它的 BRIDGE_ADMIN_TOKEN 置空，只找非空的
-docker exec "$container" sh -c 'grep -l "app-serve[r]" /proc/[0-9]*/cmdline' >/dev/null 2>&1 \
+docker exec "$container" sh -c 'grep -qs "app-serve[r]" /proc/[0-9]*/cmdline' \
   || fail "没找到 codex app-server，下一项查不到它"
 # Docker 的健康检查（Dockerfile 的 HEALTHCHECK，每 30 秒起一次、几十毫秒就结束）由 Docker 用容器的
 # 环境变量启动，带着管理令牌，这一点镜像里改不了；它不是官方程序，也不会把环境传给会话里的命令。
