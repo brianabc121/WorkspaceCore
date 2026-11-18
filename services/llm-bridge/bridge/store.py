@@ -258,9 +258,71 @@ class Store:
             """
         )
         self._migrate_memory()
+        self._migrate_longrun()
         self._migrate_platforms()
         self._db.execute(
             "UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(SCHEMA_VERSION),)
+        )
+
+    def _migrate_longrun(self) -> None:
+        """长时间任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.1）：后台作业、预约、循环。只加表。"""
+        self._db.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+                turn_id TEXT,
+                caller_id TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                by_label TEXT NOT NULL,
+                name TEXT NOT NULL,
+                command TEXT NOT NULL,
+                status TEXT NOT NULL,
+                follow_up INTEGER NOT NULL DEFAULT 1,
+                note TEXT NOT NULL DEFAULT '',
+                notify INTEGER NOT NULL DEFAULT 0,
+                timeout_seconds INTEGER NOT NULL,
+                pid INTEGER,
+                exit_code INTEGER,
+                log_bytes INTEGER NOT NULL DEFAULT 0,
+                last_output_at REAL,
+                created_at REAL NOT NULL,
+                started_at REAL,
+                finished_at REAL,
+                error TEXT,
+                stopped_by TEXT,
+                follow_turn_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS jobs_session ON jobs (session_id, created_at);
+            CREATE INDEX IF NOT EXISTS jobs_status ON jobs (status);
+            CREATE TABLE IF NOT EXISTS timers (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions (id) ON DELETE CASCADE,
+                turn_id TEXT,
+                caller_id TEXT NOT NULL,
+                origin TEXT NOT NULL,
+                by_label TEXT NOT NULL,
+                run_at REAL NOT NULL,
+                text TEXT NOT NULL,
+                status TEXT NOT NULL,
+                notify INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                fired_at REAL,
+                fired_turn_id TEXT,
+                reason TEXT
+            );
+            CREATE INDEX IF NOT EXISTS timers_due ON timers (status, run_at);
+            CREATE INDEX IF NOT EXISTS timers_session ON timers (session_id, created_at);
+            CREATE TABLE IF NOT EXISTS chains (
+                session_id TEXT PRIMARY KEY REFERENCES sessions (id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                rounds INTEGER NOT NULL DEFAULT 0,
+                failures INTEGER NOT NULL DEFAULT 0,
+                started_at REAL NOT NULL,
+                paused_reason TEXT,
+                updated_at REAL NOT NULL
+            );
+            """
         )
 
     def _migrate_platforms(self) -> None:
@@ -1005,6 +1067,123 @@ class Store:
             "GROUP BY s.platform"
         )
         return {row["platform"]: int(row["n"]) for row in rows}
+
+    # ---- 长时间任务：后台作业、预约、循环（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md）----
+    def create_job(self, **fields: Any) -> Row:
+        job_id = new_id("bj")
+        data = {"id": job_id, "created_at": time.time(), **fields}
+        columns, marks = ", ".join(data), ", ".join("?" for _ in data)
+        self._exec(f"INSERT INTO jobs ({columns}) VALUES ({marks})", tuple(data.values()))  # noqa: S608
+        job = self.get_job(job_id)
+        assert job is not None  # noqa: S101
+        return job
+
+    def get_job(self, job_id: str) -> Row | None:
+        return self._one("SELECT * FROM jobs WHERE id = ?", (job_id,))
+
+    def update_job(self, job_id: str, **fields: Any) -> None:
+        self._update("jobs", "id", job_id, fields)
+
+    def session_jobs(self, session_id: str, limit: int = 50) -> list[Row]:
+        """一个会话的作业：运行中的全部，加上最近结束的。"""
+        return self._all(
+            "SELECT * FROM jobs WHERE session_id = ? ORDER BY (status = 'running') DESC, "
+            "created_at DESC LIMIT ?",
+            (session_id, limit),
+        )
+
+    def jobs_with_status(self, status: str) -> list[Row]:
+        return self._all("SELECT * FROM jobs WHERE status = ? ORDER BY created_at", (status,))
+
+    def count_running_jobs(self, session_id: str | None = None) -> int:
+        sql = "SELECT COUNT(*) AS n FROM jobs WHERE status = 'running'"
+        params: tuple[str, ...] = ()
+        if session_id is not None:
+            sql, params = sql + " AND session_id = ?", (session_id,)
+        row = self._one(sql, params)
+        return int(row["n"]) if row else 0
+
+    def finished_jobs_before(self, before: float) -> list[Row]:
+        return self._all(
+            "SELECT * FROM jobs WHERE status != 'running' AND finished_at IS NOT NULL "
+            "AND finished_at < ?",
+            (before,),
+        )
+
+    def create_timer(self, **fields: Any) -> Row:
+        timer_id = new_id("bw")
+        data = {"id": timer_id, "created_at": time.time(), "status": "pending", **fields}
+        columns, marks = ", ".join(data), ", ".join("?" for _ in data)
+        self._exec(f"INSERT INTO timers ({columns}) VALUES ({marks})", tuple(data.values()))  # noqa: S608
+        timer = self.get_timer(timer_id)
+        assert timer is not None  # noqa: S101
+        return timer
+
+    def get_timer(self, timer_id: str) -> Row | None:
+        return self._one("SELECT * FROM timers WHERE id = ?", (timer_id,))
+
+    def update_timer(self, timer_id: str, **fields: Any) -> None:
+        self._update("timers", "id", timer_id, fields)
+
+    def session_timers(self, session_id: str, limit: int = 50) -> list[Row]:
+        return self._all(
+            "SELECT * FROM timers WHERE session_id = ? ORDER BY (status = 'pending') DESC, "
+            "CASE WHEN status = 'pending' THEN run_at ELSE -created_at END LIMIT ?",
+            (session_id, limit),
+        )
+
+    def count_pending_timers(self, session_id: str) -> int:
+        row = self._one(
+            "SELECT COUNT(*) AS n FROM timers WHERE session_id = ? AND status = 'pending'",
+            (session_id,),
+        )
+        return int(row["n"]) if row else 0
+
+    def due_timers(self, now: float) -> list[Row]:
+        return self._all(
+            "SELECT * FROM timers WHERE status = 'pending' AND run_at <= ? ORDER BY run_at",
+            (now,),
+        )
+
+    def next_timer_at(self) -> float | None:
+        row = self._one("SELECT MIN(run_at) AS at FROM timers WHERE status = 'pending'")
+        return float(row["at"]) if row and row["at"] is not None else None
+
+    def get_chain(self, session_id: str) -> Row | None:
+        return self._one("SELECT * FROM chains WHERE session_id = ?", (session_id,))
+
+    def save_chain(self, session_id: str, **fields: Any) -> Row:
+        now = time.time()
+        if self.get_chain(session_id) is None:
+            base = {"status": "active", "rounds": 0, "failures": 0, "started_at": now}
+            data = {"session_id": session_id, **base, **fields, "updated_at": now}
+            columns, marks = ", ".join(data), ", ".join("?" for _ in data)
+            self._exec(f"INSERT INTO chains ({columns}) VALUES ({marks})", tuple(data.values()))  # noqa: S608
+        else:
+            self._update("chains", "session_id", session_id, {**fields, "updated_at": now})
+        chain = self.get_chain(session_id)
+        assert chain is not None  # noqa: S101
+        return chain
+
+    def count_auto_turns_since(self, session_id: str, since: float) -> int:
+        """这个会话最近由作业结束、预约到点自动发起的回合数（循环护栏：每天上限）。"""
+        row = self._one(
+            "SELECT COUNT(*) AS n FROM turns WHERE session_id = ? AND caller_id = 'system' "
+            "AND queued_at >= ? AND request_id LIKE 'auto:%'",
+            (session_id, since),
+        )
+        return int(row["n"]) if row else 0
+
+    def queued_auto_turn(self, session_id: str) -> Row | None:
+        """这个会话里还在排队、由作业或预约自动发起的回合（新的通知合并进它，不另排）。"""
+        return self._one(
+            "SELECT * FROM turns WHERE session_id = ? AND status = 'queued' "
+            "AND caller_id = 'system' AND request_id LIKE 'auto:%' ORDER BY position LIMIT 1",
+            (session_id,),
+        )
+
+    def set_message_text(self, message_id: str, text: str) -> None:
+        self._exec("UPDATE messages SET text = ? WHERE id = ?", (text, message_id))
 
     # ---- messages（会话内容，T-0236 第二步）----
     def add_message(
