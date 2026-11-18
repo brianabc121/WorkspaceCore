@@ -66,9 +66,16 @@ mcp '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"llm_models"
 # docker exec 自己带着容器的环境变量，所以这里把它的 BRIDGE_ADMIN_TOKEN 置空，只找非空的
 docker exec "$container" sh -c 'grep -l "app-serve[r]" /proc/[0-9]*/cmdline' >/dev/null 2>&1 \
   || fail "没找到 codex app-server，下一项查不到它"
+# Docker 的健康检查（Dockerfile 的 HEALTHCHECK，每 30 秒起一次、几十毫秒就结束）由 Docker 用容器的
+# 环境变量启动，带着管理令牌，这一点镜像里改不了；它不是官方程序，也不会把环境传给会话里的命令。
+# 它属于方案第 8 节“作业和管理器是同一个用户”这条已知限制（12.7），这里按命令行认出它、不算在内。
+# 不跳过的话，这项检查碰巧赶上健康检查正在跑时就会失败（T-0297）
 leaky="$(docker exec -e BRIDGE_ADMIN_TOKEN= "$container" sh -c '
   for p in /proc/[0-9]*; do
     [ "${p#/proc/}" = "$$" ] && continue
+    case "$(tr "\0" " " 2>/dev/null <"$p/cmdline")" in
+      "python -I -c import urllib.request,sys; sys.exit(0 if urllib.request.urlopen("*"/healthz"*) continue ;;
+    esac
     if tr "\0" "\n" 2>/dev/null <"$p/environ" | grep -q "^BRIDGE_ADMIN_TOKEN=."; then
       echo "${p#/proc/}: $(tr "\0" " " 2>/dev/null <"$p/cmdline" | cut -c1-80)"
     fi

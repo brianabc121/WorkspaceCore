@@ -49,8 +49,10 @@ WORKDIR /app
 USER bridge
 VOLUME /data
 EXPOSE 8787
+# 健康检查用 exec 形式，不经过 /bin/sh：Docker 用容器的环境变量（含管理令牌）启动它，少一个带着
+# 令牌的进程；infra/llm-bridge/smoke.sh 按这条命令行认出它（T-0297，方案 12.7）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=3).status == 200 else 1)"
+    CMD ["python", "-I", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=3).status == 200 else 1)"]
 # 1 号进程是 bridge/pid1.py：回收孤儿进程（后台作业留下的不会变成僵尸），转发停止信号，
 # 不让同一个用户的进程读它的环境变量（里面有管理令牌）。不用 Docker 的 init: true，原因见 pid1.py
 CMD ["python", "-I", "/app/bridge/pid1.py", "uvicorn", "bridge.main:app", "--host", "0.0.0.0", "--port", "8787", "--no-access-log"]
