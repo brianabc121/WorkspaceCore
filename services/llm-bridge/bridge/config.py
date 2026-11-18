@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # 插入消息：等平台确认“收下了”最多多久，过了就降级成中断后合并重发
     steer_timeout_seconds: float = Field(default=10.0, ge=1, le=60)
     quota_fallback_seconds: float = Field(default=5 * 3600.0, ge=1, le=7 * 86400)
+    # 会话里的 llm-task 命令找管理器用的地址（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.5）：
+    # 写进回合令牌文件；容器里管理器监听 8787
+    session_api_url: str = "http://127.0.0.1:8787"
     rpc_timeout: float = 30.0
     clone_timeout: float = 300.0
 

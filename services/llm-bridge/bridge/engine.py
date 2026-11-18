@@ -27,7 +27,8 @@ from typing import Any
 
 from bridge import attachments as files
 from bridge import connectivity as net
-from bridge import quota, workfiles
+from bridge import quota, session_cli, workfiles
+from bridge.activity import LIVE_ONLY, TurnActivity
 from bridge.channels import SLOT_LABELS, Channel, canonical, find
 from bridge.config import Settings
 from bridge.drivers.base import (
@@ -38,6 +39,8 @@ from bridge.drivers.base import (
     Mode,
     SessionSpec,
 )
+from bridge.errors import BridgeError
+from bridge.longrun import LongRun
 from bridge.redact import mask_identity, redact
 from bridge.store import Row, Store, message_of, new_id, usage_credits, usage_tokens
 
@@ -84,6 +87,19 @@ DEFAULTS: dict[str, Any] = {
     # （并进纪要、另开会话时用）。
     # 三家的钩子都没在真实账号上验证过：默认关，在自己的服务器上验证后再打开（方案第 8 节）
     "hooks_enabled": False,
+    # 长时间任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.6，人类 2026-11-18 决定）：
+    # 后台作业只在“可以执行命令”档位的开发环境里开；同时运行的作业数默认不限（0 是不限）
+    "jobs_enabled": True,
+    "jobs_per_session": 0,
+    "jobs_total": 0,
+    "job_max_seconds": 24 * 3600,
+    "timers_per_session": 5,
+    "timer_max_days": 7,
+    # 由作业结束、预约到点连续自动接着做的回合（一条循环）：到了上限就暂停、等人决定
+    "chain_max_rounds": 20,
+    "chain_max_hours": 72,
+    "chain_max_failures": 3,
+    "auto_turns_per_day": 48,
 }
 # 固定带着的参考资料（6.3）：每个回合都算钱，上限比随消息带的更紧
 MAX_PINNED_CHARS = 4000
@@ -101,6 +117,15 @@ SETTING_LIMITS = {
     "autocompact_claude_percent": (0, 100),
     "autocompact_workbuddy_percent": (0, 100),
     "autocompact_codex_tokens": (0, 10_000_000),
+    "jobs_per_session": (0, 1000),
+    "jobs_total": (0, 1000),
+    "job_max_seconds": (60, 72 * 3600),
+    "timers_per_session": (1, 100),
+    "timer_max_days": (1, 30),
+    "chain_max_rounds": (1, 1000),
+    "chain_max_hours": (1, 720),
+    "chain_max_failures": (1, 100),
+    "auto_turns_per_day": (1, 10_000),
 }
 AUTOCOMPACT_SETTING = {
     "claude": "autocompact_claude_percent",
@@ -166,16 +191,6 @@ EXTERNAL_PLATFORM = {
     "workbuddy": "workbuddy",
     "fake": "fake",
 }
-
-
-class BridgeError(Exception):
-    """details：给调用方的补充（例如 retry_after_seconds），和 code、message 一起放在错误里。"""
-
-    def __init__(self, code: str, message: str, details: Row | None = None) -> None:
-        super().__init__(message)
-        self.code = code
-        self.message = message
-        self.details = details or {}
 
 
 def _challenge_row(challenge: LoginChallenge) -> Row:
@@ -289,6 +304,10 @@ class Engine:
         self._retainer: asyncio.Task[None] | None = None
         self._accounts: dict[str, tuple[float, Row]] = {}
         self._idle_seconds = 60.0
+        # 进行中的回合的动静（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.7）：只在内存里
+        self._activity: dict[str, TurnActivity] = {}
+        # 后台作业、预约、循环（LONGRUN 第 5 节）
+        self.longrun = LongRun(self)
 
     # ---- 设置 ----
     def setting(self, key: str) -> Any:
@@ -385,6 +404,7 @@ class Engine:
         for stale in self.store.stale_uploads(time.time() - files.STALE_UPLOAD_SECONDS):
             (self.attachment_root / stale["path"]).unlink(missing_ok=True)
             self.store.delete_attachment(stale["id"])
+        await self.longrun.startup()
         self._resumer = asyncio.create_task(self._resume_loop(), name="quota-resume")
         self._retainer = asyncio.create_task(self._retention_loop(), name="retention")
 
@@ -398,6 +418,7 @@ class Engine:
         for task in tasks:
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+        await self.longrun.shutdown()
         for driver in self.drivers.values():
             await driver.stop()
 
@@ -580,7 +601,15 @@ class Engine:
             autocompact=self._autocompact(session["slot"]),
             hooks=bool(self.setting("hooks_enabled")),
             pinned=str(options.get("pinned") or "") if session["mode"] == "chat" else "",
+            jobs=self.longrun.jobs_blocked(session) is None,
         )
+
+    def _turn_timeout(self, session: Row) -> int:
+        """单回合时限：开发环境单独设了就用环境的，否则用管理器的设置（5.7）。"""
+        env_id = session.get("environment_id")
+        env = self.store.get_environment(env_id) if env_id else None
+        own = ((env or {}).get("config") or {}).get("turn_timeout_seconds")
+        return int(own) if own else int(self.setting("turn_timeout_seconds"))
 
     def _autocompact(self, slot: str) -> int:
         key = AUTOCOMPACT_SETTING.get(slot)
@@ -758,6 +787,9 @@ class Engine:
                 effort=effort,
                 autocompact=self._autocompact(channel.slot),
                 pinned=str(options.get("pinned") or "") if channel.mode == "chat" else "",
+                jobs=channel.mode == "dev"
+                and options["sandbox"] == "exec"
+                and bool(self.setting("jobs_enabled")),
             )
             native = await self._driver(channel.slot).create(spec)
         except DriverError as error:
@@ -970,6 +1002,7 @@ class Engine:
         return view
 
     async def _archive(self, session: Row, *, remote: bool) -> None:
+        await self.longrun.archive(session)
         for turn in self.store.list_turns(
             session_id=session["id"], statuses=("queued", "running"), limit=1000
         ):
@@ -1090,6 +1123,7 @@ class Engine:
         if attached and asked is not None:
             self.store.bind_attachments([a["id"] for a in attached], turn["id"], asked["id"])
         self.store.add_event(session_id, turn["id"], "queued", {"by": caller.label})
+        self.longrun.reset_chain(session_id)  # 人或调用方发了消息：自动接着做从头算（LONGRUN 5.6）
         if merged and running is not None:
             # 降级：中断正在跑的回合（记成被打断，不是失败），新回合里带上“接着刚才的做”
             self._superseded[running["id"]] = turn["id"]
@@ -1120,6 +1154,25 @@ class Engine:
             self._workers[session_id] = asyncio.create_task(
                 self._work(session_id, queue), name=f"session-{session_id}"
             )
+
+    def turn_activity(self, turn_id: str) -> Row | None:
+        """进行中的回合的动静（5.7）；不在进行中为空。"""
+        activity = self._activity.get(turn_id)
+        return activity.view() if activity is not None else None
+
+    def enqueue(self, turn: Row) -> None:
+        """给长时间任务用：排一个已经建好的回合。"""
+        self._enqueue(turn)
+
+    def wake_scheduler(self) -> None:
+        """有新的预约：调度协程提前醒来重新算下一次什么时候醒。"""
+        self._resume_wake.set()
+
+    def cancel_queued(self, turn: Row, session: Row) -> None:
+        """取消一个还在排队的回合（停止自动接着做时用）。"""
+        if turn["status"] == "queued":
+            self.store.add_event(session["id"], turn["id"], "cancelled", {})
+            self._finish(turn["id"], status="cancelled")
 
     async def _work(self, session_id: str, queue: asyncio.Queue[str]) -> None:
         while True:
@@ -1152,7 +1205,23 @@ class Engine:
                 )
 
     def _finish(self, turn_id: str, **fields: Any) -> None:
+        activity = self._activity.pop(turn_id, None)
+        left = activity.unfinished() if activity is not None else []
+        if left:
+            # 官方程序报过的后台任务，回答结束时还没做完：程序退出时会停掉它们，写一句提醒
+            turn = self.store.get_turn(turn_id)
+            names = "、".join(
+                redact(str(t.get("description") or t["task_id"]))[:80] for t in left[:5]
+            )
+            if turn is not None:
+                text = (
+                    f"官方程序的后台任务在回答结束时还没做完：{names}。"
+                    "官方程序退出时会停掉它们；要等很久的事请用管理器的后台作业"
+                )
+                self.store.add_event(turn["session_id"], turn_id, "notice", {"text": text})
+                self.store.add_message(turn["session_id"], turn_id, "process", "notice", text)
         self.store.update_turn(turn_id, finished_at=time.time(), **fields)
+        self.longrun.after_turn(turn_id, fields.get("status"))
         self.store.drop_deltas(turn_id)
         self._cancel_requested.discard(turn_id)
         self._superseded.pop(turn_id, None)
@@ -1177,7 +1246,12 @@ class Engine:
                 return
             self.store.update_turn(turn_id, status="running", started_at=time.time())
             self.store.add_event(session["id"], turn_id, "started", {})
-            await self._run(turn, session)
+            # 回合令牌：会话里的 llm-task 命令只在这一回合里能用（LONGRUN 5.5）
+            token = self.longrun.open_token(session, turn_id)
+            try:
+                await self._run(turn, session)
+            finally:
+                self.longrun.close_token(token, session)
         finally:
             await limiter.release()
             self._harvest(session["id"])
@@ -1233,7 +1307,12 @@ class Engine:
                 self.store.add_event(session_id, turn_id, "delta", {"text": text_})
             flushed[0] = time.monotonic()
 
+        activity = self._activity.setdefault(turn_id, TurnActivity())
+
         async def sink(kind: str, payload: Row) -> None:
+            activity.note(kind, payload)
+            if kind in LIVE_ONLY:  # 只用于“正在做什么”，不写进会话记录
+                return
             if kind == "delta":
                 pending.append(str(payload.get("text") or ""))
                 size = sum(len(p) for p in pending)
@@ -1261,7 +1340,7 @@ class Engine:
 
         compact = turn.get("kind") == "compact"
         try:
-            async with asyncio.timeout(self.setting("turn_timeout_seconds")):
+            async with asyncio.timeout(self._turn_timeout(session)):
                 if compact:  # 手动压缩（4.2 第 2 个动作）
                     instructions = str(((first or {}).get("data") or {}).get("instructions") or "")
                     outcome = await driver.compact(spec, instructions, sink)
@@ -1443,6 +1522,10 @@ class Engine:
         """给工作台用：这些回合现在怎样了（不含内容）。回合结束时工作台据此叫醒发起的智能体。"""
         out: Row = {}
         for turn_id in turn_ids[:200]:
+            pseudo = self.longrun.watch_status(turn_id)  # 预约（bw_）、作业（bj_）：LONGRUN 5.8
+            if pseudo is not None:
+                out[turn_id] = pseudo
+                continue
             turn = self.store.get_turn(turn_id)
             if turn is None:
                 out[turn_id] = {"status": "missing"}
@@ -1547,6 +1630,9 @@ class Engine:
             if latest is not None:
                 last = latest["payload"] or {}
                 view["progress"] = str(last.get("text") or last.get("command") or "")[:300]
+            activity = self._activity.get(turn["id"])
+            if activity is not None:  # 正在做什么、多久没动静了（5.7）
+                view["activity"] = activity.view()
         elif turn["status"] == "completed":
             view["result"] = turn["result_text"] or ""
             view["summary"] = turn["summary"] or {}
@@ -1790,6 +1876,132 @@ class Engine:
         download: workfiles.Download = self._in_workdir(session_id, workfiles.download, path)
         return download
 
+    # ---- 长时间任务：后台作业、预约、自动接着做（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md）----
+    def _task_row(self, kind: str, task_id: str) -> Row:
+        row = self.store.get_job(task_id) if kind == "job" else self.store.get_timer(task_id)
+        if row is None:
+            raise BridgeError("NOT_FOUND", "没有这个作业" if kind == "job" else "没有这个预约")
+        return row
+
+    def _caller_task(self, caller: Caller, kind: str, task_id: str) -> tuple[Row, Row]:
+        row = self._task_row(kind, task_id)
+        try:
+            session = self._session(caller, row["session_id"])
+        except BridgeError:  # 不是你的会话：和“不存在”一样回答
+            raise BridgeError(
+                "NOT_FOUND", "没有这个作业" if kind == "job" else "没有这个预约"
+            ) from None
+        return row, session
+
+    async def caller_longrun(self, caller: Caller, name: str, args: Row) -> Row:
+        """调用方（外层智能体经工作台）的后台作业、预约、自动接着做工具。"""
+        lr = self.longrun
+        if name == "llm_tasks":
+            return lr.tasks(self._session(caller, args["session_id"]))
+        if name == "llm_job_log":
+            job, _ = self._caller_task(caller, "job", args["job_id"])
+            return lr.job_log(job, args["max_bytes"])
+        self._need(caller, "write")
+        if name == "llm_job_start":
+            session = self._session(caller, args["session_id"])
+            job = await lr.start_job(
+                session,
+                origin="caller",
+                caller_id=caller.id,
+                by=caller.label,
+                command=args["command"],
+                name=args["name"],
+                timeout_seconds=args["timeout_seconds"],
+                follow_up=args["follow_up"],
+                note=args["note"],
+            )
+            return {"job": job}
+        if name == "llm_job_stop":
+            job, _ = self._caller_task(caller, "job", args["job_id"])
+            return {"job": await lr.stop_job(job, caller.label)}
+        if name == "llm_timer_create":
+            session = self._session(caller, args["session_id"])
+            timer = lr.create_timer(
+                session,
+                origin="caller",
+                caller_id=caller.id,
+                by=caller.label,
+                text=args["text"],
+                at=args["at"],
+                after_seconds=args["after_seconds"],
+            )
+            return {"timer": timer}
+        if name == "llm_timer_cancel":
+            timer, _ = self._caller_task(caller, "timer", args["timer_id"])
+            return {"timer": lr.cancel_timer(timer, caller.label)}
+        if name == "llm_chain_control":
+            session = self._session(caller, args["session_id"])
+            return {"chain": lr.chain_control(session, args["action"], caller.label)}
+        raise BridgeError("NOT_FOUND", f"没有这个工具：{name}")
+
+    def admin_tasks(self, session_id: str) -> Row:
+        return self.longrun.tasks(self._required_session(session_id))
+
+    async def admin_start_job(self, session_id: str, body: Row, by: str) -> Row:
+        session = self._required_session(session_id)
+        job = await self.longrun.start_job(
+            session,
+            origin="admin",
+            caller_id="admin",
+            by=by,
+            command=str(body.get("command") or ""),
+            name=str(body.get("name") or ""),
+            timeout_seconds=body.get("timeout_seconds"),
+            follow_up=bool(body.get("follow_up", True)),
+            note=str(body.get("note") or ""),
+        )
+        return {"job": job}
+
+    async def admin_stop_job(self, job_id: str, by: str, tell_session: bool) -> Row:
+        job = self._task_row("job", job_id)
+        return {"job": await self.longrun.stop_job(job, by, tell_session=tell_session)}
+
+    def admin_job_log(self, job_id: str, max_bytes: int) -> Row:
+        return self.longrun.job_log(self._task_row("job", job_id), max_bytes)
+
+    def admin_create_timer(self, session_id: str, body: Row, by: str) -> Row:
+        session = self._required_session(session_id)
+        timer = self.longrun.create_timer(
+            session,
+            origin="admin",
+            caller_id="admin",
+            by=by,
+            text=str(body.get("text") or ""),
+            at=body.get("at"),
+            after_seconds=body.get("after_seconds"),
+        )
+        return {"timer": timer}
+
+    def admin_cancel_timer(self, timer_id: str, by: str) -> Row:
+        return {"timer": self.longrun.cancel_timer(self._task_row("timer", timer_id), by)}
+
+    def admin_chain(self, session_id: str, action: str, by: str) -> Row:
+        session = self._required_session(session_id)
+        return {"chain": self.longrun.chain_control(session, action, by)}
+
+    def session_api_owner(self, token: str) -> tuple[Row, str]:
+        """会话里的 llm-task：回合令牌 → (会话, 回合)；令牌无效或回合已结束时报 UNAUTHORIZED。"""
+        owner = self.longrun.token_owner(token) if token else None
+        session = self.store.get_session(owner[0]) if owner else None
+        if owner is None or session is None:
+            raise BridgeError(
+                "UNAUTHORIZED", "回合令牌无效或这一回合已经结束：llm-task 只能在回合进行中用"
+            )
+        if not self.longrun.allow_session_call(token):
+            raise BridgeError("RATE_LIMITED", "llm-task 调用太频繁，稍后再试")
+        return session, owner[1]
+
+    def session_task(self, session: Row, kind: str, task_id: str) -> Row:
+        row = self._task_row(kind, task_id)
+        if row["session_id"] != session["id"]:
+            raise BridgeError("NOT_FOUND", "没有这个作业" if kind == "job" else "没有这个预约")
+        return row
+
     # ---- 连不连得上各平台（T-0240）----
     async def connectivity(self, refresh: bool = False) -> Row:
         """管理器所在的服务器到各平台的连通性和延迟；一分钟内的结果直接复用，refresh 时重新测。"""
@@ -1918,6 +2130,8 @@ class Engine:
                 return
             if real.is_relative_to(self.attachment_root.resolve()):
                 return  # 附件目录里的不再收一遍
+            if not image and real.is_relative_to(root.resolve() / session_cli.SESSION_DIR):
+                return  # 回合令牌所在的文件夹不收（T-0292 审查）
             if real.stat().st_size > files.MAX_BYTES:
                 return
             data = real.read_bytes()
@@ -2023,6 +2237,7 @@ class Engine:
         while True:
             try:
                 self.purge_expired()
+                self.longrun.purge_logs()
             except Exception:
                 logger.exception("按保留期清理对话内容失败")
             await asyncio.sleep(RETENTION_CHECK_SECONDS)
@@ -2293,7 +2508,11 @@ class Engine:
                 for platform, pause in self.store.pauses().items():
                     if pause["until"] <= now:
                         await self._resume_platform(platform)
+                self.longrun.fire_due()  # 到点的预约（LONGRUN 5.2）
                 waits = [p["until"] - time.time() for p in self.store.pauses().values()]
+                due = self.longrun.next_due()
+                if due is not None:
+                    waits.append(due - time.time())
                 timeout = min(60.0, max(0.05, min(waits))) if waits else 60.0
             except asyncio.CancelledError:
                 raise
@@ -3055,6 +3274,7 @@ def env_view(env: Row) -> Row:
         "sandbox": config.get("sandbox", "read_only"),
         "network": bool(config.get("network", False)),
         "description": config.get("description", ""),
+        "turn_timeout_seconds": config.get("turn_timeout_seconds"),
     }
 
 

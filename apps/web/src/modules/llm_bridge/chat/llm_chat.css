@@ -419,6 +419,44 @@
 .lc-queue-meta { margin: 4px 0 0; font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
 .lc-queue-edit { display: grid; gap: 6px; grid-template-columns: 1fr auto auto; align-items: end; }
 .lc-queue-edit textarea { grid-column: 1 / -1; width: 100%; resize: vertical; }
+/* 后台任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.9）：在消息队列上面，样子参考 Claude App 的后台任务 */
+.lc-tasks { border-top: 1px solid var(--line); padding: 8px 16px; background: var(--surface-soft, transparent); max-height: 45vh; overflow-y: auto; }
+.lc-tasks-head { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; padding: 0; font: inherit; font-size: 13px; color: var(--text); cursor: pointer; text-align: left; min-width: 0; }
+.lc-tasks-head svg { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.lc-tasks-sum { color: var(--muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-tasks-sum.is-red { color: var(--danger); }
+.lc-tasks-caret { margin-left: auto; transition: transform .15s; }
+.lc-tasks-head[aria-expanded="true"] .lc-tasks-caret { transform: rotate(180deg); }
+.lc-tasks-body { display: grid; gap: 8px; margin-top: 8px; }
+.lc-tasks-title { margin: 4px 0 0; font-size: 12px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.lc-task-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lc-task { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 4px 10px; align-items: center; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; background: var(--surface); min-width: 0; }
+.lc-task-icon { width: 16px; height: 16px; color: var(--muted); }
+.lc-task-main { display: grid; gap: 2px; min-width: 0; }
+.lc-task-main b { font-size: 13px; overflow-wrap: anywhere; }
+.lc-task-text { font-size: 12px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.lc-task-state[data-tone="ok"] { color: var(--success); }
+.lc-task-state[data-tone="bad"] { color: var(--danger); }
+.lc-task-log { grid-column: 1 / -1; margin: 4px 0 0; max-height: 240px; overflow: auto; font-size: 12px; background: var(--surface-2); border-radius: 8px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lc-activity { border: 1px solid var(--accent-soft); border-radius: 10px; padding: 8px 10px; background: var(--surface); display: grid; gap: 4px; min-width: 0; }
+.lc-activity-line { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13px; min-width: 0; }
+.lc-activity-cmd { font-size: 12px; background: var(--surface-2); border-radius: 6px; padding: 1px 6px; overflow-wrap: anywhere; min-width: 0; }
+.lc-activity-tail pre { margin: 4px 0 0; max-height: 200px; overflow: auto; font-size: 12px; background: var(--surface-2); border-radius: 8px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lc-activity-tail summary, .lc-tasks-done summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+.lc-activity-bg { list-style: none; margin: 0; padding: 0; font-size: 12px; display: grid; gap: 2px; }
+.lc-activity-bg .lc-sub { margin-left: 6px; }
+.lc-dot.is-live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--success); animation: lc-pulse 1.6s ease-in-out infinite; }
+@keyframes lc-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .lc-dot.is-live { animation: none; } }
+.lc-chain { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.lc-plan { display: grid; gap: 6px; }
+.lc-plan textarea { width: 100%; resize: vertical; }
+.lc-plan-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.lc-plan-open { justify-self: start; display: inline-flex; align-items: center; gap: 6px; }
+.lc-plan-open svg { width: 14px; height: 14px; }
+.lc-tasks-hint { margin: 0; }
+@media (max-width: 640px) { .lc-tasks { max-height: 32vh; padding: 6px 12px; } }
+
 
 /* 额度用完被打断的回合（T-0237） */
 .lc-interrupted { display: grid; gap: 6px; max-width: min(100%, 720px); padding: 8px 12px; border-radius: 10px; background: color-mix(in srgb, var(--warning) 10%, var(--surface)); font-size: .84rem; overflow-wrap: anywhere; }

@@ -3590,6 +3590,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/jobs/{job_id}/log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 后台作业日志的末尾（admin；已脱敏） */
+        get: operations["llm_bridge_job_log"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/jobs/{job_id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 停掉后台作业（admin；记审计） */
+        post: operations["llm_bridge_job_stop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/quota": {
         parameters: {
             query?: never;
@@ -3670,6 +3704,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/chain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 恢复或停止一个会话的“自动接着做”（admin；记审计） */
+        post: operations["llm_bridge_chain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files": {
         parameters: {
             query?: never;
@@ -3724,6 +3775,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 给开发会话开后台作业（admin；只在“可以执行命令”档位的环境；记审计） */
+        post: operations["llm_bridge_job_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 一个会话的后台任务（admin）：作业、预约、自动接着做、正在跑的回合在做什么 */
+        get: operations["llm_bridge_session_tasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/timers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 预约：到点给会话发一条消息（admin；记审计） */
+        post: operations["llm_bridge_timer_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/turns": {
         parameters: {
             query?: never;
@@ -3772,6 +3874,23 @@ export interface paths {
         get: operations["llm_bridge_bridge_status"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_bridge/bridges/{bridge_id}/timers/{timer_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 取消一个还没发出的预约（admin；记审计） */
+        post: operations["llm_bridge_timer_cancel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11830,6 +11949,120 @@ export interface components {
             /** State */
             state: string;
         };
+        /**
+         * LlmBridgeActivityOut
+         * @description 进行中的回合在做什么（LLM_BRIDGE_LONGRUN_PLAN.md 5.7）。
+         */
+        LlmBridgeActivityOut: {
+            /**
+             * Background
+             * @description 官方程序报的后台任务
+             * @default []
+             */
+            background: components["schemas"]["LlmBridgeBackgroundTaskOut"][];
+            current?: components["schemas"]["LlmBridgeActivityStepOut"] | null;
+            /** Last Event At */
+            last_event_at: number;
+            /**
+             * Output Tail
+             * @description 命令输出的末尾（已脱敏）
+             */
+            output_tail?: string | null;
+            /**
+             * Quiet Seconds
+             * @description 多久没有动静了
+             */
+            quiet_seconds: number;
+        };
+        /** LlmBridgeActivityStepOut */
+        LlmBridgeActivityStepOut: {
+            /**
+             * Kind
+             * @description command（命令）/ tool（工具调用）
+             */
+            kind: string;
+            /**
+             * Seconds
+             * @description 已经跑了多少秒
+             */
+            seconds: number;
+            /** Started At */
+            started_at: number;
+            /** Text */
+            text: string;
+        };
+        /** LlmBridgeBackgroundTaskOut */
+        LlmBridgeBackgroundTaskOut: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Started At */
+            started_at: number;
+            /** Status */
+            status: string;
+            /**
+             * Summary
+             * @default
+             */
+            summary: string;
+            /** Task Id */
+            task_id: string;
+        };
+        /** LlmBridgeChainIn */
+        LlmBridgeChainIn: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "resume" | "stop";
+        };
+        /** LlmBridgeChainLimitsOut */
+        LlmBridgeChainLimitsOut: {
+            /** Failures */
+            failures: number;
+            /** Hours */
+            hours: number;
+            /** Per Day */
+            per_day: number;
+            /** Rounds */
+            rounds: number;
+        };
+        /** LlmBridgeChainOut */
+        LlmBridgeChainOut: {
+            /**
+             * Auto Turns Today
+             * @default 0
+             */
+            auto_turns_today: number;
+            /**
+             * Failures
+             * @description 自动回合连续失败了几次
+             */
+            failures: number;
+            limits: components["schemas"]["LlmBridgeChainLimitsOut"];
+            /** Paused Reason */
+            paused_reason?: string | null;
+            /**
+             * Rounds
+             * @description 这条循环已经自动接着做了几轮
+             */
+            rounds: number;
+            /** Started At */
+            started_at?: number | null;
+            /**
+             * Status
+             * @description active（进行中）/ paused（已暂停，等人决定）
+             */
+            status: string;
+            /** Status Label */
+            status_label: string;
+        };
+        /** LlmBridgeChainResult */
+        LlmBridgeChainResult: {
+            chain: components["schemas"]["LlmBridgeChainOut"];
+        };
         /** LlmBridgeChannelOut */
         LlmBridgeChannelOut: {
             /** Available */
@@ -12343,6 +12576,11 @@ export interface components {
              * @enum {string}
              */
             sandbox: "read_only" | "workspace_write" | "exec";
+            /**
+             * Turn Timeout Seconds
+             * @description 这个环境的单回合时限（秒）；不填用管理器的设置（LLM_BRIDGE_LONGRUN_PLAN.md 5.7）
+             */
+            turn_timeout_seconds?: number | null;
         };
         /** LlmBridgeEnvironmentList */
         LlmBridgeEnvironmentList: {
@@ -12371,6 +12609,8 @@ export interface components {
             repo_url: string | null;
             /** Sandbox */
             sandbox: string;
+            /** Turn Timeout Seconds */
+            turn_timeout_seconds?: number | null;
         };
         /** LlmBridgeFileEntryOut */
         LlmBridgeFileEntryOut: {
@@ -12696,6 +12936,131 @@ export interface components {
              * @enum {string}
              */
             target_kind: "agent_server" | "runner_host";
+        };
+        /** LlmBridgeJobIn */
+        LlmBridgeJobIn: {
+            /** Command */
+            command: string;
+            /**
+             * Follow Up
+             * @default true
+             */
+            follow_up: boolean;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /** Timeout Seconds */
+            timeout_seconds?: number | null;
+        };
+        /** LlmBridgeJobLogOut */
+        LlmBridgeJobLogOut: {
+            /** Job Id */
+            job_id: string;
+            /** Status */
+            status: string;
+            /**
+             * Text
+             * @description 日志的末尾（已脱敏）
+             */
+            text: string;
+            /** Total Bytes */
+            total_bytes: number;
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** LlmBridgeJobOut */
+        LlmBridgeJobOut: {
+            /** By */
+            by: string;
+            /**
+             * Command
+             * @description 已脱敏
+             */
+            command: string;
+            /** Created At */
+            created_at: number;
+            /** Error */
+            error?: string | null;
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Finished At */
+            finished_at?: number | null;
+            /**
+             * Follow Turn Id
+             * @description 结束后自动发起的那一回合
+             */
+            follow_turn_id?: string | null;
+            /**
+             * Follow Up
+             * @description 结束后自动给会话发消息、让模型接着做
+             */
+            follow_up: boolean;
+            /** Id */
+            id: string;
+            /** Last Output At */
+            last_output_at?: number | null;
+            /**
+             * Log Bytes
+             * @default 0
+             */
+            log_bytes: number;
+            /** Name */
+            name: string;
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Origin
+             * @description caller（智能体）/ session（会话里的模型）/ admin（人）
+             */
+            origin: string;
+            /**
+             * Quiet Seconds
+             * @description 运行中：多久没有输出了
+             */
+            quiet_seconds?: number | null;
+            /**
+             * Seconds
+             * @description 已经跑了 / 一共跑了多少秒
+             */
+            seconds?: number | null;
+            /** Session Id */
+            session_id: string;
+            /** Started At */
+            started_at?: number | null;
+            /**
+             * Status
+             * @description running / succeeded / failed / timeout / stopped / lost
+             */
+            status: string;
+            /** Status Label */
+            status_label: string;
+            /** Stopped By */
+            stopped_by?: string | null;
+            /** Timeout Seconds */
+            timeout_seconds: number;
+        };
+        /** LlmBridgeJobResult */
+        LlmBridgeJobResult: {
+            job: components["schemas"]["LlmBridgeJobOut"];
+        };
+        /** LlmBridgeJobStopIn */
+        LlmBridgeJobStopIn: {
+            /**
+             * Tell Session
+             * @description 停掉后也告诉会话、让模型接着做
+             * @default false
+             */
+            tell_session: boolean;
         };
         /** LlmBridgeList */
         LlmBridgeList: {
@@ -13135,6 +13500,11 @@ export interface components {
              */
             auto_resume_max: number;
             /**
+             * Auto Turns Per Day
+             * @description 每个会话 24 小时内最多自动发起几个回合
+             */
+            auto_turns_per_day?: number | null;
+            /**
              * Autocompact Claude Percent
              * @description Claude 的上下文用到百分之多少时自动压缩（LLM_BRIDGE_MEMORY_PLAN.md 4.2）；0 是用平台自己的（默认）。旧版本的管理器没有这一项（为空）
              */
@@ -13149,6 +13519,21 @@ export interface components {
              * @description CodeBuddy 的上下文用到百分之多少时自动压缩；0 是用平台自己的
              */
             autocompact_workbuddy_percent?: number | null;
+            /**
+             * Chain Max Failures
+             * @description 自动回合连续失败几次就暂停
+             */
+            chain_max_failures?: number | null;
+            /**
+             * Chain Max Hours
+             * @description 一条循环最长多少小时
+             */
+            chain_max_hours?: number | null;
+            /**
+             * Chain Max Rounds
+             * @description 一条循环最多自动接着做几轮
+             */
+            chain_max_rounds?: number | null;
             /**
              * Claude Subscription Ack
              * @description 已确认了解 Claude 订阅登录的合规风险
@@ -13176,6 +13561,26 @@ export interface components {
              * @description 压缩钩子（4.3）：压缩前告诉平台要保留什么、压缩后把平台写的摘要留下来（并进会话纪要、另开会话时直接用）。只对 Claude、CodeBuddy；没在真实账号上验证过，默认关。旧版本的管理器没有这一项（为空）
              */
             hooks_enabled?: boolean | null;
+            /**
+             * Job Max Seconds
+             * @description 单个作业最长多少秒
+             */
+            job_max_seconds?: number | null;
+            /**
+             * Jobs Enabled
+             * @description 允许后台作业（只在“可以执行命令”档位的开发环境里开）
+             */
+            jobs_enabled?: boolean | null;
+            /**
+             * Jobs Per Session
+             * @description 每个会话同时运行的作业数上限；0 是不限（默认）
+             */
+            jobs_per_session?: number | null;
+            /**
+             * Jobs Total
+             * @description 整个管理器同时运行的作业数上限；0 是不限（默认）
+             */
+            jobs_total?: number | null;
             /** Max Text Chars */
             max_text_chars: number;
             /**
@@ -13211,6 +13616,16 @@ export interface components {
              * @description 每个实例每小时的发送次数
              */
             send_per_hour: number;
+            /**
+             * Timer Max Days
+             * @description 预约最远几天之后
+             */
+            timer_max_days?: number | null;
+            /**
+             * Timers Per Session
+             * @description 每个会话待发出的预约数上限
+             */
+            timers_per_session?: number | null;
             /** Turn Timeout Seconds */
             turn_timeout_seconds: number;
         };
@@ -13220,12 +13635,20 @@ export interface components {
             auto_resume?: boolean | null;
             /** Auto Resume Max */
             auto_resume_max?: number | null;
+            /** Auto Turns Per Day */
+            auto_turns_per_day?: number | null;
             /** Autocompact Claude Percent */
             autocompact_claude_percent?: number | null;
             /** Autocompact Codex Tokens */
             autocompact_codex_tokens?: number | null;
             /** Autocompact Workbuddy Percent */
             autocompact_workbuddy_percent?: number | null;
+            /** Chain Max Failures */
+            chain_max_failures?: number | null;
+            /** Chain Max Hours */
+            chain_max_hours?: number | null;
+            /** Chain Max Rounds */
+            chain_max_rounds?: number | null;
             /** Claude Subscription Ack */
             claude_subscription_ack?: boolean | null;
             /** Concurrency */
@@ -13236,6 +13659,14 @@ export interface components {
             digest_follow_retention?: boolean | null;
             /** Hooks Enabled */
             hooks_enabled?: boolean | null;
+            /** Job Max Seconds */
+            job_max_seconds?: number | null;
+            /** Jobs Enabled */
+            jobs_enabled?: boolean | null;
+            /** Jobs Per Session */
+            jobs_per_session?: number | null;
+            /** Jobs Total */
+            jobs_total?: number | null;
             /** Max Text Chars */
             max_text_chars?: number | null;
             /** Min Start Interval Seconds */
@@ -13251,6 +13682,10 @@ export interface components {
             retention_days?: number | null;
             /** Send Per Hour */
             send_per_hour?: number | null;
+            /** Timer Max Days */
+            timer_max_days?: number | null;
+            /** Timers Per Session */
+            timers_per_session?: number | null;
             /** Turn Timeout Seconds */
             turn_timeout_seconds?: number | null;
         };
@@ -13312,6 +13747,83 @@ export interface components {
              * @default
              */
             version: string;
+        };
+        /** LlmBridgeTasksOut */
+        LlmBridgeTasksOut: {
+            activity?: components["schemas"]["LlmBridgeActivityOut"] | null;
+            chain: components["schemas"]["LlmBridgeChainOut"];
+            /** Jobs */
+            jobs: components["schemas"]["LlmBridgeJobOut"][];
+            /**
+             * Jobs Allowed
+             * @description 这个会话能不能开后台作业
+             */
+            jobs_allowed: boolean;
+            /**
+             * Jobs Blocked
+             * @description 不能开的原因
+             */
+            jobs_blocked?: string | null;
+            /** Running Turn Id */
+            running_turn_id?: string | null;
+            /** Session Id */
+            session_id: string;
+            /** Timers */
+            timers: components["schemas"]["LlmBridgeTimerOut"][];
+        };
+        /** LlmBridgeTimerIn */
+        LlmBridgeTimerIn: {
+            /**
+             * After Seconds
+             * @description 多少秒后发
+             */
+            after_seconds?: number | null;
+            /**
+             * At
+             * @description 什么时候发（Unix 时间戳，秒）
+             */
+            at?: number | null;
+            /** Text */
+            text: string;
+        };
+        /** LlmBridgeTimerOut */
+        LlmBridgeTimerOut: {
+            /** By */
+            by: string;
+            /** Created At */
+            created_at: number;
+            /** Fired At */
+            fired_at?: number | null;
+            /** Fired Turn Id */
+            fired_turn_id?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * In Seconds
+             * @description 还有多少秒发出（待发出时）
+             */
+            in_seconds?: number | null;
+            /** Origin */
+            origin: string;
+            /** Reason */
+            reason?: string | null;
+            /** Run At */
+            run_at: number;
+            /** Session Id */
+            session_id: string;
+            /**
+             * Status
+             * @description pending / fired / cancelled / skipped
+             */
+            status: string;
+            /** Status Label */
+            status_label: string;
+            /** Text */
+            text: string;
+        };
+        /** LlmBridgeTimerResult */
+        LlmBridgeTimerResult: {
+            timer: components["schemas"]["LlmBridgeTimerOut"];
         };
         /** LlmBridgeTurnList */
         LlmBridgeTurnList: {
@@ -38157,6 +38669,165 @@ export interface operations {
             };
         };
     };
+    llm_bridge_job_log: {
+        parameters: {
+            query?: {
+                max_bytes?: number;
+            };
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeJobLogOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_job_stop: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeJobStopIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeJobResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_bridge_bridge_quota: {
         parameters: {
             query?: {
@@ -38474,6 +39145,83 @@ export interface operations {
             };
         };
     };
+    llm_bridge_chain: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeChainIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeChainResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_bridge_session_files: {
         parameters: {
             query?: {
@@ -38696,6 +39444,267 @@ export interface operations {
             };
         };
     };
+    llm_bridge_job_start: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeJobIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeJobResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_session_tasks: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeTasksOut"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_timer_create: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LlmBridgeTimerIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeTimerResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 请求过于频繁（RATE_LIMITED，带 Retry-After 响应头） */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     llm_bridge_list_turns: {
         parameters: {
             query?: never;
@@ -38895,6 +39904,88 @@ export interface operations {
             };
             /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED） */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    llm_bridge_timer_cancel: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 当前工作空间；不是成员时返回 404 */
+                "X-Workspace-Id": string;
+                /** @description 改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED */
+                "X-CSRF-Token"?: string | null;
+            };
+            path: {
+                bridge_id: string;
+                timer_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmBridgeTimerResult"];
+                };
+            };
+            /** @description 未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS） */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID） */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在，或不属于你可访问的工作空间（NOT_FOUND） */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED） */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

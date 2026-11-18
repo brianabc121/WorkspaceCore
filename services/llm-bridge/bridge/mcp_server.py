@@ -19,8 +19,9 @@ from pydantic import ValidationError
 from starlette.requests import Request
 
 from bridge import __version__
-from bridge.engine import BridgeError, Caller, Engine
-from bridge.tools import TOOL_MAP, TOOLS, ToolDef
+from bridge.engine import Caller, Engine
+from bridge.errors import BridgeError
+from bridge.tools import LONGRUN_TOOLS, TOOL_MAP, TOOLS, ToolDef
 
 SERVER_NAME = "llm-bridge"
 CALLER_STATE_KEY = "bridge_caller"
@@ -47,7 +48,7 @@ def tool_definition(tool: ToolDef) -> types.Tool:
         input_schema=tool.input_model.model_json_schema(),
         annotations=types.ToolAnnotations(
             read_only_hint=tool.read_only,
-            destructive_hint=tool.name == "llm_session_archive",
+            destructive_hint=tool.name in ("llm_session_archive", "llm_job_stop"),
             idempotent_hint=tool.read_only
             or tool.name in ("llm_send", "llm_session_compact", "llm_session_continue"),
             open_world_hint=not tool.read_only,
@@ -131,6 +132,8 @@ async def run_tool(
         )
     if name == "llm_session_continue":
         return await engine.continue_with_summary(caller, args["session_id"], args["request_id"])
+    if name in LONGRUN_TOOLS:  # 后台作业、预约、自动接着做（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md）
+        return await engine.caller_longrun(caller, name, args)
     return await engine.archive_session(caller, args["session_id"])
 
 

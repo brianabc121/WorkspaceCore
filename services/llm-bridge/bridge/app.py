@@ -35,7 +35,8 @@ from bridge.drivers.base import Driver
 from bridge.drivers.cli_stream import CliStreamDriver, claude_profile, codebuddy_profile
 from bridge.drivers.codex import CodexDriver
 from bridge.drivers.fake import FakeDriver
-from bridge.engine import BridgeError, Caller, Engine, env_view, preview
+from bridge.engine import Caller, Engine, env_view, preview
+from bridge.errors import BridgeError
 from bridge.mcp_server import CALLER_STATE_KEY, McpRunner
 from bridge.store import Store
 
@@ -44,6 +45,7 @@ logger = logging.getLogger("bridge")
 SCOPES = ("write", "account", "takeover")
 _CALLER_ID_RE = re.compile(r"^[\w.\-:]{1,100}$")
 _STATUS = {
+    "UNAUTHORIZED": 401,
     "FORBIDDEN": 403,
     "NOT_FOUND": 404,
     "VALIDATION_FAILED": 422,
@@ -190,6 +192,38 @@ class EnvironmentBody(_Body):
     network: bool = False
     description: str = Field(default="", max_length=300)
     enabled: bool = True
+    # 这个环境的单回合时限（秒）；不填用管理器的设置（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.7）
+    turn_timeout_seconds: int | None = Field(default=None, ge=30, le=6 * 3600)
+
+
+class JobBody(_Body):
+    """开后台作业（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.3）。"""
+
+    command: str = Field(min_length=1, max_length=4000)
+    name: str = Field(default="", max_length=60)
+    timeout_seconds: int | None = Field(default=None, ge=10)
+    follow_up: bool = True
+    note: str = Field(default="", max_length=1000)
+    by: str | None = Field(default=None, max_length=120, description="谁开的（页面上的人）")
+
+
+class TimerBody(_Body):
+    """预约：到点给会话发一条消息（5.4）。at 和 after_seconds 给一个。"""
+
+    text: str = Field(min_length=1, max_length=4000)
+    at: float | None = None
+    after_seconds: float | None = Field(default=None, ge=60)
+    by: str | None = Field(default=None, max_length=120)
+
+
+class ByBody(_Body):
+    by: str | None = Field(default=None, max_length=120)
+    tell_session: bool = False
+
+
+class ChainBody(_Body):
+    action: Literal["resume", "stop"]
+    by: str | None = Field(default=None, max_length=120)
 
 
 class SessionPatchBody(_Body):
@@ -233,6 +267,7 @@ def _env_config(body: EnvironmentBody) -> dict[str, Any]:
         "sandbox": body.sandbox,
         "network": body.network,
         "description": body.description,
+        "turn_timeout_seconds": body.turn_timeout_seconds,
     }
 
 
@@ -581,6 +616,141 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "Cache-Control": "private, no-store",
             },
         )
+
+    # 长时间任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 第 6 节）：页面的“后台任务”面板用
+    @app.get("/admin/sessions/{session_id}/tasks")
+    async def admin_session_tasks(request: Request, session_id: str, _: Admin) -> dict[str, Any]:
+        return engine_of(request).admin_tasks(session_id)
+
+    @app.post("/admin/sessions/{session_id}/jobs")
+    async def admin_job_start(
+        request: Request, session_id: str, body: JobBody, _: Admin
+    ) -> dict[str, Any]:
+        return await engine_of(request).admin_start_job(
+            session_id, body.model_dump(), body.by or "管理员"
+        )
+
+    @app.post("/admin/jobs/{job_id}/stop")
+    async def admin_job_stop(
+        request: Request, job_id: str, body: ByBody, _: Admin
+    ) -> dict[str, Any]:
+        return await engine_of(request).admin_stop_job(
+            job_id, body.by or "管理员", body.tell_session
+        )
+
+    @app.get("/admin/jobs/{job_id}/log")
+    async def admin_job_log(
+        request: Request, job_id: str, _: Admin, max_bytes: int = 20000
+    ) -> dict[str, Any]:
+        return engine_of(request).admin_job_log(job_id, max_bytes)
+
+    @app.post("/admin/sessions/{session_id}/timers")
+    async def admin_timer_create(
+        request: Request, session_id: str, body: TimerBody, _: Admin
+    ) -> dict[str, Any]:
+        return engine_of(request).admin_create_timer(
+            session_id, body.model_dump(), body.by or "管理员"
+        )
+
+    @app.post("/admin/timers/{timer_id}/cancel")
+    async def admin_timer_cancel(
+        request: Request, timer_id: str, body: ByBody, _: Admin
+    ) -> dict[str, Any]:
+        return engine_of(request).admin_cancel_timer(timer_id, body.by or "管理员")
+
+    @app.post("/admin/sessions/{session_id}/chain")
+    async def admin_chain(
+        request: Request, session_id: str, body: ChainBody, _: Admin
+    ) -> dict[str, Any]:
+        return engine_of(request).admin_chain(session_id, body.action, body.by or "管理员")
+
+    # 会话里的 llm-task 命令（5.5）：只认回合令牌，只能动自己的会话
+    def _session_caller(request: Request) -> tuple[dict[str, Any], str]:
+        header = request.headers.get("authorization", "")
+        token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+        return engine_of(request).session_api_owner(token)
+
+    _MODEL = "会话里的模型"
+
+    @app.get("/session-api/tasks")
+    async def session_tasks(request: Request) -> dict[str, Any]:
+        session, _turn = _session_caller(request)
+        return engine_of(request).longrun.tasks(session)
+
+    @app.get("/session-api/jobs")
+    async def session_jobs(request: Request) -> dict[str, Any]:
+        session, _turn = _session_caller(request)
+        return {"jobs": engine_of(request).longrun.tasks(session)["jobs"]}
+
+    @app.post("/session-api/jobs")
+    async def session_job_start(request: Request, body: JobBody) -> dict[str, Any]:
+        session, turn_id = _session_caller(request)
+        job = await engine_of(request).longrun.start_job(
+            session,
+            origin="session",
+            caller_id="session",
+            by=_MODEL,
+            command=body.command,
+            name=body.name,
+            timeout_seconds=body.timeout_seconds,
+            follow_up=body.follow_up,
+            note=body.note,
+            turn_id=turn_id,
+        )
+        hint = (
+            "可以结束这一轮回答了：作业结束后 MCP 管理器会给这个会话发消息，叫你接着做。"
+            if body.follow_up
+            else "作业结束后不会自动叫你；需要时用 llm-task job show / log 查看。"
+        )
+        return {"job": job, "hint": hint}
+
+    @app.get("/session-api/jobs/{job_id}")
+    async def session_job(request: Request, job_id: str) -> dict[str, Any]:
+        session, _turn = _session_caller(request)
+        engine = engine_of(request)
+        return {"job": engine.longrun.job_view(engine.session_task(session, "job", job_id))}
+
+    @app.get("/session-api/jobs/{job_id}/log")
+    async def session_job_log(
+        request: Request, job_id: str, max_bytes: int = 20000
+    ) -> dict[str, Any]:
+        session, _turn = _session_caller(request)
+        engine = engine_of(request)
+        return engine.longrun.job_log(engine.session_task(session, "job", job_id), max_bytes)
+
+    @app.post("/session-api/jobs/{job_id}/stop")
+    async def session_job_stop(request: Request, job_id: str) -> dict[str, Any]:
+        session, _turn = _session_caller(request)
+        engine = engine_of(request)
+        job = engine.session_task(session, "job", job_id)
+        return {"job": await engine.longrun.stop_job(job, _MODEL)}
+
+    @app.get("/session-api/timers")
+    async def session_timers(request: Request) -> dict[str, Any]:
+        session, _turn = _session_caller(request)
+        return {"timers": engine_of(request).longrun.tasks(session)["timers"]}
+
+    @app.post("/session-api/timers")
+    async def session_timer_create(request: Request, body: TimerBody) -> dict[str, Any]:
+        session, turn_id = _session_caller(request)
+        timer = engine_of(request).longrun.create_timer(
+            session,
+            origin="session",
+            caller_id="session",
+            by=_MODEL,
+            text=body.text,
+            at=body.at,
+            after_seconds=body.after_seconds,
+            turn_id=turn_id,
+        )
+        return {"timer": timer}
+
+    @app.post("/session-api/timers/{timer_id}/cancel")
+    async def session_timer_cancel(request: Request, timer_id: str) -> dict[str, Any]:
+        session, _turn = _session_caller(request)
+        engine = engine_of(request)
+        timer = engine.session_task(session, "timer", timer_id)
+        return {"timer": engine.longrun.cancel_timer(timer, _MODEL)}
 
     @app.get("/admin/sessions/{session_id}/queue")
     async def admin_queue(request: Request, session_id: str, _: Admin) -> dict[str, Any]:

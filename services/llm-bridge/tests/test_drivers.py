@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+from bridge.activity import LIVE_ONLY
 from bridge.drivers.base import DriverError, SessionSpec
 from bridge.drivers.cli_stream import (
     CHAT_NOTICE,
@@ -54,11 +55,14 @@ async def _until(check: Callable[[], Any], limit: float = 10.0) -> None:
 
 
 class Sink:
+    """收集驱动报来的事件。只用于“正在做什么”的事件（LIVE_ONLY）另外放，不混进记录的顺序里。"""
+
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, Any]]] = []
+        self.live: list[tuple[str, dict[str, Any]]] = []
 
     async def __call__(self, kind: str, payload: dict[str, Any]) -> None:
-        self.events.append((kind, payload))
+        (self.live if kind in LIVE_ONLY else self.events).append((kind, payload))
 
 
 @pytest.fixture
@@ -246,6 +250,13 @@ async def test_codex_turns(codex: CodexDriver, tmp_path: Path) -> None:
     assert outcome.commands == ["ls"] and outcome.files == ["a.txt"]
     kinds = [kind for kind, _ in sink.events]
     assert kinds == ["command", "files", "delta", "delta", "message"]
+    # 命令开始、一段段的输出、跑完：只给回合进度看（LONGRUN 5.7），不进记录
+    assert sink.live == [
+        ("command_started", {"command": "ls", "step": "cmd_1"}),
+        ("output", {"text": "a.txt\nb"}),
+        ("output", {"text": ".txt\n"}),
+        ("step_done", {"step": "cmd_1"}),
+    ]
     # 逐字的增量拼起来就是那一段回答
     assert "".join(p["text"] for k, p in sink.events if k == "delta") == outcome.text
     # 平台的用量限制 → rate_limited
@@ -888,3 +899,33 @@ async def test_a_new_web_login_keeps_the_old_login_until_it_succeeds(tmp_path: P
     assert (await driver.status()).method == "web"
     await driver.logout()
     assert await driver.login_state() is None
+
+
+async def test_cli_reports_background_tasks_and_finished_steps(tmp_path: Path) -> None:
+    # 后台任务（LONGRUN 5.7）：task_* 事件记成 background；Bash 调用带编号，结果回来报 step_done
+    driver = _cli(tmp_path)
+    await driver.login("oauth_token", {"oauth_token": "tok"})
+    native = await driver.create(None)  # type: ignore[arg-type]
+    spec = SessionSpec(
+        mode="dev", model="opus", workdir=tmp_path / "w", sandbox="exec", native_id=native
+    )
+    sink = Sink()
+    await driver.run_turn(spec, "background", sink)
+    background = [p for k, p in sink.events if k == "background"]
+    assert background[0] == {
+        "task_id": "t1",
+        "event": "task_started",
+        "status": "running",
+        "description": "跑测试",
+        "task_type": "local_bash",
+    }
+    assert background[1]["last_tool_name"] == "Bash"
+    assert background[3] == {"task_id": "t1", "event": "task_updated", "status": "running"}
+    assert background[4] == {
+        "task_id": "t1",
+        "event": "task_notification",
+        "status": "completed",
+        "summary": "全部通过",
+    }
+    assert ("command", {"command": "make test", "step": "toolu_b"}) in sink.events
+    assert ("step_done", {"step": "toolu_b"}) in sink.live

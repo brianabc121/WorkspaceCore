@@ -23,6 +23,8 @@ const form = reactive({
   name: props.env?.name ?? '', repo_url: props.env?.repo_url ?? '', branch: props.env?.branch ?? '',
   sandbox: (props.env?.sandbox ?? 'read_only') as EnvironmentBody['sandbox'], network: props.env?.network ?? false,
   description: props.env?.description ?? '', enabled: props.env?.enabled ?? true,
+  // 这个环境的单回合时限（分钟，docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.7）：不填用管理器的设置
+  timeout: (props.env?.turn_timeout_seconds ? String(Math.round(props.env.turn_timeout_seconds / 60)) : '') as string | number,
 })
 const execWarning = computed(() => form.sandbox === 'exec' && (form.platform === 'claude' || form.platform === 'workbuddy'))
 const error = ref(''), busy = ref(false)
@@ -31,7 +33,9 @@ async function submit() {
   const name = form.name.trim(), repo = form.repo_url.trim(), branch = form.branch.trim()
   if (!name) { error.value = '请填写环境的名称。'; return }
   if (repo && !/^https:\/\/\S+$/.test(repo)) { error.value = '代码仓库地址只支持 https:// 开头的地址。'; return }
-  const body: EnvironmentBody = { platform: form.platform, mode: 'dev', name, repo_url: repo || null, branch: branch || null, sandbox: form.sandbox, network: form.network, description: form.description.trim(), enabled: form.enabled }
+  const minutes = String(form.timeout ?? '').trim() ? Number(form.timeout) : null
+  if (minutes != null && (!Number.isInteger(minutes) || minutes < 1 || minutes > 360)) { error.value = '单回合时限要填 1–360 分钟，或者留空用管理器的设置。'; return }
+  const body: EnvironmentBody = { platform: form.platform, mode: 'dev', name, repo_url: repo || null, branch: branch || null, sandbox: form.sandbox, network: form.network, description: form.description.trim(), enabled: form.enabled, turn_timeout_seconds: minutes == null ? null : Math.max(30, minutes * 60) }
   busy.value = true; error.value = ''
   try {
     await props.api.saveEnvironment(props.bridgeId, props.env?.id ?? null, body)
@@ -105,6 +109,13 @@ onUnmounted(() => { document.removeEventListener('keydown', keys); previous?.foc
             <span class="lb-set-text"><strong>允许联网</strong><span>允许环境访问外部网络</span></span>
             <input v-model="form.network" type="checkbox" role="switch" class="lb-switch-input" />
           </label>
+          <div class="lb-set-row lb-dialog-access">
+            <label for="lb-env-timeout">单回合时限</label>
+            <div class="lb-dialog-select">
+              <div class="lb-unit-input"><input id="lb-env-timeout" v-model="form.timeout" type="number" inputmode="numeric" step="1" min="1" max="360" placeholder="跟随管理器" /><span aria-hidden="true">分钟</span></div>
+              <p class="form-help">这个环境的一个回合最长多久（1–360 分钟）；留空用“运行设置”里的。跑很久的命令建议交给后台作业。</p>
+            </div>
+          </div>
           <label class="lb-set-row lb-set-switch-row">
             <span class="lb-set-text"><strong>启用环境</strong><span>{{ editing ? '停用后不能再用它新建会话' : '创建后可用于新建会话' }}</span></span>
             <input v-model="form.enabled" type="checkbox" role="switch" class="lb-switch-input" />

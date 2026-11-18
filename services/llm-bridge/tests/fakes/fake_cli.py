@@ -240,6 +240,56 @@ if text == "read":
             },
         }
     )
+if text == "background":
+    # 后台任务（2.1.323 / 2.184.0 的 system 事件）和一个带编号的 Bash 调用：
+    # 一个任务做完了，另一个到回答结束时还在跑
+    for event in (
+        {
+            "subtype": "task_started",
+            "task_id": "t1",
+            "description": "跑测试",
+            "task_type": "local_bash",
+        },
+        {
+            "subtype": "task_progress",
+            "task_id": "t1",
+            "description": "跑测试",
+            "last_tool_name": "Bash",
+        },
+        {"subtype": "task_started", "task_id": "t2", "description": "等 CI"},
+        {"subtype": "task_updated", "task_id": "t1", "patch": {"status": "running"}},
+        {
+            "subtype": "task_notification",
+            "task_id": "t1",
+            "status": "completed",
+            "summary": "全部通过",
+        },
+    ):
+        emit({"type": "system", **event})
+    emit(
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_b",
+                        "name": "Bash",
+                        "input": {"command": "make test"},
+                    }
+                ]
+            },
+        }
+    )
+    emit(
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "toolu_b", "content": "ok"}],
+            },
+        }
+    )
 with transcript.open("a") as handle:
     handle.write(
         json.dumps(

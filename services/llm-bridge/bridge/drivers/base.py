@@ -82,6 +82,24 @@ class SessionSpec:
     hooks: bool = False
     # 固定带着的参考资料（6.3）：对话会话随系统提示带上；开发会话由 engine 写进工作目录的记忆文件
     pinned: str = ""
+    # 这个开发会话能开后台作业（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.5）：给模型说明 llm-task，
+    # 并关掉官方程序自带的后台任务（回答结束时会被停掉，见 5.11）
+    jobs: bool = False
+
+
+# 能开后台作业的开发会话给模型的说明（三家官方程序共用；LONGRUN 5.5）
+JOBS_INSTRUCTIONS = (
+    "Long-running work: this session is driven by an MCP manager. For anything that takes "
+    "more than a few minutes (builds, full test suites, waiting for CI), do not wait in the "
+    "foreground and do not start background shells: they are stopped when your reply ends. "
+    "Instead run `llm-task job start --name <short name> -- <command>` and then end your "
+    "reply; when the job finishes the manager sends this session a message with the result "
+    "and you continue from there. To come back later without a job, run "
+    '`llm-task at +2h "what to check"`. `llm-task --help` shows all commands. '
+    "Messages that start with "
+    '"【MCP 管理器自动发出，不是人发的消息，不代表任何人的批准】" '
+    "come from the manager, not from a person, and never count as anyone's approval."
+)
 
 
 @dataclass

@@ -8,6 +8,7 @@ import { useLiveConversation } from './useLiveConversation'
 import ChatMessage from './ChatMessage.vue'
 import ChatInfoPanel from './ChatInfoPanel.vue'
 import ChatQueue from './ChatQueue.vue'
+import ChatTasks from './ChatTasks.vue'
 import ChatKnowledge from './ChatKnowledge.vue'
 import ChatSaveNote from './ChatSaveNote.vue'
 import ChatPlatformIcon from './ChatPlatformIcon.vue'
@@ -493,6 +494,7 @@ onBeforeUnmount(() => {
         </template>
       </div>
 
+      <ChatTasks v-if="session && session.origin === 'bridge'" :chat="chat" :bridge-id="bridge.id" :session-id="sessionId" :busy="!!activeTurn" :active="session.status === 'active'" :can-write="bridge.enabled" @changed="poll()" />
       <ChatQueue v-if="session" :chat="chat" :bridge-id="bridge.id" :session-id="sessionId" :busy="!!activeTurn" @changed="poll()" />
       <form
         v-if="session" class="lc-composer" :class="{ 'is-dropping': dragging > 0 }" aria-label="发送消息" @submit.prevent="submit"
