@@ -6,7 +6,9 @@ from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+
+from app.modules.llm_bridge.remote_schemas import LlmBridgeRemoteContainerIn
 
 # 已经去掉的平台的旧名字 → 现在的平台（T-0280）：原来单列的“ChatGPT 聊天”就是 Codex app-server 的
 # 纯聊天通道（codex.chat），不再单列。旧名字在请求、旧版本管理器的返回、库里的旧记录里都可能出现
@@ -515,6 +517,25 @@ class LlmBridgeEnvironmentIn(_In):
         description="这个环境的单回合时限（秒）；不填用管理器的设置"
         "（LLM_BRIDGE_LONGRUN_PLAN.md 5.7）",
     )
+    # 运行位置（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 10.1）：建好后不能改
+    location: Literal["local", "remote"] = Field(
+        "local", description="local：MCP 管理器自己的容器；remote：容器服务器上的远程开发容器"
+    )
+    remote_container_id: UUID | None = Field(
+        None, description="location=remote 时用这个管理器已有的远程容器"
+    )
+    new_container: LlmBridgeRemoteContainerIn | None = Field(
+        None, description="location=remote 时新建一个远程容器（和 remote_container_id 二选一）"
+    )
+
+    @model_validator(mode="after")
+    def _location(self) -> LlmBridgeEnvironmentIn:
+        if self.location == "remote":
+            if (self.remote_container_id is None) == (self.new_container is None):
+                raise ValueError("远程环境要选一个已有的远程容器，或者新建一个（二选一）")
+        elif self.remote_container_id is not None or self.new_container is not None:
+            raise ValueError("只有远程环境才选远程容器")
+        return self
 
 
 class LlmBridgeEnvironmentOut(BaseModel):
@@ -529,6 +550,9 @@ class LlmBridgeEnvironmentOut(BaseModel):
     network: bool
     description: str
     turn_timeout_seconds: int | None = None
+    location: Literal["local", "remote"] = "local"
+    remote_container: str | None = Field(None, description="远程开发容器的编号")
+    remote_label: str | None = None
 
 
 class LlmBridgeEnvironmentList(BaseModel):
@@ -559,6 +583,10 @@ class LlmBridgeEnvSessionOut(LlmBridgeSessionOut):
     busy: bool = Field(default=False, description="有回合正在回答或排队")
     browsable: bool = Field(
         default=False, description="工作目录还在、是管理器建的：能浏览里面的文件"
+    )
+    remote: dict[str, Any] | None = Field(
+        default=None,
+        description="远程开发容器里的会话：{container, path}（文件由工作台经容器服务器浏览）",
     )
 
 

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import uuid
 from collections.abc import Sequence
 from datetime import datetime
@@ -76,6 +77,8 @@ _STATUS = {
     "NOT_LOGGED_IN": 409,
     "ACCOUNT_MISMATCH": 409,
     "UNAVAILABLE": 503,
+    # 远程开发容器里的会话：文件由工作台经容器服务器浏览（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md）
+    "REMOTE_SESSION": 409,
 }
 
 
@@ -164,11 +167,31 @@ def install_out(row: LlmBridgeInstall, current_tag: str | None) -> LlmBridgeInst
     )
 
 
-async def remove_bridge(db: AsyncSession, row: LlmBridge) -> None:
+async def remove_bridge(db: AsyncSession, row: LlmBridge, settings: Settings) -> None:
     """去掉一座桥的登记（不提交）。
 
     只允许用这座桥的实例，之后一座都不能用（列表变空），不会变成“都能用”。
+    它的远程开发容器一起删（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md 5.5）：容器服务器上的容器
+    连数据卷删掉，登记随管理器级联删除。
     """
+    from app.domain.runner import RunnerError
+    from app.domain.runner_managed import ManagedRunner
+    from app.models import RunnerEnvironment
+    from app.modules.llm_bridge.models import LlmBridgeRemoteContainer
+
+    managed = ManagedRunner(db, settings)
+    for container in await db.scalars(
+        select(LlmBridgeRemoteContainer).where(LlmBridgeRemoteContainer.bridge_id == row.id)
+    ):
+        env = (
+            await db.get(RunnerEnvironment, container.runner_environment_id)
+            if container.runner_environment_id
+            else None
+        )
+        if env is not None and env.state != "deleted":
+            # 容器服务器已移除等删不掉的：容器服务器页面上还能看到，按“申请方已删除”处理
+            with contextlib.suppress(RunnerError):
+                await managed.delete(env, f"MCP 管理器「{row.name}」已删除")
     grants = (
         await db.scalars(
             select(LlmBridgeGrant).where(
@@ -471,7 +494,7 @@ class LlmBridgeService:
                 "（服务器连不上时，卸载里可以选“只删除登记”）",
             )
         await self._audit(access, "bridge_deleted", row.id, {"name": row.name})
-        await remove_bridge(self.db, row)
+        await remove_bridge(self.db, row, self.settings)
         await self.db.commit()
 
     async def client(self, row: LlmBridge) -> BridgeClient:

@@ -27,6 +27,8 @@ MANIFEST = ModuleManifest(
     tools_for_instance="app.modules.llm_bridge.tool_handlers:visible_tools",
     direct_tools="app.modules.llm_bridge.tool_handlers:run",
     sealed_fields="app.modules.llm_bridge.sealed:SEALED_FIELDS",
+    # 远程开发容器（docs/v2/LLM_BRIDGE_REMOTE_ENV_PLAN.md）：容器服务器托管进程的输出转给管理器
+    runner_proc_sink="app.modules.llm_bridge.remote:SINK",
     # 每分钟同步一次会话索引（哪个管理器上有哪些会话，不含对话内容）
     crons=(
         CronSpec(
@@ -37,6 +39,11 @@ MANIFEST = ModuleManifest(
         CronSpec(
             "app.modules.llm_bridge.watches:watch_tick",
             {"second": {5, 20, 35, 50}, "timeout": 60, "unique": True},
+        ),
+        # 远程开发容器：每分钟一次，跑大约 50 秒（长轮询管理器的远程操作、建等着的容器、补发结束）
+        CronSpec(
+            "app.modules.llm_bridge.remote:remote_tick",
+            {"second": 0, "timeout": 75, "unique": True},
         ),
     ),
 )
