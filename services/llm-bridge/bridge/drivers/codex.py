@@ -27,6 +27,7 @@ from typing import Any
 from bridge import __version__, quota
 from bridge.drivers import progress
 from bridge.drivers.base import (
+    JOBS_INSTRUCTIONS,
     AccountStatus,
     ContextUsage,
     Driver,
@@ -465,6 +466,8 @@ class CodexDriver(Driver):
             # 固定带着的参考资料（6.3）放在开发者说明里：随线程保存，压缩不会把它压掉
             pinned = f"\n\n{spec.pinned}" if spec.pinned else ""
             params["developerInstructions"] = CHAT_INSTRUCTIONS + pinned
+        elif spec.jobs:  # 能开后台作业的开发会话：告诉模型用 llm-task（LONGRUN 5.5）
+            params["developerInstructions"] = JOBS_INSTRUCTIONS
         if self._config(spec):
             params["config"] = self._config(spec)
         result = await self._call("thread/start", params)
@@ -583,9 +586,30 @@ class CodexDriver(Driver):
                 if isinstance(params.get("delta"), str) and params["delta"]:
                     await sink("delta", {"text": params["delta"]})
                 continue
+            if method == "item/started":
+                # 一步开始了（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.7）：只用于“正在做什么”，
+                # 不写进记录；跑完时 item/completed 照旧记一步
+                # （0.169.0 生成的接口定义：ItemStartedNotification）
+                item = params.get("item") or {}
+                step = str(item.get("id") or "")
+                if item.get("type") == "commandExecution" and item.get("command"):
+                    await sink(
+                        "command_started", {"command": str(item["command"])[:500], "step": step}
+                    )
+                elif item.get("type") in ("mcpToolCall", "webSearch"):
+                    name = f"{item.get('server') or ''}.{item.get('tool') or ''}".strip(".")
+                    await sink("tool_started", {"name": name or "web_search", "step": step})
+                continue
+            if method == "item/commandExecution/outputDelta":
+                # 命令的输出一段一段地来：只留最后几十行给回合进度看，不写进记录
+                if isinstance(params.get("delta"), str) and params["delta"]:
+                    await sink("output", {"text": params["delta"]})
+                continue
             if method == "item/completed":
                 item = params.get("item") or {}
                 kind = item.get("type")
+                if kind in ("commandExecution", "mcpToolCall", "webSearch") and item.get("id"):
+                    await sink("step_done", {"step": str(item["id"])})
                 if kind == "agentMessage" and item.get("text"):
                     messages.append(item["text"])
                     await sink("message", {"text": item["text"]})

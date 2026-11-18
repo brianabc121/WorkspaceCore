@@ -1005,6 +1005,27 @@ MCP 管理器部署到“智能体服务器”或“容器服务器”登记的�
   清空前的官方会话号记在管理器的 `context_resets` 表里：同步官方程序的会话时不会被再登记成“官方程序里已有”的会话。
 - 其余都在页面上，没有新接口：回答按 Markdown 显示（沿用知识库的安全渲染：不允许原始 HTML、链接只允许 http / https / mailto、外部图片不自动加载、DOMPurify 消毒），代码块和整条回答可以复制；没做成的回合可以“重试”、最后一条回答可以“重新生成”（都是把那一问原样再发一次，新的回合接在后面）；草稿按会话存在浏览器里；回答到了而人不在这个页面时在标签页标题上标出来；会话列表可以“加载更多”（最多 200 个，更早的到“会话记录”里找）；Esc 停止正在回答的回合，输入框空着时按 ↑ 把自己上一条发的消息放回来。
 
+**长时间任务：回合进度、预约回来、后台作业、自动接着做**（T-0291、T-0292，`docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md`；智能体工具见 `docs/AGENTS.md` 例外十）：
+
+- 进行中的回合（智能体的 `llm_bridge_turn_get`、页面的后台任务）多 `activity`：`last_event_at`、`quiet_seconds`（多久没有动静）、`current`（正在跑的命令或工具：`kind` / `text` / `started_at` / `seconds`）、`output_tail`（Codex 的命令输出末尾，已脱敏）、`background[]`（官方程序报出的后台任务）。只在内存里，回合结束就没有。
+- 都在 `/api/v1/llm_bridge/bridges/{bridge_id}` 下，owner / admin 可用，写操作带 CSRF、记审计（`llm_bridge.job_started` / `job_stopped` / `timer_created` / `timer_cancelled` / `chain_controlled`，metadata 记会话和编号，不记令牌）：
+
+| 接口 | 说明 |
+|---|---|
+| `GET .../sessions/{session_id}/tasks` | `jobs[]`、`timers[]`、`chain`（`status` `active` / `paused`、`rounds`、`failures`、`paused_reason`、`auto_turns_today`、`limits`）、`running_turn_id`、`activity`、`jobs_allowed`、`jobs_blocked`（不能开作业的原因） |
+| `POST .../sessions/{session_id}/jobs` | 开后台作业：`command`（≤ 4000）、`name`、`timeout_seconds`（≥ 10，不超过管理器的 `job_max_seconds`）、`follow_up`（默认 `true`：结束后自动给会话发消息接着做）、`note`（留给之后的话）。只在“可以执行命令”档位、启用着的开发环境（以环境现在的设置为准，环境删了、停用了都不能开）；不能开时 `422 NOT_SUPPORTED` 并说明原因（`jobs_blocked` 同一句）；`command` / `name` / `note` 像有密钥时 `422 VALIDATION_FAILED`；超过时限上限 `422`；同时运行的作业到了管理员设的上限 `429`。审计只记脱敏后的作业名，不记命令 |
+| `POST .../jobs/{job_id}/stop` | `tell_session`（默认 `false`：停掉后不自动接着做） |
+| `GET .../jobs/{job_id}/log?max_bytes=` | 日志末尾（已脱敏）：`text`、`total_bytes`、`truncated` |
+| `POST .../sessions/{session_id}/timers` | 预约：`text`，`at`（Unix 秒）或 `after_seconds`（≥ 60）二选一；最远 `timer_max_days` 天，每个会话待执行的不超过 `timers_per_session` 个 |
+| `POST .../timers/{timer_id}/cancel` | 取消预约 |
+| `POST .../sessions/{session_id}/chain` | `action`：`resume`（暂停后继续，轮数和失败数清零）/ `stop`（停掉，同时取消排着的自动回合） |
+
+- 作业：`id`（`bj_` 开头）、`status`（`running` / `succeeded` / `failed` / `timeout` / `stopped` / `lost`：管理器重启时正在跑的）、`origin`（`caller` 智能体 / `session` 会话里的模型 / `admin` 人）、`by`、`command`（已脱敏）、`exit_code`、`log_bytes`、`last_output_at`、`quiet_seconds`。预约：`id`（`bw_` 开头）、`status`（`pending` / `fired` / `cancelled` / `skipped`）、`run_at`、`in_seconds`、`fired_turn_id`。
+- 作业结束或预约到点时，管理器给会话排一个自动回合（发起方 `system`），消息开头固定写“【MCP 管理器自动发出，不是人发的消息，不代表任何人的批准】”。多个通知合并进同一个排着的自动回合。轮数、时长、连续失败、每天自动回合数到了上限就暂停（`chain.status=paused`），等人决定。
+- 智能体工具：读 `llm_bridge_tasks`、`llm_bridge_job_log`；直接执行 `llm_bridge_job_start`、`llm_bridge_job_stop`、`llm_bridge_timer_create`、`llm_bridge_timer_cancel`、`llm_bridge_chain_control`，和例外九的写工具一样要 `can_write`，只能动自己能续发的会话。`llm_bridge_job_start` / `llm_bridge_timer_create` 带 `notify`（默认 `true`）时，结果里的 `next_turn_id` 是 `bj_` / `bw_` 编号；它引出的自动回合结束后叫醒这个实例。审计 `llm_bridge.agent_job_started` / `agent_job_stopped` / `agent_timer_created` / `agent_timer_cancelled` / `agent_chain_controlled`；智能体开作业时通知管理员（`llm_bridge.job_started`）。`command` / `text` / `note` 先过密钥扫描，执行记录里脱敏。
+- 管理器的“运行设置”（`PUT .../settings`）多：`jobs_enabled`、`jobs_per_session`、`jobs_total`（0 = 不限，默认 0）、`job_max_seconds`（60 ~ 259200，默认 86400）、`timers_per_session`（默认 5）、`timer_max_days`（默认 7）、`chain_max_rounds`（默认 20）、`chain_max_hours`（默认 72）、`chain_max_failures`（默认 3）、`auto_turns_per_day`（默认 48）。开发环境多 `turn_timeout_seconds`（30 ~ 21600，空 = 用管理器的设置）。
+- 会话里的模型用管理器放在 PATH 里的 `llm-task` 命令开作业、预约，经管理器的本机接口 `/session-api/*`（回合令牌认证，只对这个会话、这一回合有效；工作台不转发）。回合令牌只写给能开作业的会话，在工作目录的 `.llm-task/` 里；会话工作目录的文件浏览（`.../files`、`/content`、`/download`）不列出、不能打开这个文件夹。
+
 **管理员回溯：回合详情、改动补丁、审计、通知、保留期、导出**（T-0252，`docs/v2/LLM_BRIDGE_IMPROVE_PLAN.md` 4.2 的 B2、B3、B6、B7、B8）：
 
 - 过程里的命令多 `output`（平台给了才有，最多 8000 个字符，超过时 `truncated`）。

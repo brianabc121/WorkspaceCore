@@ -237,6 +237,25 @@ class LlmBridgeSettings(BaseModel):
         "（并进会话纪要、另开会话时直接用）。只对 Claude、CodeBuddy；没在真实账号上验证过，"
         "默认关。旧版本的管理器没有这一项（为空）",
     )
+    # 长时间任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.6）：旧版本的管理器没有这些（为空）
+    jobs_enabled: bool | None = Field(
+        default=None, description="允许后台作业（只在“可以执行命令”档位的开发环境里开）"
+    )
+    jobs_per_session: int | None = Field(
+        default=None, description="每个会话同时运行的作业数上限；0 是不限（默认）"
+    )
+    jobs_total: int | None = Field(
+        default=None, description="整个管理器同时运行的作业数上限；0 是不限（默认）"
+    )
+    job_max_seconds: int | None = Field(default=None, description="单个作业最长多少秒")
+    timers_per_session: int | None = Field(default=None, description="每个会话待发出的预约数上限")
+    timer_max_days: int | None = Field(default=None, description="预约最远几天之后")
+    chain_max_rounds: int | None = Field(default=None, description="一条循环最多自动接着做几轮")
+    chain_max_hours: int | None = Field(default=None, description="一条循环最长多少小时")
+    chain_max_failures: int | None = Field(default=None, description="自动回合连续失败几次就暂停")
+    auto_turns_per_day: int | None = Field(
+        default=None, description="每个会话 24 小时内最多自动发起几个回合"
+    )
     platforms: list[str] = Field(
         default=list(ALL_PLATFORMS), description="这个 MCP 管理器控制的平台"
     )
@@ -259,6 +278,16 @@ class LlmBridgeSettingsPatch(_In):
     autocompact_workbuddy_percent: int | None = Field(default=None, ge=0, le=100)
     autocompact_codex_tokens: int | None = Field(default=None, ge=0, le=10_000_000)
     hooks_enabled: bool | None = None
+    jobs_enabled: bool | None = None
+    jobs_per_session: int | None = Field(default=None, ge=0, le=1000)
+    jobs_total: int | None = Field(default=None, ge=0, le=1000)
+    job_max_seconds: int | None = Field(default=None, ge=60, le=72 * 3600)
+    timers_per_session: int | None = Field(default=None, ge=1, le=100)
+    timer_max_days: int | None = Field(default=None, ge=1, le=30)
+    chain_max_rounds: int | None = Field(default=None, ge=1, le=1000)
+    chain_max_hours: int | None = Field(default=None, ge=1, le=720)
+    chain_max_failures: int | None = Field(default=None, ge=1, le=100)
+    auto_turns_per_day: int | None = Field(default=None, ge=1, le=10_000)
     platforms: list[Platform] | None = Field(
         default=None,
         min_length=1,
@@ -479,6 +508,13 @@ class LlmBridgeEnvironmentIn(_In):
     network: bool = False
     description: str = Field(default="", max_length=300)
     enabled: bool = True
+    turn_timeout_seconds: int | None = Field(
+        default=None,
+        ge=30,
+        le=21600,
+        description="这个环境的单回合时限（秒）；不填用管理器的设置"
+        "（LLM_BRIDGE_LONGRUN_PLAN.md 5.7）",
+    )
 
 
 class LlmBridgeEnvironmentOut(BaseModel):
@@ -492,6 +528,7 @@ class LlmBridgeEnvironmentOut(BaseModel):
     sandbox: str
     network: bool
     description: str
+    turn_timeout_seconds: int | None = None
 
 
 class LlmBridgeEnvironmentList(BaseModel):
@@ -698,3 +735,143 @@ class LlmBridgeUsageOut(BaseModel):
     days: int
     rows: list[LlmBridgeUsageRowOut]
     failed: list[str] = Field(description="没取到的 MCP 管理器的名字")
+
+
+# ---- 长时间任务：后台作业、预约、自动接着做（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 第 6 节）----
+class LlmBridgeJobOut(BaseModel):
+    id: str
+    session_id: str
+    name: str
+    command: str = Field(description="已脱敏")
+    status: str = Field(description="running / succeeded / failed / timeout / stopped / lost")
+    status_label: str
+    origin: str = Field(description="caller（智能体）/ session（会话里的模型）/ admin（人）")
+    by: str
+    follow_up: bool = Field(description="结束后自动给会话发消息、让模型接着做")
+    note: str = ""
+    timeout_seconds: int
+    exit_code: int | None = None
+    log_bytes: int = 0
+    created_at: float
+    started_at: float | None = None
+    finished_at: float | None = None
+    seconds: int | None = Field(default=None, description="已经跑了 / 一共跑了多少秒")
+    quiet_seconds: int | None = Field(default=None, description="运行中：多久没有输出了")
+    last_output_at: float | None = None
+    error: str | None = None
+    stopped_by: str | None = None
+    follow_turn_id: str | None = Field(default=None, description="结束后自动发起的那一回合")
+
+
+class LlmBridgeTimerOut(BaseModel):
+    id: str
+    session_id: str
+    text: str
+    status: str = Field(description="pending / fired / cancelled / skipped")
+    status_label: str
+    origin: str
+    by: str
+    run_at: float
+    created_at: float
+    fired_at: float | None = None
+    fired_turn_id: str | None = None
+    reason: str | None = None
+    in_seconds: int | None = Field(default=None, description="还有多少秒发出（待发出时）")
+
+
+class LlmBridgeChainLimitsOut(BaseModel):
+    rounds: int
+    hours: int
+    failures: int
+    per_day: int
+
+
+class LlmBridgeChainOut(BaseModel):
+    status: str = Field(description="active（进行中）/ paused（已暂停，等人决定）")
+    status_label: str
+    rounds: int = Field(description="这条循环已经自动接着做了几轮")
+    failures: int = Field(description="自动回合连续失败了几次")
+    started_at: float | None = None
+    paused_reason: str | None = None
+    auto_turns_today: int = 0
+    limits: LlmBridgeChainLimitsOut
+
+
+class LlmBridgeActivityStepOut(BaseModel):
+    kind: str = Field(description="command（命令）/ tool（工具调用）")
+    text: str
+    started_at: float
+    seconds: int = Field(description="已经跑了多少秒")
+
+
+class LlmBridgeBackgroundTaskOut(BaseModel):
+    task_id: str
+    status: str
+    description: str = ""
+    summary: str = ""
+    started_at: float
+
+
+class LlmBridgeActivityOut(BaseModel):
+    """进行中的回合在做什么（LLM_BRIDGE_LONGRUN_PLAN.md 5.7）。"""
+
+    last_event_at: float
+    quiet_seconds: int = Field(description="多久没有动静了")
+    current: LlmBridgeActivityStepOut | None = None
+    output_tail: str | None = Field(default=None, description="命令输出的末尾（已脱敏）")
+    background: list[LlmBridgeBackgroundTaskOut] = Field(
+        default=[], description="官方程序报的后台任务"
+    )
+
+
+class LlmBridgeTasksOut(BaseModel):
+    session_id: str
+    running_turn_id: str | None = None
+    activity: LlmBridgeActivityOut | None = None
+    jobs: list[LlmBridgeJobOut]
+    timers: list[LlmBridgeTimerOut]
+    chain: LlmBridgeChainOut
+    jobs_allowed: bool = Field(description="这个会话能不能开后台作业")
+    jobs_blocked: str | None = Field(default=None, description="不能开的原因")
+
+
+class LlmBridgeJobResult(BaseModel):
+    job: LlmBridgeJobOut
+
+
+class LlmBridgeTimerResult(BaseModel):
+    timer: LlmBridgeTimerOut
+
+
+class LlmBridgeChainResult(BaseModel):
+    chain: LlmBridgeChainOut
+
+
+class LlmBridgeJobLogOut(BaseModel):
+    job_id: str
+    status: str
+    text: str = Field(description="日志的末尾（已脱敏）")
+    total_bytes: int
+    truncated: bool
+
+
+class LlmBridgeJobIn(_In):
+    command: str = Field(min_length=1, max_length=4000)
+    name: str = Field(default="", max_length=60)
+    timeout_seconds: int | None = Field(default=None, ge=10)
+    follow_up: bool = True
+    note: str = Field(default="", max_length=1000)
+
+
+class LlmBridgeTimerIn(_In):
+    text: str = Field(min_length=1, max_length=4000)
+    at: float | None = Field(default=None, description="什么时候发（Unix 时间戳，秒）")
+    after_seconds: float | None = Field(default=None, ge=60, description="多少秒后发")
+
+
+class LlmBridgeJobStopIn(_In):
+    tell_session: bool = Field(default=False, description="停掉后也告诉会话、让模型接着做")
+
+
+class LlmBridgeChainIn(_In):
+    action: Literal["resume", "stop"]

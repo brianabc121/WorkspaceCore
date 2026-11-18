@@ -12483,6 +12483,240 @@
         "title": "LlmBridgeAccountStateOut",
         "type": "object"
       },
+      "LlmBridgeActivityOut": {
+        "description": "进行中的回合在做什么（LLM_BRIDGE_LONGRUN_PLAN.md 5.7）。",
+        "properties": {
+          "background": {
+            "default": [],
+            "description": "官方程序报的后台任务",
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeBackgroundTaskOut"
+            },
+            "title": "Background",
+            "type": "array"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LlmBridgeActivityStepOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_event_at": {
+            "title": "Last Event At",
+            "type": "number"
+          },
+          "output_tail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "命令输出的末尾（已脱敏）",
+            "title": "Output Tail"
+          },
+          "quiet_seconds": {
+            "description": "多久没有动静了",
+            "title": "Quiet Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "last_event_at",
+          "quiet_seconds"
+        ],
+        "title": "LlmBridgeActivityOut",
+        "type": "object"
+      },
+      "LlmBridgeActivityStepOut": {
+        "properties": {
+          "kind": {
+            "description": "command（命令）/ tool（工具调用）",
+            "title": "Kind",
+            "type": "string"
+          },
+          "seconds": {
+            "description": "已经跑了多少秒",
+            "title": "Seconds",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "number"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "text",
+          "started_at",
+          "seconds"
+        ],
+        "title": "LlmBridgeActivityStepOut",
+        "type": "object"
+      },
+      "LlmBridgeBackgroundTaskOut": {
+        "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "number"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "default": "",
+            "title": "Summary",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "status",
+          "started_at"
+        ],
+        "title": "LlmBridgeBackgroundTaskOut",
+        "type": "object"
+      },
+      "LlmBridgeChainIn": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "resume",
+              "stop"
+            ],
+            "title": "Action",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "LlmBridgeChainIn",
+        "type": "object"
+      },
+      "LlmBridgeChainLimitsOut": {
+        "properties": {
+          "failures": {
+            "title": "Failures",
+            "type": "integer"
+          },
+          "hours": {
+            "title": "Hours",
+            "type": "integer"
+          },
+          "per_day": {
+            "title": "Per Day",
+            "type": "integer"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rounds",
+          "hours",
+          "failures",
+          "per_day"
+        ],
+        "title": "LlmBridgeChainLimitsOut",
+        "type": "object"
+      },
+      "LlmBridgeChainOut": {
+        "properties": {
+          "auto_turns_today": {
+            "default": 0,
+            "title": "Auto Turns Today",
+            "type": "integer"
+          },
+          "failures": {
+            "description": "自动回合连续失败了几次",
+            "title": "Failures",
+            "type": "integer"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/LlmBridgeChainLimitsOut"
+          },
+          "paused_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paused Reason"
+          },
+          "rounds": {
+            "description": "这条循环已经自动接着做了几轮",
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "description": "active（进行中）/ paused（已暂停，等人决定）",
+            "title": "Status",
+            "type": "string"
+          },
+          "status_label": {
+            "title": "Status Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "status_label",
+          "rounds",
+          "failures",
+          "limits"
+        ],
+        "title": "LlmBridgeChainOut",
+        "type": "object"
+      },
+      "LlmBridgeChainResult": {
+        "properties": {
+          "chain": {
+            "$ref": "#/components/schemas/LlmBridgeChainOut"
+          }
+        },
+        "required": [
+          "chain"
+        ],
+        "title": "LlmBridgeChainResult",
+        "type": "object"
+      },
       "LlmBridgeChannelOut": {
         "properties": {
           "available": {
@@ -13582,6 +13816,20 @@
             ],
             "title": "Sandbox",
             "type": "string"
+          },
+          "turn_timeout_seconds": {
+            "anyOf": [
+              {
+                "maximum": 21600.0,
+                "minimum": 30.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "这个环境的单回合时限（秒）；不填用管理器的设置（LLM_BRIDGE_LONGRUN_PLAN.md 5.7）",
+            "title": "Turn Timeout Seconds"
           }
         },
         "required": [
@@ -13662,6 +13910,17 @@
           "sandbox": {
             "title": "Sandbox",
             "type": "string"
+          },
+          "turn_timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Turn Timeout Seconds"
           }
         },
         "required": [
@@ -14340,6 +14599,289 @@
           "deployed_at"
         ],
         "title": "LlmBridgeInstallOut",
+        "type": "object"
+      },
+      "LlmBridgeJobIn": {
+        "additionalProperties": false,
+        "properties": {
+          "command": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Command",
+            "type": "string"
+          },
+          "follow_up": {
+            "default": true,
+            "title": "Follow Up",
+            "type": "boolean"
+          },
+          "name": {
+            "default": "",
+            "maxLength": 60,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "maxLength": 1000,
+            "title": "Note",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "minimum": 10.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "LlmBridgeJobIn",
+        "type": "object"
+      },
+      "LlmBridgeJobLogOut": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "text": {
+            "description": "日志的末尾（已脱敏）",
+            "title": "Text",
+            "type": "string"
+          },
+          "total_bytes": {
+            "title": "Total Bytes",
+            "type": "integer"
+          },
+          "truncated": {
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "text",
+          "total_bytes",
+          "truncated"
+        ],
+        "title": "LlmBridgeJobLogOut",
+        "type": "object"
+      },
+      "LlmBridgeJobOut": {
+        "properties": {
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "command": {
+            "description": "已脱敏",
+            "title": "Command",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "follow_turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "结束后自动发起的那一回合",
+            "title": "Follow Turn Id"
+          },
+          "follow_up": {
+            "description": "结束后自动给会话发消息、让模型接着做",
+            "title": "Follow Up",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_output_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Output At"
+          },
+          "log_bytes": {
+            "default": 0,
+            "title": "Log Bytes",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "default": "",
+            "title": "Note",
+            "type": "string"
+          },
+          "origin": {
+            "description": "caller（智能体）/ session（会话里的模型）/ admin（人）",
+            "title": "Origin",
+            "type": "string"
+          },
+          "quiet_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "运行中：多久没有输出了",
+            "title": "Quiet Seconds"
+          },
+          "seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "已经跑了 / 一共跑了多少秒",
+            "title": "Seconds"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "description": "running / succeeded / failed / timeout / stopped / lost",
+            "title": "Status",
+            "type": "string"
+          },
+          "status_label": {
+            "title": "Status Label",
+            "type": "string"
+          },
+          "stopped_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stopped By"
+          },
+          "timeout_seconds": {
+            "title": "Timeout Seconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "name",
+          "command",
+          "status",
+          "status_label",
+          "origin",
+          "by",
+          "follow_up",
+          "timeout_seconds",
+          "created_at"
+        ],
+        "title": "LlmBridgeJobOut",
+        "type": "object"
+      },
+      "LlmBridgeJobResult": {
+        "properties": {
+          "job": {
+            "$ref": "#/components/schemas/LlmBridgeJobOut"
+          }
+        },
+        "required": [
+          "job"
+        ],
+        "title": "LlmBridgeJobResult",
+        "type": "object"
+      },
+      "LlmBridgeJobStopIn": {
+        "additionalProperties": false,
+        "properties": {
+          "tell_session": {
+            "default": false,
+            "description": "停掉后也告诉会话、让模型接着做",
+            "title": "Tell Session",
+            "type": "boolean"
+          }
+        },
+        "title": "LlmBridgeJobStopIn",
         "type": "object"
       },
       "LlmBridgeList": {
@@ -15319,6 +15861,18 @@
             "title": "Auto Resume Max",
             "type": "integer"
           },
+          "auto_turns_per_day": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "每个会话 24 小时内最多自动发起几个回合",
+            "title": "Auto Turns Per Day"
+          },
           "autocompact_claude_percent": {
             "anyOf": [
               {
@@ -15355,6 +15909,42 @@
             "description": "CodeBuddy 的上下文用到百分之多少时自动压缩；0 是用平台自己的",
             "title": "Autocompact Workbuddy Percent"
           },
+          "chain_max_failures": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "自动回合连续失败几次就暂停",
+            "title": "Chain Max Failures"
+          },
+          "chain_max_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "一条循环最长多少小时",
+            "title": "Chain Max Hours"
+          },
+          "chain_max_rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "一条循环最多自动接着做几轮",
+            "title": "Chain Max Rounds"
+          },
           "claude_subscription_ack": {
             "description": "已确认了解 Claude 订阅登录的合规风险",
             "title": "Claude Subscription Ack",
@@ -15390,6 +15980,54 @@
             ],
             "description": "压缩钩子（4.3）：压缩前告诉平台要保留什么、压缩后把平台写的摘要留下来（并进会话纪要、另开会话时直接用）。只对 Claude、CodeBuddy；没在真实账号上验证过，默认关。旧版本的管理器没有这一项（为空）",
             "title": "Hooks Enabled"
+          },
+          "job_max_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "单个作业最长多少秒",
+            "title": "Job Max Seconds"
+          },
+          "jobs_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "允许后台作业（只在“可以执行命令”档位的开发环境里开）",
+            "title": "Jobs Enabled"
+          },
+          "jobs_per_session": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "每个会话同时运行的作业数上限；0 是不限（默认）",
+            "title": "Jobs Per Session"
+          },
+          "jobs_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "整个管理器同时运行的作业数上限；0 是不限（默认）",
+            "title": "Jobs Total"
           },
           "max_text_chars": {
             "maximum": 1000000.0,
@@ -15439,6 +16077,30 @@
             "title": "Send Per Hour",
             "type": "integer"
           },
+          "timer_max_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "预约最远几天之后",
+            "title": "Timer Max Days"
+          },
+          "timers_per_session": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "每个会话待发出的预约数上限",
+            "title": "Timers Per Session"
+          },
           "turn_timeout_seconds": {
             "maximum": 21600.0,
             "minimum": 30.0,
@@ -15483,6 +16145,19 @@
             ],
             "title": "Auto Resume Max"
           },
+          "auto_turns_per_day": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Turns Per Day"
+          },
           "autocompact_claude_percent": {
             "anyOf": [
               {
@@ -15521,6 +16196,45 @@
               }
             ],
             "title": "Autocompact Workbuddy Percent"
+          },
+          "chain_max_failures": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain Max Failures"
+          },
+          "chain_max_hours": {
+            "anyOf": [
+              {
+                "maximum": 720.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain Max Hours"
+          },
+          "chain_max_rounds": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain Max Rounds"
           },
           "claude_subscription_ack": {
             "anyOf": [
@@ -15578,6 +16292,56 @@
               }
             ],
             "title": "Hooks Enabled"
+          },
+          "job_max_seconds": {
+            "anyOf": [
+              {
+                "maximum": 259200.0,
+                "minimum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Max Seconds"
+          },
+          "jobs_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jobs Enabled"
+          },
+          "jobs_per_session": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jobs Per Session"
+          },
+          "jobs_total": {
+            "anyOf": [
+              {
+                "maximum": 1000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jobs Total"
           },
           "max_text_chars": {
             "anyOf": [
@@ -15665,6 +16429,32 @@
               }
             ],
             "title": "Send Per Hour"
+          },
+          "timer_max_days": {
+            "anyOf": [
+              {
+                "maximum": 30.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timer Max Days"
+          },
+          "timers_per_session": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timers Per Session"
           },
           "turn_timeout_seconds": {
             "anyOf": [
@@ -15768,6 +16558,230 @@
           "reachable"
         ],
         "title": "LlmBridgeStatusOut",
+        "type": "object"
+      },
+      "LlmBridgeTasksOut": {
+        "properties": {
+          "activity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LlmBridgeActivityOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "chain": {
+            "$ref": "#/components/schemas/LlmBridgeChainOut"
+          },
+          "jobs": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeJobOut"
+            },
+            "title": "Jobs",
+            "type": "array"
+          },
+          "jobs_allowed": {
+            "description": "这个会话能不能开后台作业",
+            "title": "Jobs Allowed",
+            "type": "boolean"
+          },
+          "jobs_blocked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "不能开的原因",
+            "title": "Jobs Blocked"
+          },
+          "running_turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Running Turn Id"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "timers": {
+            "items": {
+              "$ref": "#/components/schemas/LlmBridgeTimerOut"
+            },
+            "title": "Timers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "session_id",
+          "jobs",
+          "timers",
+          "chain",
+          "jobs_allowed"
+        ],
+        "title": "LlmBridgeTasksOut",
+        "type": "object"
+      },
+      "LlmBridgeTimerIn": {
+        "additionalProperties": false,
+        "properties": {
+          "after_seconds": {
+            "anyOf": [
+              {
+                "minimum": 60.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "多少秒后发",
+            "title": "After Seconds"
+          },
+          "at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "什么时候发（Unix 时间戳，秒）",
+            "title": "At"
+          },
+          "text": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "LlmBridgeTimerIn",
+        "type": "object"
+      },
+      "LlmBridgeTimerOut": {
+        "properties": {
+          "by": {
+            "title": "By",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "number"
+          },
+          "fired_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fired At"
+          },
+          "fired_turn_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fired Turn Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "in_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "还有多少秒发出（待发出时）",
+            "title": "In Seconds"
+          },
+          "origin": {
+            "title": "Origin",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "run_at": {
+            "title": "Run At",
+            "type": "number"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "pending / fired / cancelled / skipped",
+            "title": "Status",
+            "type": "string"
+          },
+          "status_label": {
+            "title": "Status Label",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "session_id",
+          "text",
+          "status",
+          "status_label",
+          "origin",
+          "by",
+          "run_at",
+          "created_at"
+        ],
+        "title": "LlmBridgeTimerOut",
+        "type": "object"
+      },
+      "LlmBridgeTimerResult": {
+        "properties": {
+          "timer": {
+            "$ref": "#/components/schemas/LlmBridgeTimerOut"
+          }
+        },
+        "required": [
+          "timer"
+        ],
+        "title": "LlmBridgeTimerResult",
         "type": "object"
       },
       "LlmBridgeTurnList": {
@@ -63820,6 +64834,276 @@
         ]
       }
     },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/jobs/{job_id}/log": {
+      "get": {
+        "operationId": "llm_bridge_job_log",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bj_[0-9a-f]{20}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_bytes",
+            "required": false,
+            "schema": {
+              "default": 20000,
+              "maximum": 200000,
+              "minimum": 1,
+              "title": "Max Bytes",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeJobLogOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "后台作业日志的末尾（admin；已脱敏）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/jobs/{job_id}/stop": {
+      "post": {
+        "operationId": "llm_bridge_job_stop",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bj_[0-9a-f]{20}$",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmBridgeJobStopIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeJobResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "停掉后台作业（admin；记审计）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
     "/api/v1/llm_bridge/bridges/{bridge_id}/quota": {
       "get": {
         "description": "平台给的是已用百分比和重置时间，不是剩余 token 数。refresh=true 时让管理器向能随时查的平台（Codex）实查一次；Claude 只在跑回合时顺带报出来，显示的是最近一次看到的；CodeBuddy 的官方程序不给额度和重置时间（reports_quota=false），只有管理器自己记的用量。",
@@ -64345,6 +65629,144 @@
         ]
       }
     },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/chain": {
+      "post": {
+        "operationId": "llm_bridge_chain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmBridgeChainIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeChainResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "恢复或停止一个会话的“自动接着做”（admin；记审计）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
     "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/files": {
       "get": {
         "description": "只浏览管理器建的会话目录；不能跳出工作目录。官方程序里同步来的会话 422。",
@@ -64714,6 +66136,432 @@
         ]
       }
     },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/jobs": {
+      "post": {
+        "operationId": "llm_bridge_job_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmBridgeJobIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeJobResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "给开发会话开后台作业（admin；只在“可以执行命令”档位的环境；记审计）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/tasks": {
+      "get": {
+        "operationId": "llm_bridge_session_tasks",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeTasksOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "一个会话的后台任务（admin）：作业、预约、自动接着做、正在跑的回合在做什么",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/timers": {
+      "post": {
+        "operationId": "llm_bridge_timer_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bs_[0-9a-f]{20}$",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LlmBridgeTimerIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeTimerResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "请求过于频繁（RATE_LIMITED，带 Retry-After 响应头）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "预约：到点给会话发一条消息（admin；记审计）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
     "/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/turns": {
       "get": {
         "operationId": "llm_bridge_list_turns",
@@ -65058,6 +66906,144 @@
           }
         ],
         "summary": "会话桥的状态：各平台的登录情况、通道、排队、设置（admin）",
+        "tags": [
+          "llm_bridge"
+        ]
+      }
+    },
+    "/api/v1/llm_bridge/bridges/{bridge_id}/timers/{timer_id}/cancel": {
+      "post": {
+        "operationId": "llm_bridge_timer_cancel",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "bridge_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Bridge Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "timer_id",
+            "required": true,
+            "schema": {
+              "pattern": "^bw_[0-9a-f]{20}$",
+              "title": "Timer Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "当前工作空间；不是成员时返回 404",
+            "in": "header",
+            "name": "X-Workspace-Id",
+            "required": true,
+            "schema": {
+              "description": "当前工作空间；不是成员时返回 404",
+              "format": "uuid",
+              "title": "X-Workspace-Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+            "in": "header",
+            "name": "X-CSRF-Token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "改变状态的请求必须携带，值为 ws_csrf Cookie 的内容；缺失或不匹配返回 403 CSRF_FAILED",
+              "title": "X-Csrf-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LlmBridgeTimerResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "未登录或会话已失效（UNAUTHORIZED / INVALID_CREDENTIALS）"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "无权限，或 CSRF / 来源校验失败（FORBIDDEN / CSRF_FAILED / SETUP_TOKEN_INVALID）"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "资源不存在，或不属于你可访问的工作空间（NOT_FOUND）"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "状态冲突（例如 SETUP_COMPLETED、VERSION_CONFLICT、IDEMPOTENCY_KEY_REUSED）"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "参数校验失败（VALIDATION_FAILED / EXTERNAL_VALIDATION_FAILED）"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "第三方服务不可用或限流（EXTERNAL_UNAVAILABLE / EXTERNAL_RATE_LIMITED）"
+          }
+        },
+        "security": [
+          {
+            "SessionCookie": []
+          }
+        ],
+        "summary": "取消一个还没发出的预约（admin；记审计）",
         "tags": [
           "llm_bridge"
         ]

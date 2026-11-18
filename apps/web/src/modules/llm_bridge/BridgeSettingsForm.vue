@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
-import { ChevronRight, FileText, Info, RefreshCw, Settings, SlidersHorizontal } from '@lucide/vue'
+import { ChevronRight, FileText, Info, RefreshCw, Settings, SlidersHorizontal, Timer } from '@lucide/vue'
 import ActionFeedback from '../../components/ActionFeedback.vue'
 import { bridgeError, type Bridge, type BridgeStatus, type LlmBridgeApi, type SettingsPatch } from './api'
 
@@ -56,6 +56,23 @@ const hasResume = computed(() => !!settings.value?.resume_text)
 const fields = computed(() => FIELDS.filter(f => f.key !== 'auto_resume_max' || hasResume.value))
 // 高级设置里按需展开的两项
 const open = reactive({ autocompact: false, maxText: false })
+// 后台任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.6，人类 2026-11-18 决定）：后台作业、预约、自动接着做的上限。
+// 同时运行的作业数默认不限（0）。旧版本的管理器没有（为空）：整张卡片不显示；只提交改了的
+const LONGRUN = [
+  { key: 'jobs_per_session', label: '每个会话同时运行的作业', unit: '个', help: '0 是不限（默认）', min: 0, max: 1000, scale: 1 },
+  { key: 'jobs_total', label: '整个管理器同时运行的作业', unit: '个', help: '0 是不限（默认）', min: 0, max: 1000, scale: 1 },
+  { key: 'job_max_seconds', label: '单个作业最长', unit: '小时', help: '超过就停掉（1–72 小时）', min: 1, max: 72, scale: 3600 },
+  { key: 'timers_per_session', label: '每个会话待发出的预约', unit: '个', help: '1–100', min: 1, max: 100, scale: 1 },
+  { key: 'timer_max_days', label: '预约最远', unit: '天', help: '1–30 天之后', min: 1, max: 30, scale: 1 },
+  { key: 'chain_max_rounds', label: '自动接着做最多', unit: '轮', help: '到了就暂停、等人决定', min: 1, max: 1000, scale: 1 },
+  { key: 'chain_max_hours', label: '自动接着做最长', unit: '小时', help: '从人最后一次发消息算起', min: 1, max: 720, scale: 1 },
+  { key: 'chain_max_failures', label: '连续失败就暂停', unit: '次', help: '自动发起的回合连续失败几次', min: 1, max: 100, scale: 1 },
+  { key: 'auto_turns_per_day', label: '每个会话每天自动回合', unit: '个', help: '24 小时内最多自动发起几个回合', min: 1, max: 10000, scale: 1 },
+] as const
+type LongKey = (typeof LONGRUN)[number]['key']
+const longrun = reactive<Record<LongKey, string>>({ jobs_per_session: '', jobs_total: '', job_max_seconds: '', timers_per_session: '', timer_max_days: '', chain_max_rounds: '', chain_max_hours: '', chain_max_failures: '', auto_turns_per_day: '' })
+const jobsOn = ref(true)
+const hasLongrun = computed(() => settings.value?.jobs_enabled != null)
 
 // 读到设置时（以及“取消更改”时）把表单填回管理器上保存的值
 function fill(value: NonNullable<typeof settings.value>) {
@@ -65,6 +82,8 @@ function fill(value: NonNullable<typeof settings.value>) {
   Object.assign(digest, { on: value.digest_enabled, follow: value.digest_follow_retention })
   for (const f of AUTOCOMPACT) auto[f.key] = value[f.key] == null ? '' : String(value[f.key])
   hooks.value = !!value.hooks_enabled
+  for (const f of LONGRUN) longrun[f.key] = value[f.key] == null ? '' : String(Math.round(Number(value[f.key]) / f.scale))
+  jobsOn.value = value.jobs_enabled !== false
 }
 watch(settings, value => { if (value) fill(value) }, { immediate: true })
 function discard() { if (settings.value) fill(settings.value); error.value = ''; notice.value = '已取消更改。' }
@@ -92,6 +111,14 @@ async function save() {
     if (n !== settings.value?.[f.key]) body[f.key] = n
   }
   if (hasHooks.value && hooks.value !== settings.value?.hooks_enabled) body.hooks_enabled = hooks.value
+  if (hasLongrun.value) {
+    if (jobsOn.value !== settings.value?.jobs_enabled) body.jobs_enabled = jobsOn.value
+    for (const f of LONGRUN) {
+      const n = Number(longrun[f.key])
+      if (!String(longrun[f.key]).trim() || !Number.isInteger(n) || n < f.min || n > f.max) { error.value = `「${f.label}」要填 ${f.min}–${f.max} 之间的整数。`; notice.value = ''; return }
+      if (n * f.scale !== settings.value?.[f.key]) body[f.key] = n * f.scale
+    }
+  }
   busy.value = true; error.value = notice.value = ''
   try { await props.api.saveSettings(props.bridge.id, body); notice.value = '设置已保存。' } catch (e) { error.value = bridgeError(e) } finally { busy.value = false }
 }
@@ -166,6 +193,25 @@ async function save() {
               <span class="lb-set-text"><strong>纪要随对话清理</strong><span>会话内容按保留期清掉时，纪要一起放进回收站。</span></span>
               <input v-model="digest.follow" type="checkbox" role="switch" class="lb-switch-input" />
             </label>
+          </div>
+        </fieldset>
+
+        <!-- 后台任务：作业、预约、自动接着做的上限（LONGRUN 5.6） -->
+        <fieldset v-if="hasLongrun" class="lb-set-card" :disabled="!canWrite || busy" aria-label="后台任务">
+          <div class="lb-set-head">
+            <span class="lb-set-icon" aria-hidden="true"><Timer /></span>
+            <div><h3>后台任务</h3><p>后台作业、预约回来、自动接着做</p></div>
+          </div>
+          <label class="lb-set-row lb-set-switch-row">
+            <span class="lb-set-text"><strong>允许后台作业</strong><span title="会话里的模型（llm-task 命令）、智能体和人可以把很久的命令交给管理器跑：回答结束了照样跑，结束后自动叫模型接着做。只在“可以执行命令”档位的开发环境里能开。">跑很久的命令交给管理器，结束后自动接着做；只在“可以执行命令”档位的开发环境</span></span>
+            <input v-model="jobsOn" type="checkbox" role="switch" class="lb-switch-input" />
+          </label>
+          <div class="lb-set-fields">
+            <div v-for="f in LONGRUN" :key="f.key" class="form-field lb-set-field">
+              <label :for="`lb-set-${f.key}`">{{ f.label }}</label>
+              <div class="lb-unit-input"><input :id="`lb-set-${f.key}`" v-model="longrun[f.key]" type="number" inputmode="numeric" step="1" :min="f.min" :max="f.max" required :title="f.help" /><span aria-hidden="true">{{ f.unit }}</span></div>
+              <p class="form-help">{{ f.help }}</p>
+            </div>
           </div>
         </fieldset>
 

@@ -13,10 +13,15 @@ from uuid import UUID
 from fastapi import Depends, Path, Query, Response, status
 
 from app.api.deps import csrf_protected
+from app.core.errors import ApiError
+from app.domain import agent_ops, secret_scan
+from app.models import User
 from app.modules.llm_bridge.client import LOGIN_READ_TIMEOUT
 from app.modules.llm_bridge.deps import Admin, Owner, Service, router
 from app.modules.llm_bridge.schemas import (
     LlmBridgeAccountStateOut,
+    LlmBridgeChainIn,
+    LlmBridgeChainResult,
     LlmBridgeConnectivityOut,
     LlmBridgeEnvironmentIn,
     LlmBridgeEnvironmentList,
@@ -30,6 +35,10 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeIn,
     LlmBridgeIndexList,
     LlmBridgeIndexOwnerList,
+    LlmBridgeJobIn,
+    LlmBridgeJobLogOut,
+    LlmBridgeJobResult,
+    LlmBridgeJobStopIn,
     LlmBridgeList,
     LlmBridgeLocalIn,
     LlmBridgeLocalOut,
@@ -45,6 +54,9 @@ from app.modules.llm_bridge.schemas import (
     LlmBridgeSettings,
     LlmBridgeSettingsPatch,
     LlmBridgeStatusOut,
+    LlmBridgeTasksOut,
+    LlmBridgeTimerIn,
+    LlmBridgeTimerResult,
     LlmBridgeTurnList,
     LlmBridgeUsageOut,
     Platform,
@@ -392,6 +404,164 @@ async def llm_bridge_delete_environment(
         {"id": env_id},
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---- 长时间任务：后台作业、预约、自动接着做（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 第 6 节）----
+JobId = Annotated[str, Path(pattern=r"^bj_[0-9a-f]{20}$")]
+TimerId = Annotated[str, Path(pattern=r"^bw_[0-9a-f]{20}$")]
+
+
+async def _by(access: Admin, service: Service) -> str:
+    """页面上的人：自动接着做的消息、会话记录里写“谁”。"""
+    user = await service.db.get(User, access.user_id) if access.user_id else None
+    if user is None:
+        return "管理员"
+    return (user.display_name or user.email)[:120]
+
+
+@router.get(
+    "/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/tasks",
+    summary="一个会话的后台任务（admin）：作业、预约、自动接着做、正在跑的回合在做什么",
+    responses=_read_errors,
+)
+async def llm_bridge_session_tasks(
+    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId
+) -> LlmBridgeTasksOut:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    return LlmBridgeTasksOut(**await service.admin(row, "GET", f"/sessions/{session_id}/tasks"))
+
+
+@router.post(
+    "/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/jobs",
+    summary="给开发会话开后台作业（admin；只在“可以执行命令”档位的环境；记审计）",
+    responses=error_responses(401, 403, 404, 409, 422, 429, 503),
+    dependencies=[Depends(csrf_protected)],
+)
+async def llm_bridge_job_start(
+    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, body: LlmBridgeJobIn
+) -> LlmBridgeJobResult:
+    if any(secret_scan.scan(text) for text in (body.command, body.name, body.note)):
+        raise ApiError(422, "VALIDATION_FAILED", "内容里像是有令牌、私钥一类的密钥，没有开作业")
+    row = await service.bridge(access.workspace.id, bridge_id)
+    # 审计只记作业名：先脱敏再截断，不记命令原文（T-0292 审查）
+    label = " ".join(agent_ops.redact(body.name or body.command[:200]).split())[:40]
+    data = await service.admin_write(
+        access,
+        row,
+        "job_started",
+        "POST",
+        f"/sessions/{session_id}/jobs",
+        {**body.model_dump(), "by": await _by(access, service)},
+        {"session": session_id, "name": label},
+    )
+    return LlmBridgeJobResult(**data)
+
+
+@router.post(
+    "/llm_bridge/bridges/{bridge_id}/jobs/{job_id}/stop",
+    summary="停掉后台作业（admin；记审计）",
+    responses=error_responses(401, 403, 404, 409, 503),
+    dependencies=[Depends(csrf_protected)],
+)
+async def llm_bridge_job_stop(
+    access: Admin, service: Service, bridge_id: UUID, job_id: JobId, body: LlmBridgeJobStopIn
+) -> LlmBridgeJobResult:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    data = await service.admin_write(
+        access,
+        row,
+        "job_stopped",
+        "POST",
+        f"/jobs/{job_id}/stop",
+        {"by": await _by(access, service), "tell_session": body.tell_session},
+        {"job": job_id},
+    )
+    return LlmBridgeJobResult(**data)
+
+
+@router.get(
+    "/llm_bridge/bridges/{bridge_id}/jobs/{job_id}/log",
+    summary="后台作业日志的末尾（admin；已脱敏）",
+    responses=_read_errors,
+)
+async def llm_bridge_job_log(
+    access: Admin,
+    service: Service,
+    bridge_id: UUID,
+    job_id: JobId,
+    max_bytes: Annotated[int, Query(ge=1, le=200_000)] = 20000,
+) -> LlmBridgeJobLogOut:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    data = await service.admin(row, "GET", f"/jobs/{job_id}/log?max_bytes={max_bytes}")
+    return LlmBridgeJobLogOut(**data)
+
+
+@router.post(
+    "/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/timers",
+    summary="预约：到点给会话发一条消息（admin；记审计）",
+    responses=error_responses(401, 403, 404, 409, 422, 429, 503),
+    dependencies=[Depends(csrf_protected)],
+)
+async def llm_bridge_timer_create(
+    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, body: LlmBridgeTimerIn
+) -> LlmBridgeTimerResult:
+    if secret_scan.scan(body.text):
+        raise ApiError(422, "VALIDATION_FAILED", "内容里像是有令牌、私钥一类的密钥，没有预约")
+    row = await service.bridge(access.workspace.id, bridge_id)
+    data = await service.admin_write(
+        access,
+        row,
+        "timer_created",
+        "POST",
+        f"/sessions/{session_id}/timers",
+        {**body.model_dump(), "by": await _by(access, service)},
+        {"session": session_id},
+    )
+    return LlmBridgeTimerResult(**data)
+
+
+@router.post(
+    "/llm_bridge/bridges/{bridge_id}/timers/{timer_id}/cancel",
+    summary="取消一个还没发出的预约（admin；记审计）",
+    responses=error_responses(401, 403, 404, 409, 503),
+    dependencies=[Depends(csrf_protected)],
+)
+async def llm_bridge_timer_cancel(
+    access: Admin, service: Service, bridge_id: UUID, timer_id: TimerId
+) -> LlmBridgeTimerResult:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    data = await service.admin_write(
+        access,
+        row,
+        "timer_cancelled",
+        "POST",
+        f"/timers/{timer_id}/cancel",
+        {"by": await _by(access, service)},
+        {"timer": timer_id},
+    )
+    return LlmBridgeTimerResult(**data)
+
+
+@router.post(
+    "/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/chain",
+    summary="恢复或停止一个会话的“自动接着做”（admin；记审计）",
+    responses=error_responses(401, 403, 404, 422, 503),
+    dependencies=[Depends(csrf_protected)],
+)
+async def llm_bridge_chain(
+    access: Admin, service: Service, bridge_id: UUID, session_id: SessionId, body: LlmBridgeChainIn
+) -> LlmBridgeChainResult:
+    row = await service.bridge(access.workspace.id, bridge_id)
+    data = await service.admin_write(
+        access,
+        row,
+        "chain_controlled",
+        "POST",
+        f"/sessions/{session_id}/chain",
+        {"action": body.action, "by": await _by(access, service)},
+        {"session": session_id, "action": body.action},
+    )
+    return LlmBridgeChainResult(**data)
 
 
 # ---- 开发会话工作目录里的文件（T-0289，只读）----

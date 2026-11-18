@@ -97,12 +97,25 @@ def run_turn(state, thread_id, params):
             item = {"type": "contextCompaction", "id": "item_c"}
             note("item/started", {"threadId": thread_id, "turnId": turn_id, "item": item})
             note("item/completed", {"threadId": thread_id, "turnId": turn_id, "item": item})
+        # 命令开始、一段一段的输出、跑完（0.169.0：item/started、item/commandExecution/outputDelta）
+        command = {
+            "type": "commandExecution",
+            "id": "cmd_1",
+            "command": "ls",
+            "status": "inProgress",
+        }
+        note("item/started", {"threadId": thread_id, "turnId": turn_id, "item": command})
+        for piece in ("a.txt\nb", ".txt\n"):
+            note(
+                "item/commandExecution/outputDelta",
+                {"threadId": thread_id, "turnId": turn_id, "itemId": "cmd_1", "delta": piece},
+            )
         note(
             "item/completed",
             {
                 "threadId": thread_id,
                 "turnId": turn_id,
-                "item": {"type": "commandExecution", "command": "ls", "exitCode": 0},
+                "item": {"type": "commandExecution", "id": "cmd_1", "command": "ls", "exitCode": 0},
             },
         )
         note(

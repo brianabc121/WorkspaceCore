@@ -27,6 +27,7 @@ from typing import Any
 from bridge import hooks, quota
 from bridge.drivers import progress
 from bridge.drivers.base import (
+    JOBS_INSTRUCTIONS,
     AccountStatus,
     ContextUsage,
     Driver,
@@ -77,6 +78,39 @@ CHAT_NOTICE = (
     "start a new session in dev mode (with a development environment) for that."
 )
 _READ_TOOLS = "Read,Glob,Grep"
+# 后台任务的事件（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.7）：每种事件的状态
+_TASK_EVENTS = {
+    "task_started": "running",
+    "task_progress": "running",
+    "task_updated": "",
+    "task_notification": "",
+}
+_TASK_STATUS = {"completed", "failed", "stopped", "killed", "running", "pending"}
+
+
+def _task_event(subtype: str, event: dict[str, Any]) -> dict[str, Any] | None:
+    """官方程序报的一条后台任务事件 → 管理器记下的一步：编号、状态、说明、摘要。"""
+    task_id = str(event.get("task_id") or "")
+    if not task_id:
+        return None
+    raw = event.get("patch")
+    patch: dict[str, Any] = raw if isinstance(raw, dict) else {}
+    status = _TASK_EVENTS[subtype] or str(event.get("status") or patch.get("status") or "")
+    out: dict[str, Any] = {"task_id": task_id[:100], "event": subtype}
+    if status in _TASK_STATUS:
+        out["status"] = status
+    description = event.get("description") or patch.get("description")
+    if isinstance(description, str) and description.strip():
+        out["description"] = description.strip()[:300]
+    summary = event.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        out["summary"] = summary.strip()[:500]
+    for key in ("task_type", "last_tool_name"):
+        if isinstance(event.get(key), str) and event[key]:
+            out[key] = str(event[key])[:60]
+    return out
+
+
 _WRITE_TOOLS = "Read,Glob,Grep,Edit,Write"
 _MAX_SCAN_BYTES = 512 * 1024
 
@@ -104,6 +138,9 @@ class CliProfile:
     # 网页授权登录（T-0287）：管理器替人运行官方程序的 `auth login`，人在自己的浏览器里登录授权，
     # 再把授权页显示的授权码交回来。只有 Claude 有
     code_login: bool = False
+    # 关掉官方程序自带的后台任务的环境变量（LONGRUN 5.11）：能开管理器的后台作业时设成 1。
+    # Claude Code 2.1.323、CodeBuddy Code 2.184.0 的程序文件里核对过变量名
+    background_off_env: str = ""
 
 
 # 网页授权登录（Claude，T-0287）。在 Claude Code 2.1.323 上核实
@@ -169,6 +206,7 @@ def claude_profile(binary: str) -> CliProfile:
         autocompact_env="CLAUDE_AUTOCOMPACT_PCT_OVERRIDE",
         effort_flag="--effort",
         code_login=True,
+        background_off_env="CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
     )
 
 
@@ -187,6 +225,7 @@ def codebuddy_profile(binary: str) -> CliProfile:
         allow_existing=False,
         reports_quota=False,
         autocompact_env="CODEBUDDY_AUTOCOMPACT_PCT_OVERRIDE",
+        background_off_env="CODEBUDDY_CODE_DISABLE_BACKGROUND_TASKS",
     )
 
 
@@ -387,6 +426,7 @@ class CliStreamDriver(Driver):
         self._code_task: asyncio.Task[None] | None = None
         # 工具调用的编号 → 工具名：结果报回来时知道是哪个工具的
         self._tool_names: dict[str, str] = {}
+        self._open_steps: set[str] = set()  # 已经开始、结果还没回来的工具调用
         self._help_models: list[ModelInfo] | None = None
         # 压缩钩子（4.3）：钩子脚本放在哪、平台写的摘要放在哪（engine 启动时设好）
         self.hook_script: Path | None = None
@@ -414,6 +454,13 @@ class CliStreamDriver(Driver):
             env[name] = secret["value"]
         env.update(extra or {})
         return env
+
+    def _background_env(self, spec: SessionSpec) -> dict[str, str]:
+        """能开管理器的后台作业时，关掉官方程序自带的后台任务（LONGRUN 5.11）：
+        它们在回答结束、程序退出时会被停掉。"""
+        if spec.jobs and spec.mode == "dev" and self.profile.background_off_env:
+            return {self.profile.background_off_env: "1"}
+        return {}
 
     def _save_secret(self, data: dict[str, str]) -> None:
         self._secret_file.parent.mkdir(parents=True, exist_ok=True)
@@ -797,6 +844,8 @@ class CliStreamDriver(Driver):
             args += ["--tools", _WRITE_TOOLS, "--permission-mode", "acceptEdits"]
         else:  # exec：管理员在环境上明确打开的档位
             args += ["--permission-mode", "bypassPermissions"]
+            if spec.jobs:  # 能开后台作业：告诉模型用 llm-task（LONGRUN 5.5）
+                args += ["--append-system-prompt", JOBS_INSTRUCTIONS]
         if spec.images:  # 带图片时提问按一条 stream-json 的用户消息从标准输入给
             args += ["--input-format", "stream-json"]
         if spec.hooks and self.hook_script is not None:
@@ -839,7 +888,14 @@ class CliStreamDriver(Driver):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(spec.workdir),
-                env=self._env({**spec.env, **self._autocompact(spec), **self._hook_env(spec)}),
+                env=self._env(
+                    {
+                        **spec.env,
+                        **self._autocompact(spec),
+                        **self._hook_env(spec),
+                        **self._background_env(spec),
+                    }
+                ),
                 limit=16 * 1024 * 1024,
             )
         except OSError as error:
@@ -941,13 +997,21 @@ class CliStreamDriver(Driver):
     async def _on_system(
         self, event: dict[str, Any], seen: _Seen, sink: EventSink, *, manual: bool
     ) -> None:
-        """官方程序的 system 事件里和压缩有关的两种。
+        """官方程序的 system 事件里和压缩有关的两种，以及后台任务的事件。
 
         - Claude Code：`subtype: compact_boundary`，带触发方式和压缩前后的 token 数；
         - CodeBuddy Code：只有状态事件 `subtype: status`，`status: "compacting"` 表示开始压缩，
           之后 `status: null` 表示结束（2.184.0 程序文件里的 StreamJsonView），没有前后的 token 数。
-        两种都报的话（以后的版本）只算一次。"""
+        两种都报的话（以后的版本）只算一次。
+        - 后台任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.7）：两家都报 `task_started` /
+          `task_progress` / `task_notification`，Claude 另有 `task_updated`（带 `patch`）。
+          字段在 Claude Code 2.1.323、CodeBuddy Code 2.184.0 的程序文件里核对过。"""
         subtype = event.get("subtype")
+        if isinstance(subtype, str) and subtype in _TASK_EVENTS:
+            task = _task_event(subtype, event)
+            if task is not None:
+                await sink("background", task)
+            return
         if subtype == "compact_boundary":
             seen.compacting = False
             await self._compacted(seen, sink, _compaction(event))
@@ -979,16 +1043,22 @@ class CliStreamDriver(Driver):
             raw = block.get("input")
             data: dict[str, Any] = raw if isinstance(raw, dict) else {}
             name = str(block.get("name") or "")
+            step = str(block.get("id") or "")
+            if step:  # 结果回来时据此知道这一步做完了（回合进度里的“正在做什么”）
+                self._open_steps.add(step)
             if name == "Bash" and data.get("command"):
                 outcome.commands.append(str(data["command"])[:500])
-                await sink("command", {"command": outcome.commands[-1]})
+                await sink("command", {"command": outcome.commands[-1], "step": step})
             elif name in ("Edit", "Write") and data.get("file_path"):
                 outcome.files.append(str(data["file_path"]))
                 await sink("files", {"paths": [outcome.files[-1]]})
             elif name:  # 读文件、搜索和别的工具调用：也记进过程
                 if block.get("id"):
                     self._tool_names[str(block["id"])] = name
-                await sink("tool", {"name": name, "input": json.dumps(data, ensure_ascii=False)})
+                await sink(
+                    "tool",
+                    {"name": name, "input": json.dumps(data, ensure_ascii=False), "step": step},
+                )
 
     async def _on_tool_results(self, event: dict[str, Any], sink: EventSink) -> None:
         """官方程序把工具结果作为一条 user 消息报出来：每个 tool_result 内容块记一步。"""
@@ -996,7 +1066,11 @@ class CliStreamDriver(Driver):
         for block in content if isinstance(content, list) else []:
             if not isinstance(block, dict) or block.get("type") != "tool_result":
                 continue
-            name = self._tool_names.pop(str(block.get("tool_use_id")), None)
+            step = str(block.get("tool_use_id") or "")
+            if step in self._open_steps:
+                self._open_steps.discard(step)
+                await sink("step_done", {"step": step})
+            name = self._tool_names.pop(step, None)
             if name is None:  # 命令、改文件的结果不单独记（已经有“命令”“改动的文件”两步）
                 continue
             await sink(

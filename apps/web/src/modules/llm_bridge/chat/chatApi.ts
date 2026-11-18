@@ -24,6 +24,26 @@ export type ChatOptions = Schema['LlmChatOptionsOut']
 export type ChatCreateBody = Omit<Schema['LlmChatCreateIn'], 'pinned_notes'> & { pinned_notes?: string[] }
 export type ChatTurn = Schema['LlmChatTurnOut']
 export type ChatQueue = Schema['LlmChatQueueOut']
+// 后台任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md）：作业、预约、自动接着做、正在跑的回合在做什么
+export type ChatTasks = Schema['LlmBridgeTasksOut']
+export type ChatJob = Schema['LlmBridgeJobOut']
+export type ChatTimer = Schema['LlmBridgeTimerOut']
+export type ChatActivity = Schema['LlmBridgeActivityOut']
+export type ChatTimerBody = Schema['LlmBridgeTimerIn']
+// 还有在跑的作业、没发出的预约：多看几次
+export const liveTasks = (t?: ChatTasks | null) => !!t && (t.jobs.some(j => j.status === 'running') || t.timers.some(x => x.status === 'pending') || !!t.running_turn_id)
+// 管理器自动发出的消息（作业结束、预约到点）：开头带着这个标记
+export const AUTO_MARK = '【MCP 管理器自动发出，不是人发的消息，不代表任何人的批准】'
+export const AUTO_BY = 'MCP 管理器（自动接着做）'
+export function duration(seconds?: number | null) {
+  if (seconds == null) return '—'
+  const s = Math.max(0, Math.round(seconds))
+  if (s < 60) return `${s} 秒`
+  const m = Math.floor(s / 60)
+  if (m < 60) return `${m} 分钟`
+  const h = Math.floor(m / 60), rest = m % 60
+  return rest ? `${h} 小时 ${rest} 分` : `${h} 小时`
+}
 export type ChatQueueItem = Schema['LlmChatQueueItem']
 export type SessionFilter = { q: string; platform: Platform | null; status: 'active' | 'archived' }
 export type ChatGroup = Schema['LlmChatGroupOut']
@@ -204,6 +224,34 @@ export function useLlmChat(scope: string) {
       return out
     },
     invalidateQueue: (bridge: string, session: string) => cache.invalidateQueries({ queryKey: key(bridge, 'queue', session) }),
+    // 后台任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.9）：有回合在跑、作业在跑或预约没发出时每 5 秒看一次，别的时候 30 秒
+    useTasks: (bridge: Ref<string | null>, session: Ref<string | null>, busy: Ref<boolean>) => useQuery({
+      queryKey: computed(() => key(bridge.value, 'tasks', session.value)), enabled: computed(() => active() && !!bridge.value && !!session.value),
+      refetchInterval: (query: { state: { data?: ChatTasks } }) => (busy.value || liveTasks(query.state.data) ? 5000 : 30000),
+      queryFn: async ({ signal }) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/tasks', { params: sessionAt(bridge.value!, session.value!), signal })),
+    }),
+    invalidateTasks: (bridge: string, session?: string) => cache.invalidateQueries({ queryKey: session ? key(bridge, 'tasks', session) : key(bridge, 'tasks') }),
+    async stopJob(bridge: string, job: string, tellSession = false) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/jobs/{job_id}/stop', { params: { header, path: { bridge_id: bridge, job_id: job } }, body: { tell_session: tellSession } }))
+      await cache.invalidateQueries({ queryKey: key(bridge, 'tasks') })
+      return out
+    },
+    jobLog: async (bridge: string, job: string, maxBytes = 20000) => dataOf(await auth.api.GET('/api/v1/llm_bridge/bridges/{bridge_id}/jobs/{job_id}/log', { params: { header, path: { bridge_id: bridge, job_id: job }, query: { max_bytes: maxBytes } } })),
+    async createTimer(bridge: string, session: string, body: ChatTimerBody) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/timers', { params: sessionAt(bridge, session), body }))
+      await cache.invalidateQueries({ queryKey: key(bridge, 'tasks', session) })
+      return out
+    },
+    async cancelTimer(bridge: string, timer: string) {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/timers/{timer_id}/cancel', { params: { header, path: { bridge_id: bridge, timer_id: timer } } }))
+      await cache.invalidateQueries({ queryKey: key(bridge, 'tasks') })
+      return out
+    },
+    async chainControl(bridge: string, session: string, action: 'resume' | 'stop') {
+      const out = dataOf(await auth.api.POST('/api/v1/llm_bridge/bridges/{bridge_id}/sessions/{session_id}/chain', { params: sessionAt(bridge, session), body: { action } }))
+      await cache.invalidateQueries({ queryKey: key(bridge, 'tasks', session) })
+      return out
+    },
     // 被额度打断的回合：现在就试着继续（now），或者不要自动继续
     async resume(bridge: string, turn: string, now: boolean) {
       const params = { header, path: { bridge_id: bridge, turn_id: turn } }

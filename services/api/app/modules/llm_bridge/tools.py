@@ -10,8 +10,12 @@ from pydantic import BaseModel
 from app.modules.llm_bridge.tool_schemas import (
     DESCRIPTIONS,
     BridgeToolOutput,
+    ChainControlInput,
     ChannelInput,
     FileGetInput,
+    JobInput,
+    JobLogInput,
+    JobStartInput,
     QueueInput,
     SendInput,
     SessionArchiveInput,
@@ -20,6 +24,9 @@ from app.modules.llm_bridge.tool_schemas import (
     SessionGetInput,
     SessionListInput,
     StatusInput,
+    TasksInput,
+    TimerCreateInput,
+    TimerInput,
     TurnCancelInput,
     TurnGetInput,
 )
@@ -40,6 +47,14 @@ _TOOLS: tuple[tuple[str, RiskLevel, type[BaseModel]], ...] = (
     ("llm_bridge_session_archive", "direct", SessionArchiveInput),
     # 手动压缩（docs/v2/LLM_BRIDGE_MEMORY_PLAN.md 4.2；人类 2026-11-16 同意补进例外九的名单）
     ("llm_bridge_session_compact", "direct", SessionCompactInput),
+    # 后台作业、预约、自动接着做（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md；人类 2026-11-18 决定，例外十）
+    ("llm_bridge_tasks", "read", TasksInput),
+    ("llm_bridge_job_log", "read", JobLogInput),
+    ("llm_bridge_job_start", "direct", JobStartInput),
+    ("llm_bridge_job_stop", "direct", JobInput),
+    ("llm_bridge_timer_create", "direct", TimerCreateInput),
+    ("llm_bridge_timer_cancel", "direct", TimerInput),
+    ("llm_bridge_chain_control", "direct", ChainControlInput),
 )
 
 SPECS: tuple[ToolSpec, ...] = tuple(

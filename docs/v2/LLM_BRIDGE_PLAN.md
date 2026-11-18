@@ -419,6 +419,9 @@ chatgpt.com 的对话没有任何官方接口可以新建、续写或列出【�
 13. **令牌由部署命令生成**（T-0229）：`make llm-bridge-up` 第一次运行时生成管理令牌写进 `.env`，`make llm-bridge-token` 查看；
     同机部署和设置页的浏览器验收在 CI 的 `ci-llm-bridge` / `workspace` 里跑（`tests/e2e/llm_bridge_browser.cjs`）。
 
+14. **长时间任务**（人类 2026-11-18 决定，T-0291、T-0292）：回合进度看得见、预约回来、管理器托管的后台作业、会话里的 `llm-task` 命令和自动接着做的护栏。
+    方案和实施情况见 `docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md`；智能体的新工具按 `docs/AGENTS.md` 例外十直接执行、不审批。
+
 ## 19. 大模型客户端管理页面（人类 2026-11-13 要求，T-0230）
 
 > 同一个入口下的聊天页面（T-0231 / T-0232）另见 `docs/v2/LLM_CHAT_PLAN.md`：管理页面搬到了“管理器与账号”（`/llm_bridge?view=manage`）。

@@ -1089,7 +1089,48 @@ describe('大模型客户端管理', () => {
     await fireEvent.click(within(form).getByLabelText(/允许联网/))
     await fireEvent.click(within(form).getByRole('button', { name: '创建环境' }))
     expect(await within(env).findByText('已新增环境「工作台仓库」。')).toBeVisible()
-    expect(await writes(requests)[2]!.clone().json()).toEqual({ platform: 'claude', mode: 'dev', name: '工作台仓库', repo_url: 'https://github.com/o/r', branch: null, sandbox: 'exec', network: true, description: '', enabled: true })
+    expect(await writes(requests)[2]!.clone().json()).toEqual({ platform: 'claude', mode: 'dev', name: '工作台仓库', repo_url: 'https://github.com/o/r', branch: null, sandbox: 'exec', network: true, description: '', enabled: true, turn_timeout_seconds: null })
+  })
+
+  it('sets the background task limits (jobs unlimited by default) and a turn time limit per environment', async () => {
+    // 长时间任务（docs/v2/LLM_BRIDGE_LONGRUN_PLAN.md 5.6、5.7）：后台任务卡片只提交改了的；环境的单回合时限按分钟填
+    const withLongrun = { ...settings, jobs_enabled: true, jobs_per_session: 0, jobs_total: 0, job_max_seconds: 86400, timers_per_session: 5, timer_max_days: 7, chain_max_rounds: 20, chain_max_hours: 72, chain_max_failures: 3, auto_turns_per_day: 48 }
+    const requests = setup('owner', async r => {
+      if (path(r) === `${base}/settings`) return Response.json({ ...withLongrun, ...(await r.clone().json()) })
+      if (path(r) === `${base}/status`) return Response.json({ ...status(), settings: withLongrun })
+      if (path(r) === `${base}/environments` && r.method === 'POST') return Response.json({ id: 'be_0123456789abcdef0123', ...(await r.clone().json()) }, { status: 201 })
+      return undefined
+    })
+    await openApp('/llm_bridge?view=manage')
+    const set = await openTab('运行设置')
+    const card = await within(set).findByRole('group', { name: '后台任务' })
+    expect(within(card).getByLabelText(/跑很久的命令交给管理器/)).toBeChecked()
+    expect(within(card).getByLabelText('每个会话同时运行的作业')).toHaveValue(0)
+    expect(within(card).getByLabelText('单个作业最长')).toHaveValue(24)
+    await fireEvent.update(within(card).getByLabelText('单个作业最长'), '80')
+    await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
+    expect(await within(set).findByText('「单个作业最长」要填 1–72 之间的整数。')).toBeVisible()
+    await fireEvent.update(within(card).getByLabelText('单个作业最长'), '6')
+    await fireEvent.update(within(card).getByLabelText('自动接着做最多'), '50')
+    await fireEvent.click(within(set).getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(writes(requests)).toHaveLength(1))
+    const body = await writes(requests)[0]!.clone().json()
+    expect(body).toMatchObject({ job_max_seconds: 21600, chain_max_rounds: 50 })
+    expect(body).not.toHaveProperty('jobs_per_session')
+    expect(body).not.toHaveProperty('jobs_enabled')
+
+    const env = await openTab('开发环境')
+    await fireEvent.click(await within(env).findByRole('button', { name: '新增环境' }))
+    const form = within(env).getByRole('form', { name: '新增开发环境' })
+    await fireEvent.click(within(form).getByRole('radio', { name: 'Claude' }))
+    await fireEvent.update(within(form).getByLabelText(/^环境名称/), '跑 CI')
+    await fireEvent.update(within(form).getByLabelText('单回合时限'), '400')
+    await fireEvent.click(within(form).getByRole('button', { name: '创建环境' }))
+    expect(await within(env).findByText('单回合时限要填 1–360 分钟，或者留空用管理器的设置。')).toBeVisible()
+    await fireEvent.update(within(form).getByLabelText('单回合时限'), '90')
+    await fireEvent.click(within(form).getByRole('button', { name: '创建环境' }))
+    await waitFor(() => expect(writes(requests)).toHaveLength(2))
+    expect(await writes(requests)[1]!.clone().json()).toMatchObject({ name: '跑 CI', turn_timeout_seconds: 5400 })
   })
 
   it('shows the quota of each platform, when it resets and that it is paused, and asks the platform on request', async () => {

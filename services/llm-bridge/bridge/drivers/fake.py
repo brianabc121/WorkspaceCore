@@ -146,6 +146,26 @@ class FakeDriver(Driver):
                 waiter.cancel()
                 if done:
                     raise DriverError("platform_error", "回合被中断")
+            if text.startswith("longcmd:"):
+                # 模拟一条长命令（LONGRUN 5.7）：开始、几行输出、官方程序报的一个后台任务，
+                # 停一会儿（longcmd:<停几秒>）再结束；后台任务到回答结束时还没做完
+                await sink("command_started", {"command": "make test", "step": "s1"})
+                await sink("output", {"text": "running 1\nrunning 2\npart"})
+                await sink(
+                    "background",
+                    {
+                        "task_id": "bg1",
+                        "event": "task_started",
+                        "status": "running",
+                        "description": "等 CI",
+                    },
+                )
+                waiter = asyncio.create_task(cancel.wait())
+                done, _ = await asyncio.wait({waiter}, timeout=float(text[8:] or 0))
+                waiter.cancel()
+                if done:
+                    raise DriverError("platform_error", "回合被中断")
+                await sink("step_done", {"step": "s1"})
             if text.startswith("stream:"):
                 # 模拟逐字输出：分三小段给增量，中间停一下（stream:<每段停几秒>），最后给整段
                 for piece in ("第一", "二", "三段"):
