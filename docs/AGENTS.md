@@ -12,7 +12,7 @@
 你是 Codex 就用身份 `codex`；你是 Claude Code 就用 `claude`（CLAUDE.md 里也会写明）。
 所有 `scripts/collab.py` 命令都要带 `--as <你的身份>`。
 
-**当前生效规则：[D-0008](../.collab/decisions/D-0008-stable-pr-integration.md)。** 开工和合并前读取
+**当前生效规则：[D-0008](../.collab/decisions/D-0008-stable-pr-integration.md) 及其补充 [D-0009](../.collab/decisions/D-0009-batch-integration-train.md)（批量车次集成、测过即发布、停线），合并步骤见[版本更新执行手册](guides/integration-runbook.md)。** 开工和合并前读取
 [README 首页协作规则](../README.md)与[通知 / 人工集成队列 #235](https://github.com/brianabc121/WorkspaceCore/issues/235)。
 固定 PR 验证提交，不机械追赶 main；由唯一登记会话排队集成，按改动范围验证。D-0004 / D-0007 为历史。
 当前工具尚未提供自动门禁或原子锁，按 D-0008 的人工流程执行并如实记录。Codex 按人类指派并行工作，既有任务不自动转移 owner。
@@ -93,6 +93,7 @@
    - Codex 的 PR 默认由 Claude 审查；相关必需验证成功、无阻塞意见后，由集成者验证最终合并候选并发布。
    - 纯文档 / 元数据按轻量门禁处理；涉及业务、依赖、迁移、安全和不确定关联时扩大验证。不得忽略相关失败、伪造状态或把旧 SHA 检查冒充新 SHA 通过。
    - 候选验证期间，其他 PR 不插队更新 main。完成、失败或中断都记录并释放窗口；已有绿色检查不因无关 main 推进而全套重跑。
+   - 已就绪的 PR 由集成者组成车次一起验证，测过的内容原样合入后立即释放窗口；上车后作者不再往该 PR 推送（D-0009）。
    - 人类已明确指派某次集成者或批准本次规则发布时，按该授权执行并留记录；未授权的规范 / 协议改动、不可逆操作或进入新 Sprint 仍由人类决定，不重复询问已获批准的同一事项。
 
 交接类型：

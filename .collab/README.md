@@ -126,7 +126,7 @@ stateDiagram-v2
 
 ### 合并 PR
 
-平时按 [D-0008](decisions/D-0008-stable-pr-integration.md) 执行：
+平时按 [D-0008](decisions/D-0008-stable-pr-integration.md) 及其补充 [D-0009](decisions/D-0009-batch-integration-train.md) 执行（已就绪的 PR 按车次一起验证，步骤见[版本更新执行手册](../docs/guides/integration-runbook.md)）：
 
 1. 准备就绪的 PR 在 #235 登记链接、head SHA、类别、检查结果和关联风险。
 2. 唯一登记的集成会话按就绪顺序领取窗口；候选验证期间其他 PR 不插队，功能分支可继续开发。
